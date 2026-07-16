@@ -36,6 +36,7 @@ from config import (
     TRENCHES_CONCURRENCY,
 )
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("moon-scanner")
 from services.dexscreener import DexScreenerClient
 from services.discovery import DiscoveryService, is_dead_token, is_early_eligible
@@ -74,10 +75,13 @@ async def _background_trenches_warm() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    port = os.getenv("PORT", "8765")
+    logger.info("Moon Scanner starting on port %s (deploy=%s)", port, "render" if IS_RENDER else "local")
     task = None
     if BACKGROUND_SCAN_INTERVAL_SEC > 0 and BACKGROUND_SCAN_PER_COLUMN > 0:
         task = asyncio.create_task(_background_trenches_warm())
     yield
+    logger.info("Moon Scanner shutting down")
     if task:
         task.cancel()
         try:
