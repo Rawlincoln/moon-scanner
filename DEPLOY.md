@@ -12,19 +12,18 @@ git commit -m "Moon Scanner — Render deploy"
 Create a new repo on GitHub (e.g. `moon-scanner`), then:
 
 ```bash
-git remote add origin https://github.com/YOUR_USERNAME/moon-scanner.git
+git remote add origin https://github.com/Rawlincoln/moon-scanner.git
 git branch -M main
 git push -u origin main
 ```
 
 ## 2. Deploy on Render
 
-1. Go to [render.com](https://render.com) and sign in
-2. **New** → **Blueprint**
-3. Connect your GitHub account and select the `moon-scanner` repo
-4. Render reads `render.yaml` automatically — click **Apply**
+1. Run `.\deploy.ps1` (uses **Rawlincoln** — same as pro-trader / soccer-under-strategy)
+2. Open: **https://dashboard.render.com/blueprints/new?repo=https://github.com/Rawlincoln/moon-scanner**
+3. Click **Apply** — Render reads `render.yaml` automatically
 
-Your site will be live at: `https://moon-scanner.onrender.com` (or the name you choose)
+Your site will be live at: **https://moon-scanner.onrender.com**
 
 ## 3. Plan (always online)
 

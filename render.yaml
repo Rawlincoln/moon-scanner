@@ -1,11 +1,9 @@
-# Render Blueprint — https://render.com/docs/blueprint-spec
-# Deploy: connect this repo in Render Dashboard → New → Blueprint
+# Render Blueprint — connect at https://dashboard.render.com/blueprints
 services:
   - type: web
     name: moon-scanner
     runtime: python
-    plan: starter
-    region: oregon
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
@@ -14,4 +12,13 @@ services:
       - key: MOON_SCANNER_DEPLOY
         value: render
       - key: PYTHON_VERSION
-        value: 3.12.8
+        value: "3.12.8"
+
+  # Ping /api/health every 12 min so free tier stays awake
+  - type: cron
+    name: moon-scanner-keepalive
+    runtime: python
+    plan: free
+    schedule: "*/12 * * * *"
+    buildCommand: "true"
+    startCommand: python -c "import urllib.request; urllib.request.urlopen('https://moon-scanner.onrender.com/api/health', timeout=60).read()"
