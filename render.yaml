@@ -1,0 +1,17 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploy: connect this repo in Render Dashboard → New → Blueprint
+services:
+  - type: web
+    name: moon-scanner
+    runtime: python
+    plan: starter
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: MOON_SCANNER_DEPLOY
+        value: render
+      - key: PYTHON_VERSION
+        value: 3.12.8

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Moon Scanner — Safe Gem Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="glow glow-1"></div>
+  <div class="glow glow-2"></div>
+
+  <header class="header">
+    <div class="logo">
+      <span class="logo-icon">◈</span>
+      <div>
+        <h1>Moon Scanner</h1>
+        <p class="tagline">$6K approach only · Real Dex volume · Sniper & dev checks</p>
+      </div>
+    </div>
+    <div class="header-stats" id="headerStats">
+      <div class="stat-pill"><span id="statCount">—</span> fresh</div>
+      <div class="stat-pill safe">pump.fun live</div>
+      <a class="stat-pill padre-link" href="https://trade.padre.gg/trenches" target="_blank" rel="noopener">Padre Trenches</a>
+      <a class="stat-pill padre-link" href="https://trade.padre.gg/new-pairs" target="_blank" rel="noopener">Padre New Pairs</a>
+    </div>
+  </header>
+
+  <section class="controls">
+    <div class="control-group">
+      <label>Chains</label>
+      <div class="chain-chips" id="chainChips"></div>
+    </div>
+    <div class="control-row">
+      <div class="control-group inline">
+        <label>
+          <input type="checkbox" id="earlyOnly" checked /> Early launches only
+        </label>
+      </div>
+      <div class="control-group inline">
+        <label>
+          <input type="checkbox" id="safeOnly" /> Hide UNSAFE only
+        </label>
+      </div>
+      <div class="control-group inline">
+        <label>
+          <input type="checkbox" id="checkerPassOnly" /> Checker PASS only (RugCheck+)
+        </label>
+      </div>
+      <div class="control-group inline">
+        <label>Max age</label>
+        <select id="maxAge">
+          <option value="15">15 min</option>
+          <option value="30" selected>30 min</option>
+          <option value="60">1 hour</option>
+          <option value="120">2 hours</option>
+        </select>
+      </div>
+      <div class="control-group inline">
+        <label>Limit</label>
+        <select id="scanLimit">
+          <option value="10" selected>10</option>
+          <option value="25">25</option>
+          <option value="50">50</option>
+        </select>
+      </div>
+      <div class="control-group inline">
+        <label>
+          <input type="checkbox" id="autoRefresh" checked /> Auto-refresh 60s
+        </label>
+      </div>
+      <button class="btn btn-primary" id="scanBtn">
+        <span class="btn-icon">⟳</span> Scan Padre Trenches
+      </button>
+    </div>
+    <div class="lookup-row">
+      <input type="text" id="lookupChain" placeholder="Chain (solana, bsc, base...)" value="solana" />
+      <input type="text" id="lookupAddress" placeholder="Token contract / mint address" />
+      <button class="btn btn-secondary" id="lookupBtn">Analyze Token</button>
+    </div>
+  </section>
+
+  <div class="status-bar" id="statusBar">Ready — only recommends tokens approaching $6K with real buyers (rejects sub-$4K rugs)</div>
+
+  <main class="token-grid" id="tokenGrid"></main>
+
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modal">
+      <button class="modal-close" id="modalClose">×</button>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <p>⚠ Not financial advice. Always DYOR. Scammers evolve — no tool is 100% safe.</p>
+    <p>Security checkers: RugCheck · Bundle scan · Padre · Holders · DexScreener · pump.fun · Bubblemaps · GMGN</p>
+  </footer>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
