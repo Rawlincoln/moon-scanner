@@ -1,14 +1,14 @@
-# Render Blueprint — same pattern as pro-trader / soccer-under-strategy
+# Render Blueprint — web service only (matches ironmen / pro-trader pattern)
 services:
   - type: web
     name: moon-scanner
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 120
     healthCheckPath: /api/health
     envVars:
       - key: MOON_SCANNER_DEPLOY
         value: render
       - key: PYTHON_VERSION
-        value: "3.13.0"
+        value: "3.12.0"

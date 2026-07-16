@@ -33,6 +33,7 @@ from config import (
     PADRE_TRADE_URL,
     SUPPORTED_CHAINS,
     TRENCHES_CACHE_TTL,
+    TRENCHES_CONCURRENCY,
 )
 
 logger = logging.getLogger("moon-scanner")
@@ -56,7 +57,7 @@ from services.solana_analyzer import SolanaAnalyzer
 
 async def _background_trenches_warm() -> None:
     """Keep trenches cache warm on Render so API responses stay fast."""
-    await asyncio.sleep(5)
+    await asyncio.sleep(30)
     while True:
         try:
             logger.info("Background trenches refresh starting")
@@ -691,7 +692,7 @@ async def _run_trenches_scan(
         per_column=per_column, max_age_minutes=max_age_minutes
     )
 
-    sem = asyncio.Semaphore(12)
+    sem = asyncio.Semaphore(TRENCHES_CONCURRENCY)
     analyzed_columns: dict[str, list] = {
         "new": [],
         "almost_bonded": [],
