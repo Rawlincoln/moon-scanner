@@ -36,8 +36,16 @@ git push -u origin main 2>$null
 if ($LASTEXITCODE -ne 0) {
   git push -u origin main
 }
+if ($LASTEXITCODE -ne 0) {
+  Write-Host ""
+  Write-Host "GitHub repo not found. Create it first (same account as pro-trader):" -ForegroundColor Yellow
+  Write-Host "https://github.com/new?name=$RepoName" -ForegroundColor Cyan
+  Write-Host "Then run: .\deploy.ps1" -ForegroundColor Yellow
+  exit 1
+}
 
 Write-Host ""
+Write-Host "GitHub: https://github.com/$GitHubUser/$RepoName" -ForegroundColor Green
 Write-Host "Deploy on Render:" -ForegroundColor Green
 Write-Host "https://dashboard.render.com/blueprints/new?repo=https://github.com/$GitHubUser/$RepoName" -ForegroundColor Cyan
 Write-Host "Live URL: https://$RepoName.onrender.com" -ForegroundColor Cyan
