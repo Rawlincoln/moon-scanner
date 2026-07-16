@@ -1,0 +1,2 @@
+start-render.sh text eol=lf
+render.yaml text eol=lf

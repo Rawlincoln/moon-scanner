@@ -1,11 +1,12 @@
-# Render Blueprint — minimal web service (ironmen pattern)
+# Render Blueprint — matches pro-trader pattern exactly
 services:
   - type: web
     name: moon-scanner
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: bash start-render.sh
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 120
+    healthCheckPath: /api/health
     envVars:
       - key: MOON_SCANNER_DEPLOY
         value: render
