@@ -349,6 +349,7 @@ async def root():
     return FileResponse(BASE_DIR / "static" / "index.html")
 
 
+@app.get("/health")
 @app.get("/api/health")
 async def health():
     cache_age = (
