@@ -52,6 +52,7 @@ from services.signals import (
 from services.padre_feed import PadreFeedClient
 from services.safety_report import build_safety_report
 from services.checker_hub import run_checker_hub
+from services.smart_money import analyze_smart_money_async
 from services.social_signals import analyze_social_narrative
 from services.solana_analyzer import SolanaAnalyzer
 
@@ -278,6 +279,20 @@ async def _analyze_token(
         chain_id, token_address, safety, pair=pair, padre_audit=padre_audit
     )
 
+    mcap_for_sm = float(
+        (pump_coin or {}).get("usd_market_cap")
+        or pair.get("marketCap")
+        or pair.get("fdv")
+        or 0
+    )
+    smart_money = await analyze_smart_money_async(
+        safety,
+        pair,
+        chain_id,
+        token_address,
+        mcap_usd=mcap_for_sm,
+    )
+
     links = _padre_links(chain_id, token_address)
 
     return {
@@ -291,6 +306,7 @@ async def _analyze_token(
         "investSignal": invest,
         "trenchAnalysis": trench,
         "socialSignals": social,
+        "smartMoney": smart_money,
         "checkerHub": checker_hub,
         "padre": links,
         "analyzedAt": time.time(),
@@ -726,8 +742,13 @@ async def _run_trenches_scan(
                 checker_hub = run_checker_hub(
                     "solana", cand["tokenAddress"], safety, pair=pair
                 )
+                smart_money = result.get("smartMoney") or {}
                 report = build_safety_report(
-                    safety, pair, trench=trench, checker_hub=checker_hub
+                    safety,
+                    pair,
+                    trench=trench,
+                    checker_hub=checker_hub,
+                    smart_money=smart_money,
                 )
                 base = (result.get("market") or {}).get("baseToken") or {}
                 mcap = float(
@@ -761,6 +782,7 @@ async def _run_trenches_scan(
                         "pumpfun", {}
                     ).get("pump_url"),
                     "socialSignals": result.get("socialSignals") or {},
+                    "smartMoney": smart_money,
                     "checkerHub": checker_hub,
                 }
             except Exception:

@@ -65,6 +65,7 @@ def build_safety_report(
     pair: dict,
     trench: dict | None = None,
     checker_hub: dict | None = None,
+    smart_money: dict | None = None,
 ) -> dict[str, Any]:
     """Human-readable safety breakdown for trench traders."""
     pump = pair.get("pumpfun") or {}
@@ -72,6 +73,7 @@ def build_safety_report(
     community = analyze_community(pump, pair)
     bundle = _check_bundle_risks(safety)
     trench = trench or {}
+    sm = smart_money or {}
 
     dev_pct = _safe_float(safety.get("creator_pct"))
     checks: list[dict[str, Any]] = []
@@ -88,6 +90,13 @@ def build_safety_report(
             f"{consensus.get('passed', 0)}/{consensus.get('total', 0)} checkers passed "
             f"({consensus.get('score', 0)}%)",
             weight=2,
+        )
+    if sm:
+        add(
+            "major_trader_or_whale",
+            bool(sm.get("anti_rug_signal")),
+            sm.get("summary") or "No major trader / whale buy",
+            weight=2 if sm.get("anti_rug_signal") else 1,
         )
     add("rugcheck_pass", safety.get("passed"), "RugCheck + Padre audit clearance")
     add("not_rugged", not safety.get("rugged"), "Not flagged rugged")
@@ -174,11 +183,22 @@ def build_safety_report(
         "blockers": [{"name": c["name"], "detail": c["detail"]} for c in blockers],
         "warnings": [{"name": c["name"], "detail": c["detail"]} for c in warnings],
         "checkerHub": hub,
-        "verdict": _verdict_text(tier, blockers, bundle, trench),
+        "smartMoney": sm,
+        "verdict": _verdict_text(tier, blockers, bundle, trench, smart_money=sm),
     }
 
 
-def _verdict_text(tier: str, blockers: list, bundle: dict, trench: dict) -> str:
+def _verdict_text(
+    tier: str,
+    blockers: list,
+    bundle: dict,
+    trench: dict,
+    smart_money: dict | None = None,
+) -> str:
+    sm = smart_money or {}
+    sm_note = ""
+    if sm.get("anti_rug_signal"):
+        sm_note = f" · {sm.get('signal', 'WHALE').replace('_', ' ')} anti-rug signal"
     if tier == "UNSAFE":
         if bundle.get("bundled"):
             return "UNSAFE — bundled/insider launch detected. Do not enter."
@@ -186,9 +206,15 @@ def _verdict_text(tier: str, blockers: list, bundle: dict, trench: dict) -> str:
     if tier == "HIGH_RISK":
         return "HIGH RISK — failed core safety. Wait or skip."
     if tier == "CAUTION":
-        return f"CAUTION — {blockers[0]['detail'] if blockers else 'issues detected'}"
+        return f"CAUTION — {blockers[0]['detail'] if blockers else 'issues detected'}{sm_note}"
     if tier == "SAFE_ENTRY":
-        return "SAFE ENTRY — passed bundle/dev/sniper checks with real momentum"
+        return (
+            "SAFE ENTRY — passed bundle/dev/sniper checks with real momentum"
+            + sm_note
+        )
     if tier == "WATCH":
-        return "WATCH — safe-ish but wait for $6k approach + real volume"
+        base = "WATCH — safe-ish but wait for $6k approach + real volume"
+        if sm.get("anti_rug_signal"):
+            return base + " · major trader/whale buy supports not-a-rug case"
+        return base
     return "AVOID — insufficient safety or momentum"

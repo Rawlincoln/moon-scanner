@@ -157,6 +157,59 @@ function socialBadgesHtml(social) {
   return `<div class="social-badges">${badges.join("")}</div>`;
 }
 
+function smartMoneyBadgesHtml(sm) {
+  if (!sm || sm.signal === "NONE" || !sm.signal) return "";
+  const sig = sm.signal;
+  let label = "Whale";
+  let cls = "smart-money-badge whale";
+  if (sig === "MAJOR_TRADER") {
+    label = "🐋 Major trader";
+    cls = "smart-money-badge major";
+  } else if (sig === "WHALE_BUY") {
+    label = "🐋 Whale buy";
+    cls = "smart-money-badge whale";
+  } else if (sig === "DISTRIBUTED_WHALES") {
+    label = "Distributed whales";
+    cls = "smart-money-badge distributed";
+  } else if (sig === "PAID_INTEREST") {
+    label = "Paid promo";
+    cls = "smart-money-badge paid";
+  } else if (sig === "TAINTED") {
+    label = "Large bag ⚠ insider risk";
+    cls = "smart-money-badge tainted";
+  }
+  if (sm.anti_rug_signal) label += " · anti-rug";
+  return `<div class="smart-money-row" title="${sm.summary || ""}">
+    <span class="${cls}">${label}</span>
+    ${sm.confidence ? `<span class="smart-money-conf">${sm.confidence}%</span>` : ""}
+  </div>`;
+}
+
+function smartMoneyPanelHtml(sm) {
+  if (!sm || sm.signal === "NONE" || !sm.signal) {
+    return `<div class="analysis-section"><h4>Major traders / whales</h4>
+      <p style="color:var(--muted)">No major trader or healthy whale bag detected yet.</p></div>`;
+  }
+  const known = (sm.known_traders || []).map((t) =>
+    `<div class="analysis-item"><div class="k">${t.label}</div>
+     <div class="v">${t.pct}% · ~$${Number(t.est_usd || 0).toLocaleString()}</div>
+     <div class="smart-money-addr">${t.owner?.slice(0, 6)}…${t.owner?.slice(-4) || ""}</div></div>`
+  ).join("");
+  const whales = (sm.whale_holders || []).map((t) =>
+    `<div class="analysis-item"><div class="k">Whale ${t.pct}%</div>
+     <div class="v">~$${Number(t.est_usd || 0).toLocaleString()}</div>
+     <div class="smart-money-addr">${t.owner?.slice(0, 6)}…${t.owner?.slice(-4) || ""}</div></div>`
+  ).join("");
+  return `
+    <div class="analysis-section">
+      <h4>Major traders / whales ${sm.anti_rug_signal ? "✓ anti-rug signal" : ""}</h4>
+      <p style="margin-bottom:10px;color:var(--accent)">${sm.summary || ""}</p>
+      ${smartMoneyBadgesHtml(sm)}
+      <div class="analysis-grid" style="margin-top:10px">${known}${whales}</div>
+      ${(sm.paid_interest || []).length ? `<p style="margin-top:8px;color:var(--muted);font-size:0.8rem">DexScreener: ${(sm.paid_interest || []).map((p) => p.label).join(", ")}</p>` : ""}
+    </div>`;
+}
+
 function sourceBadgesHtml(sources) {
   if (!sources?.length) return "";
   const badges = sources.map((s) => {
@@ -233,13 +286,14 @@ function renderCard(token) {
   const dev = market.dev || {};
   const pc = m.priceChange || {};
   const social = token.socialSignals || {};
+  const sm = token.smartMoney || {};
   const hub = token.checkerHub || {};
 
   const h1 = parseFloat(pc.h1);
   const h1Class = h1 >= 0 ? "up" : "down";
 
   const card = document.createElement("article");
-  card.className = `token-card${social.highlight ? " token-card--narrative" : ""}`;
+  card.className = `token-card${social.highlight ? " token-card--narrative" : ""}${sm.anti_rug_signal ? " token-card--smart-money" : ""}`;
   card.addEventListener("click", (e) => {
     if (e.target.closest("[data-copy]")) return;
     openModal(token);
@@ -282,9 +336,14 @@ function renderCard(token) {
   const investSignal = invest.signal || entry.signal || "WATCH";
   const investConf = invest.confidence ?? entry.confidence ?? 0;
 
+  if (sm.anti_rug_signal) {
+    safetyTags.unshift('<span class="tag smart-money-tag">🐋 Major / whale buy</span>');
+  }
+
   card.innerHTML = `
     ${sourceBadgesHtml(token.sources)}
     ${socialBadgesHtml(social)}
+    ${smartMoneyBadgesHtml(sm)}
     ${checkerHubHtml(hub, true)}
     <div class="invest-banner ${investSignal}">
       <div class="invest-title">▸ ${investSignal.replace(/_/g, " ")} (${investConf}%)</div>
@@ -333,11 +392,12 @@ function renderTrenchesCard(t) {
   const bundle = rep.bundle || {};
   const snipers = rep.snipers || {};
   const social = t.socialSignals || {};
+  const sm = t.smartMoney || t.safetyReport?.smartMoney || {};
   const hub = t.checkerHub || t.safetyReport?.checkerHub || {};
   const tier = t.safetyTier || "AVOID";
   const isPreview = t.preview || tier === "SCANNING";
   const card = document.createElement("article");
-  card.className = `token-card${social.highlight ? " token-card--narrative" : ""}${isPreview ? " token-card--scanning" : ""}`;
+  card.className = `token-card${social.highlight ? " token-card--narrative" : ""}${isPreview ? " token-card--scanning" : ""}${sm.anti_rug_signal ? " token-card--smart-money" : ""}`;
   card.addEventListener("click", () => openTrenchesModal(t));
 
   const iconHtml = t.icon
@@ -347,6 +407,7 @@ function renderTrenchesCard(t) {
   card.innerHTML = `
     ${sourceBadgesHtml([t.column ? `padre_trenches_${t.column}` : "pump.fun"])}
     ${socialBadgesHtml(social)}
+    ${smartMoneyBadgesHtml(sm)}
     <div class="invest-banner ${isPreview ? "WATCH" : tier === "SAFE_ENTRY" ? "STRONG_INVEST" : tier === "WATCH" ? "WATCH" : "AVOID"}">
       <div class="invest-title">▸ ${isPreview ? "SCANNING…" : tier} (${t.safetyScore ?? 0}%)</div>
       <div class="invest-action">${rep.verdict || (isPreview ? "RugCheck + Padre analysis running…" : "")}</div>
@@ -382,6 +443,7 @@ function openTrenchesModal(t) {
   const blockers = (rep.blockers || []).map((b) => `<li>${b.detail}</li>`).join("");
 
   const social = t.socialSignals || {};
+  const sm = t.smartMoney || rep.smartMoney || {};
   const hub = t.checkerHub || rep.checkerHub || {};
   $("#modalContent").innerHTML = `
     <h2>${t.name || "Token"} ($${t.symbol || "?"})</h2>
@@ -391,6 +453,7 @@ function openTrenchesModal(t) {
     ${social.x_url ? `<p style="margin-bottom:8px"><a href="${social.x_url}" target="_blank" rel="noopener" style="color:#5b9fff">X / Twitter →</a></p>` : ""}
     ${social.tiktok_url ? `<p style="margin-bottom:8px"><a href="${social.tiktok_url}" target="_blank" rel="noopener" style="color:#ff6b9d">TikTok →</a></p>` : ""}
     <p style="color:var(--muted);margin-bottom:16px">${rep.verdict || ""}</p>
+    ${smartMoneyPanelHtml(sm)}
     ${checkerHubHtml(hub)}
     <div class="analysis-section" style="margin-top:16px"><h4>Trench Checks</h4></div>
     <div class="analysis-grid">${checks}</div>
@@ -634,6 +697,8 @@ function openModal(token) {
       ` : ""}
     </div>
 
+    ${smartMoneyPanelHtml(token.smartMoney || {})}
+
     <div class="analysis-section">
       <h4>Security Checkers (RugCheck, Padre, DexScreener…)</h4>
       ${checkerHubHtml(hub)}
@@ -731,10 +796,19 @@ async function runScan(force = false, silent = false) {
       lastTokens.sort((a, b) => {
         const tier = { SAFE_ENTRY: 0, WATCH: 1, CAUTION: 2, HIGH_RISK: 3, AVOID: 4, UNSAFE: 5 };
         const chk = { PASS: 0, WARN: 1, FAIL: 2 };
+        const smRank = (t) => {
+          const s = (t.smartMoney || {}).signal;
+          if (s === "MAJOR_TRADER") return 0;
+          if (s === "WHALE_BUY") return 1;
+          if (s === "DISTRIBUTED_WHALES") return 2;
+          if (s === "PAID_INTEREST") return 3;
+          return 4;
+        };
         const av = chk[(a.checkerHub || {}).consensus?.verdict] ?? 3;
         const bv = chk[(b.checkerHub || {}).consensus?.verdict] ?? 3;
         return (
-          av - bv
+          smRank(a) - smRank(b)
+          || av - bv
           || (tier[a.safetyTier] ?? 9) - (tier[b.safetyTier] ?? 9)
           || (b.safetyScore || 0) - (a.safetyScore || 0)
           || ((b.checkerHub || {}).consensus?.score || 0) - ((a.checkerHub || {}).consensus?.score || 0)
