@@ -19,14 +19,15 @@
       <span class="logo-icon">◈</span>
       <div>
         <h1>Moon Scanner</h1>
-        <p class="tagline">$6K approach only · Real Dex volume · Sniper & dev checks</p>
+        <p class="tagline">Learns every token · Entry/TP/SL · $6K radar</p>
       </div>
     </div>
     <div class="header-stats" id="headerStats">
       <div class="stat-pill"><span id="statCount">—</span> fresh</div>
+      <div class="stat-pill" id="backendPill" title="API backend">Cloud synced</div>
       <div class="stat-pill safe">pump.fun live</div>
+      <a class="stat-pill padre-link" href="https://moon-scanner-9tlz.onrender.com/" target="_blank" rel="noopener">Open cloud</a>
       <a class="stat-pill padre-link" href="https://trade.padre.gg/trenches" target="_blank" rel="noopener">Padre Trenches</a>
-      <a class="stat-pill padre-link" href="https://trade.padre.gg/new-pairs" target="_blank" rel="noopener">Padre New Pairs</a>
     </div>
   </header>
 
@@ -54,24 +55,32 @@
       <div class="control-group inline">
         <label>Max age</label>
         <select id="maxAge">
-          <option value="15">15 min</option>
-          <option value="30" selected>30 min</option>
+          <option value="10">10 min</option>
+          <option value="15" selected>15 min</option>
+          <option value="30">30 min</option>
           <option value="60">1 hour</option>
-          <option value="120">2 hours</option>
         </select>
       </div>
       <div class="control-group inline">
         <label>Limit</label>
         <select id="scanLimit">
-          <option value="10" selected>10</option>
+          <option value="8" selected>8 (fast)</option>
+          <option value="10">10</option>
+          <option value="15">15</option>
           <option value="25">25</option>
-          <option value="50">50</option>
         </select>
       </div>
       <div class="control-group inline">
         <label>
-          <input type="checkbox" id="autoRefresh" checked /> Auto-refresh 60s
+          <input type="checkbox" id="autoRefresh" checked /> Auto-refresh 15s
         </label>
+      </div>
+      <div class="control-group inline">
+        <label>Backend</label>
+        <select id="apiBackend" title="Use cloud so local matches Render">
+          <option value="cloud" selected>Cloud (synced)</option>
+          <option value="local">Local only</option>
+        </select>
       </div>
       <button class="btn btn-primary" id="scanBtn">
         <span class="btn-icon">⟳</span> Scan Padre Trenches

@@ -42,29 +42,45 @@ WEIGHT_EARLY = 0.20
 # Scan limits
 DEFAULT_SCAN_LIMIT = 10
 MAX_SCAN_LIMIT = 50
-REQUEST_TIMEOUT = 20.0
+REQUEST_TIMEOUT = 12.0  # fail fast — don't wait on slow rugcheck/padre
 
 # Early-entry mode (real-time fresh launches)
 PUMPFUN_API_URL = "https://frontend-api-v3.pump.fun"
 PADRE_API_URL = "https://backend.padre.gg"
 PADRE_TRADE_URL = "https://trade.padre.gg"
-DEFAULT_MAX_AGE_MINUTES = 30
+DEFAULT_MAX_AGE_MINUTES = 15  # tighter window = catch tokens earlier
 MAX_AGE_MINUTES_CAP = 180
-CACHE_TTL = 15
-TRENCHES_CACHE_TTL = 300 if IS_PRODUCTION else 90
-# Background scan off on Render until service is stable (enable after first deploy)
-BACKGROUND_SCAN_INTERVAL_SEC = 0
-BACKGROUND_SCAN_PER_COLUMN = 0
-TRENCHES_CONCURRENCY = 4 if IS_PRODUCTION else 12
+CACHE_TTL = 10
+# Short cache so we don't re-show tokens that already pumped
+# Keep cache short on both local + Render so scans stay aligned with live market
+TRENCHES_CACHE_TTL = 15
+TRENCHES_CONCURRENCY = 12 if IS_PRODUCTION else 24
 EXCLUDE_GRADUATED_DEFAULT = True
 EARLY_MCAP_MIN_USD = 1_500
 EARLY_MCAP_MAX_USD = 65_000
 
+# Drop tokens already past early window (user complaint: seeing $25k+ too late)
+SCAN_MCAP_MAX_USD = 25_000
+# Prefer analyzing / ranking under this first
+SCAN_MCAP_FOCUS_MAX_USD = 12_000
+# Skip DexScreener smart-money order fetch during bulk trenches (saves ~0.5–1s/token)
+FAST_SCAN_SKIP_DEX_ORDERS = True
+
+# $6k entry radar — catch climbers BEFORE they leave the entry zone
+# (user missed GLourz… at $6k; scanner only saw it later at $30k+)
+SIXK_RADAR_MIN_USD = 2_000
+SIXK_RADAR_MAX_USD = 9_000
+SIXK_ENTRY_SWEET_MIN = 3_500
+SIXK_ENTRY_SWEET_MAX = 7_500
+# Continuous local warm of the $6k band so UI isn't minutes behind
+BACKGROUND_SCAN_INTERVAL_SEC = 18
+BACKGROUND_SCAN_PER_COLUMN = 8
+
 # Pro trencher — only recommend tokens approaching $6k with real momentum
 TARGET_MCAP_USD = 6_000
-MCAP_INVEST_MIN_USD = 4_000
-MCAP_INVEST_MAX_USD = 7_500
-MIN_SURVIVAL_AGE_MINUTES = 2.0
+MCAP_INVEST_MIN_USD = 3_500  # start flagging earlier than $4k
+MCAP_INVEST_MAX_USD = 8_500  # still "entry" slightly past 6k
+MIN_SURVIVAL_AGE_MINUTES = 0.75
 MIN_TOKEN_HOLDERS = 12
 MIN_DEX_VOL_M5_USD = 600
 MIN_DEX_BUYS_M5 = 8

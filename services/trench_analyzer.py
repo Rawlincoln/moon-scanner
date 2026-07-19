@@ -26,6 +26,8 @@ from config import (
     MIN_PUMPFUN_REPLIES,
     MIN_SURVIVAL_AGE_MINUTES,
     MIN_TOKEN_HOLDERS,
+    SIXK_RADAR_MAX_USD,
+    SIXK_RADAR_MIN_USD,
     TARGET_MCAP_USD,
 )
 from services.pumpfun import PumpFunClient
@@ -317,11 +319,11 @@ def run_trench_gate(
 
 
 def is_approaching_6k_candidate(pump: dict | None) -> bool:
-    """Fast pre-filter for discovery — mcap in climb zone."""
+    """Fast pre-filter — wide $2k–$9k radar so we catch before $6k is gone."""
     if not pump or pump.get("complete") or pump.get("is_banned"):
         return False
     mcap = _safe_float(pump.get("usd_market_cap"))
-    if mcap < MCAP_INVEST_MIN_USD * 0.85 or mcap > MCAP_INVEST_MAX_USD:
+    if mcap < SIXK_RADAR_MIN_USD or mcap > SIXK_RADAR_MAX_USD:
         return False
     age = PumpFunClient.coin_age_minutes(pump)
     return age >= MIN_SURVIVAL_AGE_MINUTES

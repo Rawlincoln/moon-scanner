@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.avoid_filters import analyze_avoid_flags
 from services.trench_analyzer import analyze_community, analyze_snipers
 
 
@@ -138,6 +139,17 @@ def build_safety_report(
         f"{community['reply_count']} replies, {community['buys_m5']} buys in 5m",
     )
 
+    mint = safety.get("mint") or ""
+    avoid = safety.get("avoid") or analyze_avoid_flags(
+        safety, pump, mint=mint, pair=pair
+    )
+    add(
+        "not_junk_pattern",
+        not avoid.get("avoid"),
+        avoid.get("summary") or "No ghost-launch / blocklist flags",
+        weight=2,
+    )
+
     score = sum(c["weight"] for c in checks if c["ok"])
     max_score = sum(c["weight"] for c in checks)
     pct = round(score / max(max_score, 1) * 100)
@@ -145,7 +157,13 @@ def build_safety_report(
     blockers = [c for c in checks if not c["ok"] and c["weight"] >= 2]
     warnings = [c for c in checks if not c["ok"] and c["weight"] < 2]
 
-    if consensus.get("verdict") == "FAIL":
+    if avoid.get("hard_avoid") or avoid.get("avoid"):
+        tier = "UNSAFE"
+        blockers.append({
+            "name": "avoid_filter",
+            "detail": avoid.get("summary") or "Junk / ghost-launch pattern",
+        })
+    elif consensus.get("verdict") == "FAIL":
         tier = "UNSAFE"
     elif bundle["bundled"] or safety.get("is_honeypot") or safety.get("rugged"):
         tier = "UNSAFE"
@@ -184,7 +202,10 @@ def build_safety_report(
         "warnings": [{"name": c["name"], "detail": c["detail"]} for c in warnings],
         "checkerHub": hub,
         "smartMoney": sm,
-        "verdict": _verdict_text(tier, blockers, bundle, trench, smart_money=sm),
+        "avoid": avoid,
+        "verdict": _verdict_text(
+            tier, blockers, bundle, trench, smart_money=sm, avoid=avoid
+        ),
     }
 
 
@@ -194,12 +215,16 @@ def _verdict_text(
     bundle: dict,
     trench: dict,
     smart_money: dict | None = None,
+    avoid: dict | None = None,
 ) -> str:
     sm = smart_money or {}
+    avoid = avoid or {}
     sm_note = ""
     if sm.get("anti_rug_signal"):
         sm_note = f" · {sm.get('signal', 'WHALE').replace('_', ' ')} anti-rug signal"
     if tier == "UNSAFE":
+        if avoid.get("avoid"):
+            return f"UNSAFE — {avoid.get('summary') or 'junk pattern'}. Skip."
         if bundle.get("bundled"):
             return "UNSAFE — bundled/insider launch detected. Do not enter."
         return "UNSAFE — honeypot or rugged. Do not enter."

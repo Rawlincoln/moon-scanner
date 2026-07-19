@@ -437,6 +437,131 @@ select:focus, input:focus { outline: none; border-color: var(--accent2); }
   border-color: rgba(0, 229, 160, 0.4);
   box-shadow: 0 0 0 1px rgba(0, 229, 160, 0.1), 0 0 24px rgba(0, 229, 160, 0.06);
 }
+.token-card--alpha {
+  border-color: rgba(255, 215, 64, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 215, 64, 0.15), 0 0 28px rgba(255, 176, 32, 0.12);
+}
+.sixk-row { margin-bottom: 8px; }
+.sixk-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: #7ee787;
+  border: 1px solid rgba(126, 231, 135, 0.45);
+  background: rgba(126, 231, 135, 0.1);
+  font-family: var(--mono);
+}
+.sixk-badge.sweet {
+  color: #ffd740;
+  border-color: rgba(255, 215, 64, 0.55);
+  background: rgba(255, 176, 32, 0.14);
+}
+.trade-plan-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.trade-plan-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.trade-plan-badge.enter {
+  color: #00e5a0;
+  border-color: rgba(0, 229, 160, 0.5);
+  background: rgba(0, 229, 160, 0.12);
+}
+.trade-plan-badge.skip {
+  color: var(--danger);
+  border-color: rgba(255, 77, 106, 0.45);
+  background: rgba(255, 77, 106, 0.1);
+}
+.trade-plan-badge.watch {
+  color: #5b9fff;
+  border-color: rgba(91, 159, 255, 0.4);
+  background: rgba(91, 159, 255, 0.1);
+}
+.trade-plan-meta {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+.trade-plan-panel { border-left: 3px solid #00e5a0; padding-left: 12px; }
+
+#backendPill.cloud { color: var(--accent); border-color: rgba(0, 229, 160, 0.35); }
+#backendPill.local { color: var(--warn); border-color: rgba(255, 176, 32, 0.35); }
+.alpha-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.alpha-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.alpha-badge.moon {
+  color: #ffd740;
+  border-color: rgba(255, 215, 64, 0.55);
+  background: rgba(255, 176, 32, 0.14);
+}
+.alpha-badge.alpha {
+  color: #00e5a0;
+  border-color: rgba(0, 229, 160, 0.45);
+  background: rgba(0, 229, 160, 0.12);
+}
+.alpha-badge.watch {
+  color: #5b9fff;
+  border-color: rgba(91, 159, 255, 0.4);
+  background: rgba(91, 159, 255, 0.1);
+}
+.alpha-badge.spec { color: var(--muted); }
+.alpha-window {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.alpha-panel { border-left: 3px solid #ffd740; padding-left: 12px; }
+.alpha-minis { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.alpha-mini {
+  font-size: 0.68rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.alpha-mini.viral { color: #ff6b9d; border-color: rgba(255, 107, 157, 0.35); }
+.alpha-mini.social { color: #5b9fff; border-color: rgba(91, 159, 255, 0.35); }
+.alpha-mini.holders { color: #00e5a0; border-color: rgba(0, 229, 160, 0.35); }
+.alpha-mini.momentum { color: #ffb020; border-color: rgba(255, 176, 32, 0.35); }
+.alpha-mini.timing { color: #c4b5fd; border-color: rgba(196, 181, 253, 0.35); }
+.alpha-mini.liq { color: #7ee787; border-color: rgba(126, 231, 135, 0.35); }
+.token-card--avoid {
+  border-color: rgba(255, 77, 106, 0.5);
+  opacity: 0.75;
+  box-shadow: 0 0 0 1px rgba(255, 77, 106, 0.12);
+}
+.avoid-row { margin-bottom: 8px; }
+.avoid-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--danger);
+  border: 1px solid rgba(255, 77, 106, 0.45);
+  background: rgba(255, 77, 106, 0.12);
+}
 .smart-money-row {
   display: flex;
   align-items: center;

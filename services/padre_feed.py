@@ -12,7 +12,19 @@ import asyncio
 import time
 from typing import Any
 
-from config import MCAP_INVEST_MAX_USD, MCAP_INVEST_MIN_USD, REQUEST_TIMEOUT
+from config import (
+    MCAP_INVEST_MAX_USD,
+    MCAP_INVEST_MIN_USD,
+    REQUEST_TIMEOUT,
+    SCAN_MCAP_FOCUS_MAX_USD,
+    SCAN_MCAP_MAX_USD,
+    SIXK_ENTRY_SWEET_MAX,
+    SIXK_ENTRY_SWEET_MIN,
+    SIXK_RADAR_MAX_USD,
+    SIXK_RADAR_MIN_USD,
+    TARGET_MCAP_USD,
+)
+from services.avoid_filters import BLOCKED_MINTS
 from services.dexscreener import DexScreenerClient
 from services.pumpfun import PumpFunClient
 from services.trench_analyzer import is_approaching_6k_candidate
@@ -83,34 +95,192 @@ class PadreFeedClient:
         )
         return results[: limit * 2]
 
+    @staticmethod
+    def _candidate_mcap(cand: dict) -> float:
+        pf = cand.get("pumpfun") or {}
+        try:
+            return float(
+                pf.get("usd_market_cap")
+                or cand.get("marketCap")
+                or cand.get("_mcap")
+                or 0
+            )
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _keep_early_mcap(self, cand: dict) -> bool:
+        """Drop tokens already past the early window ($25k)."""
+        mcap = self._candidate_mcap(cand)
+        # Unknown mcap (0) — keep for brand-new launches
+        if mcap <= 0:
+            return True
+        return mcap <= SCAN_MCAP_MAX_USD
+
+    def _rank_early(self, cand: dict) -> tuple:
+        """$6k entry band first, then younger — never high mcap first."""
+        mcap = self._candidate_mcap(cand)
+        age = float(cand.get("_age_minutes") or cand.get("age_minutes") or 999)
+        if SIXK_ENTRY_SWEET_MIN <= mcap <= SIXK_ENTRY_SWEET_MAX:
+            band = 0  # ideal $3.5k–$7.5k
+        elif SIXK_RADAR_MIN_USD <= mcap < SIXK_ENTRY_SWEET_MIN:
+            band = 1  # pre-$6k climb
+        elif SIXK_ENTRY_SWEET_MAX < mcap <= SIXK_RADAR_MAX_USD:
+            band = 2  # just past 6k — still usable
+        elif mcap <= SCAN_MCAP_FOCUS_MAX_USD:
+            band = 3
+        else:
+            band = 4
+        closeness = abs(mcap - TARGET_MCAP_USD) if mcap > 0 else 99999
+        return (band, closeness, age)
+
+    def _in_sixk_band(self, cand: dict) -> bool:
+        mcap = self._candidate_mcap(cand)
+        return SIXK_RADAR_MIN_USD <= mcap <= SIXK_RADAR_MAX_USD
+
+    async def fetch_sixk_radar(
+        self,
+        limit: int = 30,
+        max_age_minutes: float = 45.0,
+    ) -> list[dict]:
+        """Dedicated $2k–$9k climber radar — last-trade first (not brand-new dust)."""
+        # Pull large last-trade feed so we catch climbers mid-run, not only brand-new
+        coins = await self._fetch_pump_sorted("last_trade_timestamp", max(limit * 8, 80))
+        # Second pass: market_cap DESC is wrong for early; still merge last-trade only
+        coins2 = await self._fetch_pump_sorted("last_trade_timestamp", max(limit * 4, 40))
+        coins = (coins or []) + (coins2 or [])
+        out: list[dict] = []
+        seen: set[str] = set()
+        for coin in coins:
+            mint = coin.get("mint", "")
+            if not mint or mint in seen or mint in BLOCKED_MINTS:
+                continue
+            if coin.get("complete") or coin.get("is_banned"):
+                continue
+            mcap = float(coin.get("usd_market_cap") or 0)
+            if mcap < SIXK_RADAR_MIN_USD or mcap > SIXK_RADAR_MAX_USD:
+                continue
+            age = self.pump.coin_age_minutes(coin)
+            if age > max_age_minutes or age < 0.5:
+                continue
+            seen.add(mint)
+            cand = self.pump.to_candidate(coin)
+            cand["sources"] = [SOURCE_PUMPFUN, GAZE_APPROACHING_6K, "sixk_radar"]
+            cand["_sort_priority"] = 0
+            cand["_age_minutes"] = age
+            cand["_mcap"] = mcap
+            cand["_mcap_closeness"] = max(0, 100 - abs(mcap - TARGET_MCAP_USD) / 60)
+            cand["_sixk_radar"] = True
+            # Quick narrative flags (no RugCheck) for instant feed ranking
+            desc = (coin.get("description") or "").lower()
+            tw = str(coin.get("twitter") or "").lower()
+            web = str(coin.get("website") or "").lower()
+            viral = any(h in f"{desc} {tw} {web}" for h in (
+                "tiktok.com", "youtube.com", "youtu.be", "instagram.com"
+            ))
+            own_x = "status/" not in tw and (
+                "x.com/" in tw or "twitter.com/" in tw
+            )
+            # Penalize status-link-only / empty-desc entry traps (CEO of Sex style)
+            status_x = "status/" in tw
+            empty_desc = len((coin.get("description") or "").strip()) < 8
+            adult = any(
+                k in f"{(coin.get('name') or '')} {(coin.get('symbol') or '')}".lower()
+                for k in (
+                    "sex", "porn", "nude", "onlyfans", "xxx", "nsfw", "milf", "hentai",
+                )
+            )
+            if status_x and empty_desc:
+                cand["_entry_trap"] = True
+            if adult:
+                cand["_adult_bait"] = True
+            cand["_quick_alpha"] = (
+                int(viral) * 2
+                + int(own_x and not status_x)
+                + int(bool(web and "x.com" not in web and "instagram" not in web))
+                - int(status_x) * 3
+                - int(adult) * 5
+                - int(empty_desc and not viral)
+            )
+            out.append(cand)
+
+        # Drop obvious entry traps from radar (status-link + empty / adult bait)
+        out = [
+            c
+            for c in out
+            if not c.get("_adult_bait") and not c.get("_entry_trap")
+        ]
+        out.sort(
+            key=lambda c: (
+                0 if SIXK_ENTRY_SWEET_MIN <= self._candidate_mcap(c) <= SIXK_ENTRY_SWEET_MAX else 1,
+                abs(self._candidate_mcap(c) - TARGET_MCAP_USD),
+                -c.get("_quick_alpha", 0),
+                c.get("_age_minutes", 999),
+            )
+        )
+        return out[:limit]
+
     async def fetch_trenches_columns(
         self,
         per_column: int = 20,
         max_age_minutes: float = 30.0,
     ) -> dict[str, list[dict]]:
-        """Mirror Padre Trenches columns: NEW, Almost Bonded, Recently Bonded."""
+        """Trenches + dedicated $6k radar (analyzed first)."""
+        radar_limit = max(per_column * 3, 24)
+        sixk_task = self.fetch_sixk_radar(
+            limit=radar_limit,
+            max_age_minutes=max(max_age_minutes, 40),
+        )
         new_task = self._from_pumpfun_new(
             per_column * 2, max_age_minutes, exclude_graduated=True
         )
         almost_task = self._from_pumpfun_almost_bonded(per_column, max_age_minutes)
-        bonded_task = self._from_pumpfun_recently_bonded(per_column, max_age_minutes)
-        new, almost, bonded = await asyncio.gather(new_task, almost_task, bonded_task)
+        bonded_task = self._from_pumpfun_recently_bonded(
+            max(5, per_column // 2), max_age_minutes
+        )
+        sixk, new, almost, bonded = await asyncio.gather(
+            sixk_task, new_task, almost_task, bonded_task
+        )
 
-        def dedup(items: list[dict]) -> list[dict]:
+        def prepare(items: list[dict], n: int, prefer_sixk: bool = False) -> list[dict]:
             seen: set[str] = set()
             out: list[dict] = []
             for c in items:
                 mint = c.get("tokenAddress", "")
                 if not mint or mint in seen:
                     continue
+                if mint in BLOCKED_MINTS:
+                    continue
+                if not self._keep_early_mcap(c):
+                    continue
+                pf = c.get("pumpfun") or {}
+                replies = int(pf.get("reply_count") or 0)
+                has_social = bool(
+                    pf.get("twitter") or pf.get("telegram") or pf.get("website")
+                )
+                desc = (pf.get("description") or "").strip()
+                if replies == 0 and not has_social and len(desc) < 4:
+                    c["_ghost_risk"] = True
                 seen.add(mint)
                 out.append(c)
-            return out[:per_column]
+            out.sort(
+                key=lambda x: (
+                    0 if (prefer_sixk and x.get("_sixk_radar")) else 1,
+                    1 if x.get("_ghost_risk") else 0,
+                    *self._rank_early(x),
+                )
+            )
+            return out[:n]
+
+        # Six-k climbers get their own column + overflow into NEW
+        sixk_col = prepare(sixk, max(per_column * 2, 16), prefer_sixk=True)
+        sixk_mints = {c["tokenAddress"] for c in sixk_col}
+        new_rest = [c for c in new if c.get("tokenAddress") not in sixk_mints]
 
         return {
-            "new": dedup(new),
-            "almost_bonded": dedup(almost),
-            "recently_bonded": dedup(bonded),
+            "sixk_radar": sixk_col,
+            "new": prepare(new_rest, per_column),
+            "almost_bonded": prepare(almost, per_column),
+            "recently_bonded": prepare(bonded, max(5, per_column // 2)),
         }
 
     async def _fetch_pump_sorted(
@@ -208,11 +378,22 @@ class PadreFeedClient:
                 continue
             if coin.get("is_banned"):
                 continue
+            mcap = float(coin.get("usd_market_cap") or 0)
+            if mcap > SCAN_MCAP_MAX_USD:
+                continue
             cand = self.pump.to_candidate(coin)
             cand["sources"] = [SOURCE_PUMPFUN, GAZE_NEW]
             cand["_sort_priority"] = 0
             cand["_age_minutes"] = age
+            cand["_mcap"] = mcap
             out.append(cand)
+        # Youngest + lowest mcap first
+        out.sort(
+            key=lambda c: (
+                c.get("_age_minutes", 999),
+                c.get("_mcap") or 0,
+            )
+        )
         return out
 
     async def _from_pumpfun_almost_bonded(
@@ -221,7 +402,7 @@ class PadreFeedClient:
         coins = await self.pump.get_latest_coins(
             limit=limit * 4, offset=0
         )
-        # Also pull by market cap for curve-near-graduation tokens
+        # Pull actively traded (not top mcap DESC — that returns late $50k+ bags)
         try:
             async with __import__("httpx").AsyncClient(
                 timeout=REQUEST_TIMEOUT,
@@ -233,8 +414,8 @@ class PadreFeedClient:
                 resp = await client.get(
                     "https://frontend-api-v3.pump.fun/coins",
                     params={
-                        "limit": limit * 2,
-                        "sort": "market_cap",
+                        "limit": limit * 4,
+                        "sort": "last_trade_timestamp",
                         "order": "DESC",
                         "includeNsfw": "false",
                     },
@@ -253,9 +434,12 @@ class PadreFeedClient:
         for coin in coins:
             if coin.get("complete") or coin.get("is_banned"):
                 continue
+            mcap = float(coin.get("usd_market_cap") or 0)
+            if mcap > SCAN_MCAP_MAX_USD:
+                continue
             progress = self.pump.bonding_progress(coin)
             age = self.pump.coin_age_minutes(coin)
-            if age > max_age_minutes * 3:
+            if age > max_age_minutes * 2:
                 continue
             if progress < _ALMOST_BONDED_MIN_PCT:
                 continue
@@ -263,8 +447,10 @@ class PadreFeedClient:
             cand["sources"] = [SOURCE_PUMPFUN, GAZE_ALMOST_BONDED]
             cand["_sort_priority"] = 1
             cand["_age_minutes"] = age
+            cand["_mcap"] = mcap
             cand["bonding_progress"] = progress
             out.append(cand)
+        out.sort(key=lambda c: (c.get("_age_minutes", 999), c.get("_mcap") or 0))
         return out[:limit]
 
     async def _from_pumpfun_recently_bonded(
@@ -295,14 +481,19 @@ class PadreFeedClient:
         for coin in coins if isinstance(coins, list) else []:
             if not coin.get("complete"):
                 continue
+            mcap = float(coin.get("usd_market_cap") or 0)
+            if mcap > SCAN_MCAP_MAX_USD:
+                continue
             age = self.pump.coin_age_minutes(coin)
-            if age > _RECENT_BONDED_MAX_AGE_MIN:
+            if age > min(_RECENT_BONDED_MAX_AGE_MIN, max_age_minutes * 4):
                 continue
             cand = self.pump.to_candidate(coin)
             cand["sources"] = [SOURCE_PUMPFUN, GAZE_RECENTLY_BONDED]
             cand["_sort_priority"] = 2
             cand["_age_minutes"] = age
+            cand["_mcap"] = mcap
             out.append(cand)
+        out.sort(key=lambda c: (c.get("_age_minutes", 999), c.get("_mcap") or 0))
         return out[:limit]
 
     async def _from_dex_trending(self, limit: int) -> list[dict]:

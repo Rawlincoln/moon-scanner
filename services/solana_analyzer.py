@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -13,6 +14,7 @@ from config import (
     REQUEST_TIMEOUT,
     USER_AGENT,
 )
+from services.avoid_filters import analyze_avoid_flags
 
 RUGCHECK_BASE = "https://api.rugcheck.xyz/v1/tokens"
 
@@ -31,9 +33,14 @@ class SolanaAnalyzer:
             async with httpx.AsyncClient(
                 timeout=REQUEST_TIMEOUT, headers=self._headers
             ) as client:
-                summary_resp = await client.get(
-                    f"{RUGCHECK_BASE}/{mint_address}/report/summary"
+                # Parallel RugCheck calls — saves ~1 round-trip per token
+                summary_resp, full_resp = await asyncio.gather(
+                    client.get(f"{RUGCHECK_BASE}/{mint_address}/report/summary"),
+                    client.get(f"{RUGCHECK_BASE}/{mint_address}/report"),
+                    return_exceptions=True,
                 )
+                if isinstance(summary_resp, Exception):
+                    raise summary_resp
                 if summary_resp.status_code == 404:
                     if pump_coin:
                         return self._pumpfun_fallback(
@@ -42,11 +49,10 @@ class SolanaAnalyzer:
                     return self._no_data(mint_address)
                 summary_resp.raise_for_status()
                 summary = summary_resp.json()
-
-                full_resp = await client.get(
-                    f"{RUGCHECK_BASE}/{mint_address}/report"
-                )
-                full = full_resp.json() if full_resp.status_code == 200 else {}
+                if isinstance(full_resp, Exception) or full_resp.status_code != 200:
+                    full = {}
+                else:
+                    full = full_resp.json()
         except Exception as exc:
             if pump_coin:
                 return self._pumpfun_fallback(
@@ -185,6 +191,12 @@ class SolanaAnalyzer:
                 "symbol": pump_coin.get("symbol", ""),
             }
         markets = full.get("markets") or []
+        lp_info = self._extract_lp_info(markets, summary, on_bonding_curve)
+        # Prefer market-level lock stats when summary is blank/misleading
+        if lp_info.get("lp_locked_pct") is not None:
+            lp_locked = float(lp_info["lp_locked_pct"])
+        if lp_info.get("quote_usd"):
+            liquidity = max(liquidity, float(lp_info["quote_usd"]))
 
         creator = full.get("creator") or (pump_coin or {}).get("creator")
         creator_balance = float(full.get("creatorBalance") or 0)
@@ -208,9 +220,42 @@ class SolanaAnalyzer:
             h for h in top_holders if h.get("insider")
         ]
 
+        # Re-evaluate LP with market data.
+        # NOTE: pump.fun always reports lpLockedPct=100 — do NOT trust that alone.
+        quote_sol = float(lp_info.get("quote_sol") or 0)
+        unlocked = float(lp_info.get("lp_unlocked") or 0)
+        if on_bonding_curve:
+            # Exit liquidity = real SOL left on the curve
+            lp_ok = quote_sol >= 0.5
+            if not lp_ok:
+                issues.append(
+                    f"Bonding curve drained — only {quote_sol:.3f} SOL left "
+                    "(devs/sellers already pulled exit liquidity)"
+                )
+        else:
+            lp_ok = lp_locked >= MIN_LP_LOCKED_PCT and unlocked <= 0
+            if unlocked > 0:
+                issues.append("LP tokens unlocked — liquidity can be pulled")
+            elif lp_locked < MIN_LP_LOCKED_PCT:
+                issues.append(
+                    f"LP only {lp_locked:.0f}% locked — can be pulled"
+                )
+
+        passed = (
+            not is_honeypot
+            and not sell_tax_detected
+            and score_norm <= max_rug
+            and len(danger_risks) == 0
+            and lp_ok
+            and not mint_authority
+            and not freeze_authority
+            and not (pump_coin and pump_coin.get("is_banned"))
+        )
+
         result = {
             "chain": "solana",
             "type": "solana",
+            "mint": mint,
             "passed": passed,
             "on_bonding_curve": on_bonding_curve,
             "is_honeypot": is_honeypot,
@@ -219,6 +264,11 @@ class SolanaAnalyzer:
             "rug_score_raw": score_raw,
             "lp_locked_pct": lp_locked,
             "liquidity_usd": liquidity,
+            "lp_quote_sol": lp_info.get("quote_sol", 0),
+            "lp_quote_usd": lp_info.get("quote_usd", 0),
+            "lp_unlocked": lp_info.get("lp_unlocked", 0),
+            "lp_locked_usd": lp_info.get("lp_locked_usd", 0),
+            "market_type": lp_info.get("market_type", ""),
             "mint_authority": mint_authority,
             "freeze_authority": freeze_authority,
             "mutable_metadata": mutable_metadata,
@@ -226,6 +276,8 @@ class SolanaAnalyzer:
             "warn_risks": len(warn_risks),
             "token_name": token_meta.get("name", ""),
             "token_symbol": token_meta.get("symbol", ""),
+            "token_meta": token_meta,
+            "metadata_uri": token_meta.get("uri") or "",
             "markets_count": len(markets),
             "top_holders": top_holders[:10],
             "risks": risks,
@@ -241,7 +293,63 @@ class SolanaAnalyzer:
             "rugged": rugged,
             "insider_holders": insider_holders[:5],
         }
-        return self._merge_padre_audit(result, padre_audit)
+        result = self._merge_padre_audit(result, padre_audit)
+        return self._apply_avoid_filters(result, pump_coin, mint)
+
+    @staticmethod
+    def _extract_lp_info(
+        markets: list, summary: dict, on_bonding_curve: bool
+    ) -> dict[str, Any]:
+        """Parse RugCheck markets[].lp for real SOL/USD + lock state."""
+        best = {
+            "quote_sol": 0.0,
+            "quote_usd": 0.0,
+            "base_usd": 0.0,
+            "lp_locked_pct": None,
+            "lp_unlocked": 0.0,
+            "lp_locked": 0.0,
+            "lp_locked_usd": 0.0,
+            "market_type": "",
+        }
+        if summary.get("lpLockedPct") is not None:
+            try:
+                best["lp_locked_pct"] = float(summary["lpLockedPct"])
+            except (TypeError, ValueError):
+                pass
+
+        for m in markets or []:
+            lp = m.get("lp") or {}
+            if not lp and not m.get("marketType"):
+                continue
+            try:
+                quote = float(lp.get("quote") or 0)
+                quote_usd = float(lp.get("quoteUSD") or 0)
+                base_usd = float(lp.get("baseUSD") or 0)
+                locked_pct = lp.get("lpLockedPct")
+                unlocked = float(lp.get("lpUnlocked") or 0)
+                locked = float(lp.get("lpLocked") or 0)
+                locked_usd = float(lp.get("lpLockedUSD") or 0)
+            except (TypeError, ValueError):
+                continue
+            # Prefer market with more quote SOL (real exit liquidity)
+            if quote >= best["quote_sol"] or quote_usd >= best["quote_usd"]:
+                best.update(
+                    {
+                        "quote_sol": quote,
+                        "quote_usd": quote_usd,
+                        "base_usd": base_usd,
+                        "lp_unlocked": unlocked,
+                        "lp_locked": locked,
+                        "lp_locked_usd": locked_usd,
+                        "market_type": str(m.get("marketType") or ""),
+                    }
+                )
+                if locked_pct is not None:
+                    try:
+                        best["lp_locked_pct"] = float(locked_pct)
+                    except (TypeError, ValueError):
+                        pass
+        return best
 
     @staticmethod
     def _merge_padre_audit(
@@ -284,6 +392,7 @@ class SolanaAnalyzer:
         result = {
             "chain": "solana",
             "type": "solana",
+            "mint": mint,
             "passed": passed,
             "is_honeypot": False,
             "sell_tax_detected": False,
@@ -298,6 +407,8 @@ class SolanaAnalyzer:
             "warn_risks": 0,
             "token_name": coin.get("name", ""),
             "token_symbol": coin.get("symbol", ""),
+            "token_meta": {},
+            "metadata_uri": coin.get("uri") or coin.get("metadata_uri") or "",
             "markets_count": 0,
             "top_holders": [],
             "risks": [],
@@ -315,7 +426,25 @@ class SolanaAnalyzer:
             "rugged": False,
             "insider_holders": [],
         }
-        return SolanaAnalyzer._merge_padre_audit(result, padre_audit)
+        result = SolanaAnalyzer._merge_padre_audit(result, padre_audit)
+        return SolanaAnalyzer._apply_avoid_filters(result, coin, mint)
+
+    @staticmethod
+    def _apply_avoid_filters(
+        result: dict[str, Any],
+        pump_coin: dict | None,
+        mint: str,
+        pair: dict | None = None,
+    ) -> dict[str, Any]:
+        avoid = analyze_avoid_flags(result, pump_coin, mint=mint, pair=pair)
+        result["avoid"] = avoid
+        if avoid.get("avoid"):
+            result["passed"] = False
+            for reason in avoid.get("reasons") or []:
+                tag = f"AVOID: {reason}"
+                if tag not in result.get("issues", []):
+                    result.setdefault("issues", []).append(tag)
+        return result
 
     @staticmethod
     def _no_data(mint: str) -> dict:

@@ -5,6 +5,29 @@ let refreshTimer = null;
 let scanInFlight = false;
 const SCAN_TIMEOUT_MS = 120000;
 
+/** Production cloud API — single source of truth for token lists */
+const CLOUD_API = "https://moon-scanner-9tlz.onrender.com";
+const IS_CLOUD_HOST = /onrender\.com$/i.test(location.hostname);
+
+function getApiBase() {
+  // On Render always use same origin (already the cloud backend)
+  if (IS_CLOUD_HOST) return "";
+  const mode = localStorage.getItem("moon_api_mode") || "cloud";
+  if (mode === "local") return "";
+  return CLOUD_API;
+}
+
+function apiUrl(path) {
+  const base = getApiBase().replace(/\/$/, "");
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return base ? `${base}${p}` : p;
+}
+
+function getApiModeLabel() {
+  if (IS_CLOUD_HOST) return "cloud";
+  return localStorage.getItem("moon_api_mode") || "cloud";
+}
+
 const $ = (sel) => document.querySelector(sel);
 const grid = $("#tokenGrid");
 const statusBar = $("#statusBar");
@@ -44,7 +67,9 @@ async function fetchWithTimeout(url, timeoutMs = SCAN_TIMEOUT_MS) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: ctrl.signal });
+    // Relative /api paths go through apiUrl() for local↔cloud sync
+    const full = url.startsWith("http") ? url : apiUrl(url);
+    const res = await fetch(full, { signal: ctrl.signal });
     if (!res.ok) throw new Error((await res.text()).slice(0, 200) || `HTTP ${res.status}`);
     return res;
   } catch (err) {
@@ -55,6 +80,42 @@ async function fetchWithTimeout(url, timeoutMs = SCAN_TIMEOUT_MS) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function updateBackendPill() {
+  const pill = $("#backendPill");
+  if (!pill) return;
+  const mode = getApiModeLabel();
+  const base = getApiBase() || location.origin;
+  pill.textContent = mode === "cloud" || IS_CLOUD_HOST ? "Cloud synced" : "Local only";
+  pill.classList.toggle("cloud", mode === "cloud" || IS_CLOUD_HOST);
+  pill.classList.toggle("local", mode === "local" && !IS_CLOUD_HOST);
+  pill.title = `API: ${base}`;
+}
+
+function initBackendSync() {
+  const sel = $("#apiBackend");
+  if (!sel) return;
+  if (IS_CLOUD_HOST) {
+    sel.value = "cloud";
+    sel.disabled = true;
+    updateBackendPill();
+    return;
+  }
+  sel.value = getApiModeLabel();
+  sel.onchange = () => {
+    localStorage.setItem("moon_api_mode", sel.value);
+    updateBackendPill();
+    lastTokens = [];
+    setStatus(
+      sel.value === "cloud"
+        ? `Switched to cloud backend (${CLOUD_API}) — same tokens as Render`
+        : "Switched to local backend — independent scan",
+      true
+    );
+    runScan(true);
+  };
+  updateBackendPill();
 }
 
 function fmtUsd(n) {
@@ -155,6 +216,90 @@ function socialBadgesHtml(social) {
     return `<span class="${cls}" title="${social.summary || ""}">${b.label}</span>`;
   });
   return `<div class="social-badges">${badges.join("")}</div>`;
+}
+
+function tradePlanHtml(plan, compact = false) {
+  if (!plan || !plan.action) return "";
+  const act = plan.action;
+  const cls = act === "ENTER" ? "enter" : act === "SKIP" ? "skip" : "watch";
+  if (compact) {
+    return `<div class="trade-plan-row" title="${plan.summary || ""}">
+      <span class="trade-plan-badge ${cls}">${act} ${plan.confidence || 0}%</span>
+      ${plan.p_good != null ? `<span class="trade-plan-meta">win≈${Math.round((plan.p_good || 0) * 100)}%</span>` : ""}
+    </div>`;
+  }
+  const tps = (plan.take_profit || []).map((t) =>
+    `<div class="analysis-item"><div class="k">${t.label} (${t.multiple}x)</div>
+     <div class="v">${t.mcap ? fmtUsd(t.mcap) : "—"} · ${t.action || ""}</div></div>`
+  ).join("");
+  const sl = plan.stop_loss || {};
+  const exits = (plan.exit_triggers || []).slice(0, 5).map((e) => `<li>${e}</li>`).join("");
+  const entry = plan.entry || {};
+  return `<div class="analysis-section trade-plan-panel">
+    <h4>Learned plan: ${act} (${plan.confidence || 0}%)</h4>
+    <p style="color:var(--accent);margin-bottom:8px">${plan.summary || ""}</p>
+    <div class="analysis-grid">
+      <div class="analysis-item"><div class="k">P(good)</div><div class="v">${Math.round((plan.p_good || 0) * 100)}%</div></div>
+      <div class="analysis-item"><div class="k">P(bad)</div><div class="v">${Math.round((plan.p_bad || 0) * 100)}%</div></div>
+      <div class="analysis-item"><div class="k">Samples</div><div class="v">${plan.sample_size ?? 0}</div></div>
+      <div class="analysis-item"><div class="k">Avg winner</div><div class="v">${plan.learned_avg_winner_multiple || "—"}x</div></div>
+      <div class="analysis-item"><div class="k">Sweet entry</div><div class="v">${entry.ideal_min_mcap ? fmtUsd(entry.ideal_min_mcap) + "–" + fmtUsd(entry.ideal_max_mcap) : "—"}</div></div>
+      <div class="analysis-item"><div class="k">Now</div><div class="v">${entry.current_mcap ? fmtUsd(entry.current_mcap) : "—"} ${entry.in_sweet_zone ? "✓ sweet" : ""}</div></div>
+    </div>
+    <h4 style="margin-top:12px">Take profit</h4>
+    <div class="analysis-grid">${tps}</div>
+    <h4 style="margin-top:12px">Stop loss</h4>
+    <div class="analysis-grid">
+      <div class="analysis-item"><div class="k">SL (${sl.multiple || "—"}x)</div>
+      <div class="v">${sl.mcap ? fmtUsd(sl.mcap) : "—"} · ${sl.action || ""}</div></div>
+    </div>
+    ${plan.dev_dump_hint_mcap ? `<p style="margin-top:8px;color:var(--warn)">Historical dev-dump cluster ~${fmtUsd(plan.dev_dump_hint_mcap)}</p>` : ""}
+    <ul class="reason-list" style="margin-top:8px">${exits}</ul>
+  </div>`;
+}
+
+function alphaSetupHtml(alpha, compact = false) {
+  if (!alpha || alpha.tier === "WEAK" || alpha.tier === "SKIP" || !alpha.score) return "";
+  if (!alpha.highlight && alpha.score < 45) return "";
+  const tier = alpha.tier || "SPEC";
+  const cls = {
+    MOON_SETUP: "alpha-badge moon",
+    ALPHA: "alpha-badge alpha",
+    WATCH_ALPHA: "alpha-badge watch",
+    SPEC: "alpha-badge spec",
+  }[tier] || "alpha-badge";
+  const label = {
+    MOON_SETUP: "🚀 MOON SETUP",
+    ALPHA: "✦ ALPHA early",
+    WATCH_ALPHA: "◎ Watch alpha",
+    SPEC: "Spec",
+  }[tier] || tier;
+  const win = (alpha.entry_window || "").replace(/_/g, " ");
+  if (compact) {
+    return `<div class="alpha-row" title="${alpha.summary || ""}">
+      <span class="${cls}">${label} ${alpha.score}</span>
+      ${win ? `<span class="alpha-window">${win}</span>` : ""}
+    </div>`;
+  }
+  const reasons = (alpha.reasons || []).slice(0, 6).map((r) => `<li>${r}</li>`).join("");
+  const badges = (alpha.badges || []).map((b) =>
+    `<span class="alpha-mini ${b.type || ""}">${b.label}</span>`
+  ).join("");
+  return `<div class="analysis-section alpha-panel">
+    <h4>${label} · score ${alpha.score} · ${win || "timing n/a"}</h4>
+    <p style="color:var(--accent);margin-bottom:8px">${alpha.summary || ""}</p>
+    <div class="alpha-minis">${badges}</div>
+    <ul class="reason-list">${reasons}</ul>
+  </div>`;
+}
+
+function avoidBadgesHtml(avoid) {
+  if (!avoid?.avoid && !avoid?.flags?.length) return "";
+  const reason = avoid.summary || (avoid.reasons || [])[0] || "Junk pattern";
+  const flags = (avoid.flags || []).slice(0, 3).join(", ");
+  return `<div class="avoid-row" title="${reason}">
+    <span class="avoid-badge">⛔ AVOID${flags ? ` · ${flags}` : ""}</span>
+  </div>`;
 }
 
 function smartMoneyBadgesHtml(sm) {
@@ -287,13 +432,16 @@ function renderCard(token) {
   const pc = m.priceChange || {};
   const social = token.socialSignals || {};
   const sm = token.smartMoney || {};
+  const alpha = token.alphaSetup || {};
+  const plan = token.tradePlan || {};
+  const avoid = token.safety?.avoid || token.safetyReport?.avoid || {};
   const hub = token.checkerHub || {};
 
   const h1 = parseFloat(pc.h1);
   const h1Class = h1 >= 0 ? "up" : "down";
 
   const card = document.createElement("article");
-  card.className = `token-card${social.highlight ? " token-card--narrative" : ""}${sm.anti_rug_signal ? " token-card--smart-money" : ""}`;
+  card.className = `token-card${social.highlight ? " token-card--narrative" : ""}${sm.anti_rug_signal ? " token-card--smart-money" : ""}${alpha.is_alpha ? " token-card--alpha" : ""}${avoid.avoid ? " token-card--avoid" : ""}`;
   card.addEventListener("click", (e) => {
     if (e.target.closest("[data-copy]")) return;
     openModal(token);
@@ -343,11 +491,14 @@ function renderCard(token) {
   card.innerHTML = `
     ${sourceBadgesHtml(token.sources)}
     ${socialBadgesHtml(social)}
+    ${alphaSetupHtml(alpha, true)}
+    ${tradePlanHtml(plan, true)}
+    ${avoidBadgesHtml(avoid)}
     ${smartMoneyBadgesHtml(sm)}
     ${checkerHubHtml(hub, true)}
-    <div class="invest-banner ${investSignal}">
-      <div class="invest-title">▸ ${investSignal.replace(/_/g, " ")} (${investConf}%)</div>
-      <div class="invest-action">${invest.summary || invest.action || entry.action || ""}</div>
+    <div class="invest-banner ${avoid.avoid || plan.action === "SKIP" ? "AVOID" : (plan.action === "ENTER" || alpha.is_alpha ? "STRONG_INVEST" : investSignal)}">
+      <div class="invest-title">▸ ${avoid.avoid || plan.action === "SKIP" ? "AVOID" : (plan.action === "ENTER" ? "ENTER (learned)" : (alpha.is_alpha ? alpha.tier.replace(/_/g, " ") : investSignal.replace(/_/g, " ")))} (${plan.confidence || (alpha.is_alpha ? alpha.confidence : investConf)}%)</div>
+      <div class="invest-action">${avoid.avoid ? (avoid.summary || "Junk / ghost launch") : (plan.summary || (alpha.is_alpha ? alpha.summary : (invest.summary || invest.action || entry.action || "")))}</div>
     </div>
     <div class="moon-score">
       <div class="score-ring ${gradeClass(moon.grade)}">${moon.total || 0}</div>
@@ -393,24 +544,54 @@ function renderTrenchesCard(t) {
   const snipers = rep.snipers || {};
   const social = t.socialSignals || {};
   const sm = t.smartMoney || t.safetyReport?.smartMoney || {};
+  const alpha = t.alphaSetup || {};
+  const plan = t.tradePlan || {};
+  const avoid = t.safetyReport?.avoid || {};
   const hub = t.checkerHub || t.safetyReport?.checkerHub || {};
   const tier = t.safetyTier || "AVOID";
   const isPreview = t.preview || tier === "SCANNING";
   const card = document.createElement("article");
-  card.className = `token-card${social.highlight ? " token-card--narrative" : ""}${isPreview ? " token-card--scanning" : ""}${sm.anti_rug_signal ? " token-card--smart-money" : ""}`;
+  card.className = `token-card${social.highlight ? " token-card--narrative" : ""}${isPreview ? " token-card--scanning" : ""}${sm.anti_rug_signal ? " token-card--smart-money" : ""}${alpha.is_alpha || plan.action === "ENTER" ? " token-card--alpha" : ""}${avoid.avoid || plan.action === "SKIP" ? " token-card--avoid" : ""}`;
   card.addEventListener("click", () => openTrenchesModal(t));
 
   const iconHtml = t.icon
     ? `<img class="token-icon" src="${t.icon}" alt="" onerror="this.style.display='none'" />`
     : `<div class="token-icon placeholder">◎</div>`;
 
+  const bannerCls = isPreview
+    ? "WATCH"
+    : alpha.is_alpha
+      ? "STRONG_INVEST"
+      : tier === "SAFE_ENTRY"
+        ? "STRONG_INVEST"
+        : tier === "WATCH"
+          ? "WATCH"
+          : "AVOID";
+  const mcap = t.mcap_usd || 0;
+  const sweet = t.entrySweet || (mcap >= 3500 && mcap <= 7500);
+  const sixk = t.sixkRadar || (mcap >= 2000 && mcap <= 9000);
+  const title = isPreview
+    ? (sweet ? "🎯 $6K SWEET ZONE" : sixk ? "$6K RADAR" : "SCANNING…")
+    : alpha.is_alpha
+      ? `${alpha.tier.replace(/_/g, " ")} (${alpha.score})`
+      : `${tier} (${t.safetyScore ?? 0}%)`;
+  const action = isPreview
+    ? (sweet
+      ? `MCap ${fmtUsd(mcap)} — ideal entry band, safety running…`
+      : (rep.verdict || "RugCheck + Padre analysis running…"))
+    : (alpha.is_alpha ? alpha.summary : (rep.verdict || ""));
+
   card.innerHTML = `
     ${sourceBadgesHtml([t.column ? `padre_trenches_${t.column}` : "pump.fun"])}
+    ${sixk ? `<div class="sixk-row"><span class="sixk-badge ${sweet ? "sweet" : ""}">${sweet ? "🎯 SWEET $3.5–7.5K" : "$6K RADAR"} · ${fmtUsd(mcap)}</span></div>` : ""}
     ${socialBadgesHtml(social)}
+    ${alphaSetupHtml(alpha, true)}
+    ${tradePlanHtml(plan, true)}
+    ${avoidBadgesHtml(avoid)}
     ${smartMoneyBadgesHtml(sm)}
-    <div class="invest-banner ${isPreview ? "WATCH" : tier === "SAFE_ENTRY" ? "STRONG_INVEST" : tier === "WATCH" ? "WATCH" : "AVOID"}">
-      <div class="invest-title">▸ ${isPreview ? "SCANNING…" : tier} (${t.safetyScore ?? 0}%)</div>
-      <div class="invest-action">${rep.verdict || (isPreview ? "RugCheck + Padre analysis running…" : "")}</div>
+    <div class="invest-banner ${bannerCls}">
+      <div class="invest-title">▸ ${title}</div>
+      <div class="invest-action">${action}</div>
     </div>
     <div class="card-header">
       ${iconHtml}
@@ -444,6 +625,8 @@ function openTrenchesModal(t) {
 
   const social = t.socialSignals || {};
   const sm = t.smartMoney || rep.smartMoney || {};
+  const alpha = t.alphaSetup || {};
+  const avoid = rep.avoid || t.avoid || {};
   const hub = t.checkerHub || rep.checkerHub || {};
   $("#modalContent").innerHTML = `
     <h2>${t.name || "Token"} ($${t.symbol || "?"})</h2>
@@ -453,6 +636,12 @@ function openTrenchesModal(t) {
     ${social.x_url ? `<p style="margin-bottom:8px"><a href="${social.x_url}" target="_blank" rel="noopener" style="color:#5b9fff">X / Twitter →</a></p>` : ""}
     ${social.tiktok_url ? `<p style="margin-bottom:8px"><a href="${social.tiktok_url}" target="_blank" rel="noopener" style="color:#ff6b9d">TikTok →</a></p>` : ""}
     <p style="color:var(--muted);margin-bottom:16px">${rep.verdict || ""}</p>
+    ${alphaSetupHtml(alpha)}
+    ${tradePlanHtml(t.tradePlan || {})}
+    ${avoid.avoid ? `<div class="analysis-section"><h4>⛔ Avoid filters</h4>
+      <p style="color:var(--danger)">${avoid.summary || ""}</p>
+      <ul class="reason-list issue-list">${(avoid.reasons || []).map((r) => `<li>${r}</li>`).join("")}</ul>
+    </div>` : ""}
     ${smartMoneyPanelHtml(sm)}
     ${checkerHubHtml(hub)}
     <div class="analysis-section" style="margin-top:16px"><h4>Trench Checks</h4></div>
@@ -468,9 +657,13 @@ function openTrenchesModal(t) {
 }
 
 function flattenTrenchesData(data) {
+  if (!data?.columns && data?.tokens) return data.tokens || [];
   if (!data?.columns) return data?.tokens || [];
   return [
+    ...(data.sixk_picks || []),
+    ...(data.alpha_picks || []),
     ...(data.safe_picks || []),
+    ...(data.columns?.sixk_radar || []),
     ...(data.columns?.new || []),
     ...(data.columns?.almost_bonded || []),
     ...(data.columns?.recently_bonded || []),
@@ -697,6 +890,8 @@ function openModal(token) {
       ` : ""}
     </div>
 
+    ${alphaSetupHtml(token.alphaSetup || {})}
+    ${tradePlanHtml(token.tradePlan || {})}
     ${smartMoneyPanelHtml(token.smartMoney || {})}
 
     <div class="analysis-section">
@@ -737,22 +932,67 @@ function openModal(token) {
 function scheduleAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   if ($("#autoRefresh").checked) {
-    refreshTimer = setInterval(() => runScan(false, true), 60000);
+    // 15s — $6k climbers leave the zone in minutes
+    refreshTimer = setInterval(() => runScan(false, true), 15000);
   }
+}
+
+const MAX_DISPLAY_MCAP = 25000;
+
+function filterEarlyMcap(tokens) {
+  return tokens.filter((t) => {
+    const m = t.mcap_usd ?? t.market?.pumpfun?.usd_market_cap ?? t.market?.marketCap ?? 0;
+    if (!m || m <= 0) return true; // brand new / unknown — keep
+    return m <= MAX_DISPLAY_MCAP;
+  });
 }
 
 async function loadFeedPreview(limit, maxAge) {
   try {
-    const res = await fetchWithTimeout(
-      `/api/padre/trenches/feed?per_column=${limit}&max_age_minutes=${maxAge}`,
-      20000
-    );
-    const data = await res.json();
-    const preview = flattenTrenchesData(data);
+    // Hit $6k radar first (fast, no RugCheck) so entry-zone tokens show immediately
+    const [sixkRes, feedRes] = await Promise.all([
+      fetchWithTimeout(`/api/padre/sixk?limit=${Math.max(24, limit * 3)}&max_age_minutes=${Math.max(40, maxAge)}`, 12000).catch(() => null),
+      fetchWithTimeout(
+        `/api/padre/trenches/feed?per_column=${limit}&max_age_minutes=${maxAge}`,
+        20000
+      ).catch(() => null),
+    ]);
+    let preview = [];
+    let sixkN = 0;
+    let sweetN = 0;
+    if (sixkRes) {
+      const sixk = await sixkRes.json();
+      const toks = sixk.tokens || [];
+      sixkN = toks.length;
+      sweetN = (sixk.sweet_zone || []).length;
+      preview = toks;
+    }
+    if (feedRes) {
+      const data = await feedRes.json();
+      preview = [...preview, ...flattenTrenchesData(data)];
+    }
+    const seen = new Set();
+    preview = filterEarlyMcap(preview).filter((t) => {
+      const k = t.tokenAddress;
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    // Sort: sweet $3.5–7.5k first
+    preview.sort((a, b) => {
+      const ma = a.mcap_usd || 0;
+      const mb = b.mcap_usd || 0;
+      const sa = ma >= 3500 && ma <= 7500 ? 0 : ma >= 2000 && ma <= 9000 ? 1 : 2;
+      const sb = mb >= 3500 && mb <= 7500 ? 0 : mb >= 2000 && mb <= 9000 ? 1 : 2;
+      return sa - sb || Math.abs(ma - 6000) - Math.abs(mb - 6000);
+    });
     if (preview.length) {
       lastTokens = preview;
       renderGrid(lastTokens);
-      setStatus(`Showing ${preview.length} tokens — RugCheck analysis in progress…`, true);
+      setStatus(
+        `$6K RADAR: ${sixkN} climbers (${sweetN} in sweet $3.5–7.5k) · ${preview.length} on screen — safety check…`,
+        true
+      );
       return true;
     }
   } catch {
@@ -792,8 +1032,28 @@ async function runScan(force = false, silent = false) {
     const data = await res.json();
     const isTrenches = Array.isArray(data.safe_picks) || data.columns;
     if (isTrenches) {
-      lastTokens = flattenTrenchesData(data);
+      // $6k entry + alpha first so we don't surface tokens only after $30k
+      lastTokens = filterEarlyMcap([
+        ...(data.sixk_picks || []),
+        ...(data.alpha_picks || []),
+        ...(data.safe_picks || []),
+        ...flattenTrenchesData(data),
+      ]);
+      const seen = new Set();
+      lastTokens = lastTokens.filter((tok) => {
+        const k = tok.tokenAddress;
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
       lastTokens.sort((a, b) => {
+        const aTier = (a.alphaSetup || {}).tier || "";
+        const bTier = (b.alphaSetup || {}).tier || "";
+        const alphaR = { MOON_SETUP: 0, ALPHA: 1, WATCH_ALPHA: 2, SPEC: 3 };
+        const mcapA = a.mcap_usd || 0;
+        const mcapB = b.mcap_usd || 0;
+        const earlyA = mcapA > 0 && mcapA <= 12000 ? 0 : 1;
+        const earlyB = mcapB > 0 && mcapB <= 12000 ? 0 : 1;
         const tier = { SAFE_ENTRY: 0, WATCH: 1, CAUTION: 2, HIGH_RISK: 3, AVOID: 4, UNSAFE: 5 };
         const chk = { PASS: 0, WARN: 1, FAIL: 2 };
         const smRank = (t) => {
@@ -807,32 +1067,48 @@ async function runScan(force = false, silent = false) {
         const av = chk[(a.checkerHub || {}).consensus?.verdict] ?? 3;
         const bv = chk[(b.checkerHub || {}).consensus?.verdict] ?? 3;
         return (
-          smRank(a) - smRank(b)
+          (alphaR[aTier] ?? 5) - (alphaR[bTier] ?? 5)
+          || ((b.alphaSetup || {}).score || 0) - ((a.alphaSetup || {}).score || 0)
+          || earlyA - earlyB
+          || (a.age_minutes ?? 999) - (b.age_minutes ?? 999)
+          || smRank(a) - smRank(b)
           || av - bv
           || (tier[a.safetyTier] ?? 9) - (tier[b.safetyTier] ?? 9)
           || (b.safetyScore || 0) - (a.safetyScore || 0)
-          || ((b.checkerHub || {}).consensus?.score || 0) - ((a.checkerHub || {}).consensus?.score || 0)
+          || mcapA - mcapB
         );
       });
     } else {
-      lastTokens = data.tokens || [];
+      lastTokens = filterEarlyMcap(data.tokens || []);
     }
     renderGrid(lastTokens);
     const visible = applyClientFilters(lastTokens).length;
     const t = new Date(data.scanned_at * 1000).toLocaleTimeString();
     const total = data.counts?.total ?? lastTokens.length;
+    const dropped = data.counts?.skipped_late_mcap ?? 0;
+    const alphaCount = data.counts?.alpha_picks
+      ?? lastTokens.filter((x) => (x.alphaSetup || {}).is_alpha).length;
     const safeCount = isTrenches ? (data.safe_picks || []).length : lastTokens.filter((x) => ["STRONG_INVEST", "INVEST"].includes(x.investSignal?.signal)).length;
     const narrCount = isTrenches ? (data.counts?.narrative_picks ?? 0) : lastTokens.filter((x) => x.socialSignals?.highlight).length;
     const chkPass = data.counts?.checker_pass ?? lastTokens.filter((x) => (x.checkerHub || {}).consensus?.verdict === "PASS").length;
     const chkFail = data.counts?.checker_fail ?? lastTokens.filter((x) => (x.checkerHub || {}).consensus?.verdict === "FAIL").length;
     const failNote = data.counts?.analyze_failures ? ` · ${data.counts.analyze_failures} analyze errors` : "";
+    const lateNote = dropped ? ` · dropped ${dropped} over $25K` : "";
     const staleNote = data.stale ? " · cached" : "";
     const filterNote = visible < total ? ` · showing ${visible}/${total}` : "";
+    const sixkN = data.counts?.sixk_live ?? lastTokens.filter((x) => {
+      const m = x.mcap_usd || 0;
+      return m >= 2000 && m <= 9000;
+    }).length;
+    const sweetN = data.counts?.sixk_sweet ?? lastTokens.filter((x) => {
+      const m = x.mcap_usd || 0;
+      return m >= 3500 && m <= 7500;
+    }).length;
     setStatus(
-      `${total} scanned · showing ${visible} · ${safeCount} safe entry · ` +
-      `${chkPass} checker PASS · ${chkFail} FAIL · ${narrCount} social${failNote} · ${t}` +
-      staleNote + filterNote +
-      `${$("#autoRefresh").checked ? " · auto-refresh on" : ""}`
+      `$6k radar: ${sixkN} live · ${sweetN} sweet zone · ${alphaCount} moon/alpha · showing ${visible}/${total} · ` +
+      `${safeCount} safe · ${chkPass} PASS · ${chkFail} FAIL${lateNote}${failNote} · ${t}` +
+      staleNote +
+      `${$("#autoRefresh").checked ? " · auto 15s" : ""}`
     );
     scheduleAutoRefresh();
   } catch (err) {
@@ -857,7 +1133,7 @@ async function runLookup() {
   setStatus(`Analyzing ${shorten(addr)} on ${chain}…`, true);
 
   try {
-    const res = await fetch(`/api/analyze/${encodeURIComponent(chain)}/${encodeURIComponent(addr)}`);
+    const res = await fetch(apiUrl(`/api/analyze/${encodeURIComponent(chain)}/${encodeURIComponent(addr)}`));
     if (!res.ok) throw new Error(await res.text());
     const token = await res.json();
     lastTokens = [token];
@@ -891,10 +1167,32 @@ document.addEventListener("click", (e) => {
 });
 
 initChains();
-showLoadingGrid();
-fetchWithTimeout("/api/health", 5000).then(() => {
+initBackendSync();
+showLoadingGrid(
+  getApiModeLabel() === "cloud" && !IS_CLOUD_HOST
+    ? "Loading from cloud (same as Render)…"
+    : "Scanning…"
+);
+fetchWithTimeout("/api/health", 15000).then(async (res) => {
+  try {
+    const h = await res.json();
+    const mode = getApiModeLabel();
+    const backend = h.deploy || mode;
+    setStatus(
+      `Backend: ${backend}${h.learning ? ` · learned ${h.learning.finalized || 0} tokens` : ""} · ready`,
+      true
+    );
+  } catch { /* ignore */ }
   runScan(false);
 }).catch(() => {
-  setStatus("Server not reachable — starting scan anyway…", true);
+  if (!IS_CLOUD_HOST && getApiModeLabel() === "cloud") {
+    setStatus("Cloud unreachable — falling back to local…", true);
+    localStorage.setItem("moon_api_mode", "local");
+    const sel = $("#apiBackend");
+    if (sel) sel.value = "local";
+    updateBackendPill();
+  } else {
+    setStatus("Server not reachable — starting scan anyway…", true);
+  }
   runScan(false);
 });

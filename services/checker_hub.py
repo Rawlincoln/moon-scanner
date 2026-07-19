@@ -192,6 +192,48 @@ def run_checker_hub(
         url=f"{SOLSCAN}/{mint}",
     )
 
+    # --- Liquidity / pull-risk checker ---
+    on_curve = bool(safety.get("on_bonding_curve"))
+    quote_sol = float(safety.get("lp_quote_sol") or 0)
+    lp_locked = float(safety.get("lp_locked_pct") or 0)
+    lp_unlocked = float(safety.get("lp_unlocked") or 0)
+    liq_fail = bool(
+        (on_curve and 0 < quote_sol < 0.5)
+        or (not on_curve and (lp_unlocked > 0 or (0 < lp_locked < 80)))
+        or (safety.get("avoid") or {}).get("flags")
+        and any(
+            f in ((safety.get("avoid") or {}).get("flags") or [])
+            for f in ("drained_curve", "lp_unlocked", "lp_not_locked")
+        )
+    )
+    liq_warn = bool(
+        not liq_fail
+        and (
+            (on_curve and quote_sol < 2.0)
+            or (not on_curve and lp_locked < 95)
+            or safety.get("creator_sold")
+        )
+    )
+    liq_details = [
+        f"Market: {safety.get('market_type') or ('pump curve' if on_curve else 'dex')}",
+        f"Exit SOL on curve/pool: {quote_sol:.3f}",
+        f"LP locked: {lp_locked:.0f}% · unlocked units: {lp_unlocked:g}",
+        f"Creator sold: {'YES ⚠' if safety.get('creator_sold') else 'No'}",
+    ]
+    liq_checker = _checker(
+        "liquidity",
+        "Liquidity / Pull Risk",
+        _status_from_flags(liq_fail, liq_warn, rug_unknown and not quote_sol),
+        "Drained / unlockable" if liq_fail else "Exit liquidity OK" if not liq_warn else "Thin liquidity",
+        details=liq_details,
+        issues=[
+            r
+            for r in (safety.get("issues") or [])
+            if any(k in r.lower() for k in ("liquidity", "lp ", "curve", "drained", "unlock"))
+        ][:4],
+        url=f"{RUGCHECK_WEB}/{mint}",
+    )
+
     # --- DexScreener market verification ---
     synthetic = bool(pair.get("is_pumpfun_synthetic"))
     vol_m5 = float((pair.get("volume") or {}).get("m5") or 0)
@@ -273,6 +315,7 @@ def run_checker_hub(
         bundle_checker,
         padre_checker,
         auth_checker,
+        liq_checker,
         holder_checker,
         dex_checker,
         pump_checker,
