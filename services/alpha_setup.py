@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from config import SCAN_MCAP_FOCUS_MAX_USD, SCAN_MCAP_MAX_USD, TARGET_MCAP_USD
+from services.mega_fingerprint import analyze_mega_fingerprint
 
 # Known launch communities that produced runners
 KNOWN_LAUNCH_DISCORD = (
@@ -230,6 +231,11 @@ def analyze_alpha_setup(
         score -= 25
         reasons.append("Entry trap socials (tweet link + no description)")
 
+    # Long AI pitch with no socials (CUBEMAN) — never a mega
+    if len(desc) >= 120 and not twitter and not website and not pump.get("telegram"):
+        score -= 35
+        reasons.append("Long pitch + zero socials — marketing shell / wash setup")
+
     # Launch community (uxento etc.)
     blob = f"{desc} {twitter} {website}".lower()
     if any(k in blob for k in KNOWN_LAUNCH_DISCORD):
@@ -309,26 +315,38 @@ def analyze_alpha_setup(
             score += 8
             reasons.append("Graduated with deep SOL liquidity")
 
-    # --- Momentum ---
-    if buy_ratio >= 1.3 and buys_m5 >= 10:
-        score += 14
-        reasons.append(f"Buy pressure {buy_ratio:.1f}x · {buys_m5} buys/5m")
-        badges.append({"id": "buys", "label": f"{buys_m5} buys/5m", "type": "momentum"})
-    elif buy_ratio >= 1.1 and buys_m5 >= 5:
+    # --- Momentum (require two-way market — "all green no sellers" is a trap) ---
+    real_two_way = buys_m5 >= 8 and sells_m5 >= 3 and 1.05 <= buy_ratio <= 3.2
+    if buys_m5 >= 10 and sells_m5 == 0:
+        score -= 30
+        reasons.append("All buys / zero sells — wash or no exit (not a moon)")
+    elif buy_ratio >= 4.0 and buys_m5 >= 20:
+        score -= 20
+        reasons.append(f"One-way buys {buy_ratio:.1f}x — wash risk, not organic moon")
+    elif real_two_way:
+        score += 16
+        reasons.append(
+            f"Real two-way market {buy_ratio:.1f}x · {buys_m5}B/{sells_m5}S — organic flow"
+        )
+        badges.append({"id": "buys", "label": f"{buys_m5}B/{sells_m5}S", "type": "momentum"})
+    elif buy_ratio >= 1.15 and buys_m5 >= 5 and sells_m5 >= 1:
         score += 8
-        reasons.append(f"Positive flow {buy_ratio:.1f}x")
+        reasons.append(f"Positive flow {buy_ratio:.1f}x with some sells")
 
-    if vol_m5 >= 2000:
-        score += 8
+    if vol_m5 >= 5000 and real_two_way:
+        score += 10
+        reasons.append(f"Strong organic vol ${vol_m5:,.0f}/5m")
+    elif vol_m5 >= 2000 and sells_m5 >= 2:
+        score += 6
         reasons.append(f"5m volume ${vol_m5:,.0f}")
     elif vol_m5 >= 500:
-        score += 4
+        score += 2
 
-    if pc_m5 >= 5:
+    if pc_m5 >= 5 and real_two_way:
         score += 6
         reasons.append(f"Climbing +{pc_m5:.0f}% (5m)")
     elif pc_m5 <= -40:
-        score -= 10  # already dumping hard
+        score -= 10
 
     # Smart money boost
     if smart_money.get("anti_rug_signal"):
@@ -373,58 +391,247 @@ def analyze_alpha_setup(
         reasons.append(f"MCap ${mcap:,.0f} — late for max profit")
 
     if age_min is not None:
-        if 2 <= age_min <= 25:
+        if 3 <= age_min <= 25:
             score += 6
             reasons.append(f"Age {age_min:.0f}m — survived snipers, still early")
-        elif age_min < 1.5:
-            score -= 3  # too fresh, high rug rate
+        elif age_min < 2:
+            score -= 6  # flash pumps die; real moons need a few minutes
+            reasons.append(f"Age {age_min:.1f}m — too fresh for mega conviction")
         elif age_min > 90:
             score -= 8
 
+    # --- Mega-moon structural stack (learned: big ATH had deep SOL + mid bags + holders) ---
+    # Historical big ATH (≥$25k) avg: quote_sol~18, mid_bags~4, holders~54
+    deep_curve = (on_curve and quote_sol >= 10) or (
+        not on_curve and quote_sol >= 40
+    )
+    solid_dist = len(mid_bags) >= 5 and holders >= 40 and 0 < max_non_pool <= 15
+    clean_social = (
+        bool(viral)
+        or _is_own_twitter(twitter)
+        or _is_real_website(website)
+    ) and not (twitter and "status/" in twitter.lower())
+    organic_flow = real_two_way or (
+        buys_m5 >= 12 and sells_m5 >= 4 and buy_ratio <= 3.5
+    )
+    mega_stack = deep_curve and solid_dist and clean_social and organic_flow
+    high_stack = (
+        (quote_sol >= 6 or (not on_curve and quote_sol >= 25))
+        and len(mid_bags) >= 4
+        and holders >= 25
+        and clean_social
+        and sells_m5 >= 2
+    )
+
+    if mega_stack:
+        score += 18
+        reasons.append(
+            "MEGA stack: deep SOL + distributed holders + clean social + two-way flow"
+        )
+        badges.append({"id": "mega", "label": "MEGA structure", "type": "mega"})
+    elif high_stack:
+        score += 10
+        reasons.append("High-ceiling structure forming (SOL + bags + social)")
+        badges.append({"id": "high", "label": "High ceiling", "type": "mega"})
+
+    # --- $10M–$100M fingerprint (historical multi‑$M common factors) ---
+    fingerprint = analyze_mega_fingerprint(
+        safety=safety,
+        pair=pair,
+        pump=pump,
+        social=social,
+        mcap_usd=mcap,
+        precomputed={
+            "own_twitter": _is_own_twitter(twitter),
+            "real_website": _is_real_website(website),
+            "viral": viral,
+            "on_curve": on_curve,
+            "quote_sol": quote_sol,
+            "holders": holders,
+            "mid_bags": len(mid_bags),
+            "max_wallet_pct": max_non_pool,
+            "buys_m5": buys_m5,
+            "sells_m5": sells_m5,
+            "age_min": age_min,
+        },
+    )
+    fp_score = int(fingerprint.get("score") or 0)
+    fp_tier = str(fingerprint.get("tier") or "NONE")
+    if fp_score >= 65:
+        score += 12 if fp_tier == "MEGA_10M" else 8
+        reasons.append(fingerprint.get("summary") or f"$10M fingerprint {fp_score}")
+        for b in fingerprint.get("badges") or []:
+            badges.append(b)
+    elif fp_score >= 52:
+        score += 4
+        reasons.append(f"$10M fingerprint building ({fp_score})")
+    for tag in (fingerprint.get("narrative_tags") or [])[:2]:
+        reasons.append(f"Narrative tag: {tag.replace('_', ' ')}")
+
+    # Cap score if missing mega ingredients (prevents false 100s that top <$20k)
+    if not deep_curve and score > 70:
+        score = min(score, 68)
+        reasons.append("Capped — need deeper curve SOL for 100k+ moons")
+    if not solid_dist and score > 65:
+        score = min(score, 62)
+        reasons.append("Capped — need more mid-size holders for mega run")
+
     score = int(max(0, min(100, score)))
 
-    # Tier recommendation
-    if score >= 72 and entry_window in ("ultra_early", "early", "sweet") and on_curve:
+    # Ceiling estimate (what this setup can reach if it works)
+    if fp_tier == "MEGA_10M" and mega_stack and entry_window in (
+        "ultra_early", "early", "sweet"
+    ):
+        ceiling = "10M_to_100M"
+        ceiling_label = "$10M–$100M+"
+    elif fp_tier == "HIGH_10M" and (mega_stack or high_stack) and entry_window != "late":
+        ceiling = "1M_to_10M"
+        ceiling_label = "$1M–$10M path"
+    elif mega_stack and score >= 78 and entry_window in (
+        "ultra_early", "early", "sweet"
+    ):
+        ceiling = "100k_to_1M"
+        ceiling_label = "$100K–$1M+"
+    elif high_stack and score >= 70 and entry_window != "late":
+        ceiling = "50k_to_250k"
+        ceiling_label = "$50K–$250K"
+    elif score >= 62 and entry_window in ("ultra_early", "early", "sweet"):
+        ceiling = "20k_to_80k"
+        ceiling_label = "$20K–$80K"
+    elif score >= 48:
+        ceiling = "under_25k"
+        ceiling_label = "likely under $25K"
+    else:
+        ceiling = "low"
+        ceiling_label = "low ceiling / skip"
+
+    # Tier — only ENTER on high/mega ceiling (user complaint: only 1–2 hit 50k)
+    early_ok = entry_window in ("ultra_early", "early", "sweet")
+    if (
+        fp_tier == "MEGA_10M"
+        and mega_stack
+        and score >= 80
+        and early_ok
+        and on_curve
+    ):
+        tier = "MEGA_MOON"
+        signal = "STRONG_INVEST"
+        summary = (
+            f"MEGA $10M+ ({score}) — fingerprint matches multi‑$M historicals "
+            f"(narrative + deep SOL + distribution + organic flow). "
+            f"Ceiling {ceiling_label}. Enter ${mcap:,.0f}."
+        )
+    elif mega_stack and score >= 78 and early_ok and on_curve:
+        tier = "MEGA_MOON"
+        signal = "STRONG_INVEST"
+        summary = (
+            f"MEGA MOON ({score}) — structure matches historical big runners "
+            f"(deep SOL + distribution + organic flow). "
+            f"Ceiling {ceiling_label}. Enter ${mcap:,.0f}."
+        )
+    elif high_stack and score >= 72 and early_ok:
         tier = "MOON_SETUP"
         signal = "STRONG_INVEST"
         summary = (
-            f"MOON SETUP ({score}) — KIWI-style early profile. "
-            f"Enter now for max upside while mcap ${mcap:,.0f}."
+            f"MOON SETUP ({score}) — high ceiling {ceiling_label}. "
+            f"Enter early at ${mcap:,.0f}."
         )
-    elif score >= 60 and entry_window in ("ultra_early", "early", "sweet"):
+    elif score >= 68 and early_ok and solid_dist and quote_sol >= 5:
         tier = "ALPHA"
         signal = "INVEST"
         summary = (
-            f"ALPHA ({score}) — strong early narrative + structure. "
-            f"MCap ${mcap:,.0f}."
+            f"ALPHA ({score}) — solid but not full mega stack. "
+            f"Ceiling {ceiling_label}."
         )
-    elif score >= 48 and entry_window != "late":
+    elif score >= 55 and entry_window != "late" and (
+        high_stack or fp_tier in ("HIGH_10M", "BUILDING_10M")
+    ):
         tier = "WATCH_ALPHA"
         signal = "WATCH"
-        summary = f"Building alpha ({score}) — wait for volume/holders confirm"
-    elif score >= 40:
+        summary = (
+            f"Building mega ({score}) — wait for more holders/SOL. "
+            f"Potential {ceiling_label}."
+        )
+    elif score >= 48 and entry_window != "late":
         tier = "SPEC"
         signal = "WATCH"
-        summary = f"Speculative ({score}) — incomplete setup"
+        summary = (
+            f"Spec only ({score}) — ceiling {ceiling_label}. "
+            "Most of these die under $20k; do not size large."
+        )
     else:
         tier = "WEAK"
         signal = "SKIP"
-        summary = f"Weak alpha score ({score}) — pass"
+        summary = f"Weak ({score}) — {ceiling_label}. Pass."
 
-    is_alpha = tier in ("MOON_SETUP", "ALPHA")
-    confidence = min(92, score) if is_alpha else max(20, score // 2)
+    # Only highlight high-conviction moons (not every mediocre alpha)
+    is_alpha = tier in ("MEGA_MOON", "MOON_SETUP", "ALPHA")
+    is_mega = tier == "MEGA_MOON"
+    is_mega_10m = fp_tier in ("MEGA_10M", "HIGH_10M") and is_mega
+    confidence = min(92, score + 2) if is_mega_10m else (
+        min(90, score) if is_mega else (
+            min(82, score - 5) if is_alpha else max(15, score // 2)
+        )
+    )
+
+    # TP mcap targets — prefer $10M ladder when fingerprint matches
+    tp_targets = {
+        "tp1_mcap": round(max(mcap * 2.5, 15_000)) if mcap else 15_000,
+        "tp2_mcap": round(max(mcap * 8, 50_000)) if mcap else 50_000,
+        "tp3_mcap": round(max(mcap * 25, 150_000)) if mcap else 150_000,
+        "moon_mcap": 500_000 if is_mega else 100_000,
+    }
+    fp_ladder = fingerprint.get("tp_ladder") or {}
+    if ceiling == "10M_to_100M" and fp_ladder:
+        tp_targets.update(
+            {
+                "tp1_mcap": fp_ladder.get("tp1_mcap", 15_000),
+                "tp2_mcap": fp_ladder.get("tp2_mcap", 100_000),
+                "tp3_mcap": fp_ladder.get("tp3_mcap", 1_000_000),
+                "moon_mcap": fp_ladder.get("moon_mcap", 10_000_000),
+                "mega_band_mcap": fp_ladder.get("mega_band_mcap", 100_000_000),
+                "sell_pct": fp_ladder.get("sell_pct"),
+                "notes": fp_ladder.get("notes"),
+            }
+        )
+    elif ceiling == "1M_to_10M" and fp_ladder:
+        tp_targets.update(
+            {
+                "tp1_mcap": fp_ladder.get("tp1_mcap", 15_000),
+                "tp2_mcap": fp_ladder.get("tp2_mcap", 100_000),
+                "tp3_mcap": fp_ladder.get("tp3_mcap", 500_000),
+                "moon_mcap": fp_ladder.get("moon_mcap", 10_000_000),
+                "sell_pct": fp_ladder.get("sell_pct"),
+            }
+        )
+    elif ceiling == "100k_to_1M":
+        tp_targets.update(
+            {"tp2_mcap": 100_000, "tp3_mcap": 350_000, "moon_mcap": 1_000_000}
+        )
+    elif ceiling == "50k_to_250k":
+        tp_targets.update(
+            {"tp2_mcap": 50_000, "tp3_mcap": 150_000, "moon_mcap": 250_000}
+        )
 
     return {
         "is_alpha": is_alpha,
-        "highlight": is_alpha or tier == "WATCH_ALPHA",
+        "is_mega": is_mega,
+        "is_mega_10m": is_mega_10m,
+        "highlight": is_alpha or tier == "WATCH_ALPHA" or fp_tier in ("MEGA_10M", "HIGH_10M"),
         "score": score,
         "tier": tier,
         "signal": signal,
         "summary": summary,
-        "reasons": reasons[:10],
-        "badges": badges[:8],
+        "reasons": reasons[:14],
+        "badges": badges[:12],
         "entry_window": entry_window,
         "confidence": confidence,
+        "ceiling": ceiling,
+        "ceiling_label": ceiling_label,
+        "mega_stack": mega_stack,
+        "high_stack": high_stack,
+        "tp_mcap_targets": tp_targets,
+        "megaFingerprint": fingerprint,
         "metrics": {
             "mcap": round(mcap),
             "holders": holders,
@@ -432,11 +639,17 @@ def analyze_alpha_setup(
             "max_wallet_pct": round(max_non_pool, 2),
             "quote_sol": round(quote_sol, 3),
             "buys_m5": buys_m5,
+            "sells_m5": sells_m5,
             "buy_ratio": round(buy_ratio, 2),
+            "real_two_way": real_two_way,
             "viral": viral,
             "own_twitter": _is_own_twitter(twitter),
             "real_website": _is_real_website(website),
             "on_curve": on_curve,
             "age_min": round(age_min, 1) if age_min is not None else None,
+            "deep_curve": deep_curve,
+            "solid_dist": solid_dist,
+            "fingerprint_score": fp_score,
+            "fingerprint_tier": fp_tier,
         },
     }

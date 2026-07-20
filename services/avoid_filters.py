@@ -9,6 +9,15 @@ Learned from real rugs:
     * status-link Twitter only, empty desc, 0 replies
     * adult-bait name, dust holders, creator dumped, ~0.16 SOL left
     * RugCheck still "clean" — must catch BEFORE entry, not after dump
+  BTU7…pump (USWR) — "all green, no sellers":
+    * polished pitch + own X + website — looks institutional
+    * 99.9% curve, only dust holders (0.05% max), 27 holders
+    * creator dumped, curve ~0.04 SOL, ATH crash
+    * extreme one-way buys (2676 buys / 560 sells) then chart "green"
+  9Sj7…pump (CUBEMAN) — wash + AI pitch, still "green":
+    * long AI community copy, ZERO twitter/telegram/website
+    * 3355 buys vs 64 sells (extreme one-way), creator balance 0
+    * many mid bags look "distributed" but flow is fake
 """
 
 from __future__ import annotations
@@ -23,6 +32,8 @@ BLOCKED_MINTS: set[str] = {
     "FAAnKpATxZuWWsCbxWZ5yaNn9CyCj4d9Wnqzhhdqpump",
     "62pzwoXyHi5Z1iEdD67RDPTT12spZ4ph8WsLU5y8pump",  # Baby Corn flash P&D
     "5ocgBRqLyQxZEvtAYcX1nXeVhAj1cuCHi2ZfSZKVpump",  # CEO of Sex — status-link P&D
+    "BTU78ZNs11eDYsaUXysXnEPEJrCDYDobAkTfQQafpump",  # USWR — all green, no real sellers/holders
+    "9Sj7Yi6oYCATrjC68or2Rqk3D6YkgKaqc9UepDogpump",  # CUBEMAN — AI pitch, no socials, wash buys, creator dumped
 }
 
 # Adult-bait / shock names — almost always pure attention rugs (CEO of Sex, etc.)
@@ -342,21 +353,139 @@ def analyze_avoid_flags(
                 f"Flash pump-dump: ATH ${ath:,.0f} in {mins_to_ath:.1f}m, "
                 f"now ${cur:,.0f} (−{dump_frac*100:.0f}%)"
             )
-        elif dump_frac >= 0.70 and mins_to_ath <= 30:
+        elif dump_frac >= 0.55 and (mins_to_ath <= 60 or len(meaningful) <= 1):
+            # USWR-style: −55%+ from ATH with empty book still counts
             flags.append("post_ath_crash")
             reasons.append(
                 f"Crashed {dump_frac*100:.0f}% from ATH ${ath:,.0f} "
-                f"within {mins_to_ath:.0f}m — likely scam exit"
+                f"— exit already happened"
             )
 
-    # --- 5f. Active sell pressure (dex txns) ---
-    txns = (pair.get("txns") or {}).get("m5") or {}
-    buys = int(txns.get("buys") or 0)
-    sells = int(txns.get("sells") or 0)
-    if sells >= 25 and sells > buys * 1.05:
+    # --- 5f. Buy/sell flow traps (honeypot / wash / "all green no sellers") ---
+    all_tx = pair.get("txns") or {}
+    windows = []
+    for win in ("m5", "h1", "h6", "h24"):
+        t = all_tx.get(win) or {}
+        b, s = int(t.get("buys") or 0), int(t.get("sells") or 0)
+        if b or s:
+            windows.append((win, b, s))
+
+    for win, buys, sells in windows:
+        # Zero sellers with meaningful buy count = cannot exit / wash only
+        if buys >= 12 and sells == 0:
+            flags.append("zero_sellers")
+            reasons.append(
+                f"All green / no sellers ({buys} buys, 0 sells in {win}) "
+                "— honeypot or fake volume, do not enter"
+            )
+            break
+        if buys >= 8 and sells == 0 and win in ("m5", "h1"):
+            flags.append("zero_sellers")
+            reasons.append(
+                f"No sellers in {win} ({buys} buys) — cannot verify exit"
+            )
+            break
+
+    # Extreme one-way buys (wash trading paints green chart)
+    for win, buys, sells in windows:
+        ratio = buys / max(sells, 1)
+        if buys >= 40 and ratio >= 4.0:
+            flags.append("wash_buys")
+            reasons.append(
+                f"One-way buys: {buys} buys vs {sells} sells ({win}) "
+                "— wash volume / no real market"
+            )
+            break
+        # CUBEMAN-class: hundreds of buys, almost no sells
+        if buys >= 200 and ratio >= 8.0:
+            flags.append("extreme_wash")
+            reasons.append(
+                f"Extreme wash: {buys} buys / {sells} sells ({win}, {ratio:.0f}x) "
+                "— chart is fake green"
+            )
+            break
+        if buys >= 500 and sells <= max(20, buys * 0.05):
+            flags.append("extreme_wash")
+            reasons.append(
+                f"Bot buy flood: {buys} buys vs {sells} sells ({win}) "
+                "— skip even if holders look distributed"
+            )
+            break
+
+    # Active dump
+    m5 = all_tx.get("m5") or {}
+    buys_m5 = int(m5.get("buys") or 0)
+    sells_m5 = int(m5.get("sells") or 0)
+    if sells_m5 >= 25 and sells_m5 > buys_m5 * 1.05:
         flags.append("sell_pressure")
         reasons.append(
-            f"Selling dominates: {sells} sells vs {buys} buys (5m) — dump in progress"
+            f"Selling dominates: {sells_m5} sells vs {buys_m5} buys (5m) — dump in progress"
+        )
+
+    # Creator already out while chart still green (CUBEMAN)
+    if (
+        on_curve
+        and creator_sold
+        and creator_bal == 0
+        and creator_pct < 0.05
+        and (
+            sells_m5 < buys_m5 * 0.25
+            or any(b >= 50 and b / max(s, 1) >= 3 for _, b, s in windows)
+        )
+    ):
+        flags.append("dev_out_green_chart")
+        reasons.append(
+            "Dev already sold while buys still dominate — exit liquidity is a trap"
+        )
+
+    # --- 5g. Polished narrative + empty holder book (USWR) ---
+    max_non_pool = max(meaningful) if meaningful else 0.0
+    for h in top:
+        pct = _safe_float(h.get("pct"))
+        if 0 < pct < _POOL_PCT_MIN and not h.get("insider"):
+            max_non_pool = max(max_non_pool, pct)
+    if (
+        on_curve
+        and holders < 80
+        and len(meaningful) == 0
+        and max_non_pool < 0.5
+        and (has_real_social or len(desc) >= 60)
+    ):
+        flags.append("empty_distribution")
+        reasons.append(
+            f"Looks marketed green but empty book — "
+            f"{holders} holders, max bag {max_non_pool:.2f}% outside curve "
+            "(wash / no real free float)"
+        )
+
+    # --- 5h. AI pitch / long copy with ZERO socials (CUBEMAN) ---
+    # Generic "community vibes" essay + no X/TG/web = marketing shell
+    if (
+        len(desc) >= 120
+        and not twitter
+        and not website
+        and not pump.get("telegram")
+        and replies == 0
+    ):
+        flags.append("ai_pitch_no_socials")
+        reasons.append(
+            "Long pitch + zero socials (no X/TG/web) — AI/marketing shell, not organic"
+        )
+
+    # Mid-bag cluster + wash + no socials = bot farm book that looks "distributed"
+    if (
+        len(meaningful) >= 5
+        and not has_real_social
+        and replies == 0
+        and any(
+            b >= 100 and b / max(s, 1) >= 5
+            for _, b, s in windows
+        )
+    ):
+        flags.append("bot_holder_cluster")
+        reasons.append(
+            f"{len(meaningful)} mid bags + wash buys + no socials "
+            "— bot farm distribution, not a real community"
         )
 
     # --- 6. Insider / honeypot / rugged ---
@@ -406,6 +535,13 @@ def analyze_avoid_flags(
         "entry_trap_social",
         "adult_bait",
         "parabolic_no_community",
+        "zero_sellers",
+        "wash_buys",
+        "extreme_wash",
+        "empty_distribution",
+        "ai_pitch_no_socials",
+        "bot_holder_cluster",
+        "dev_out_green_chart",
     }
     hard = bool(hard_set & set(flags))
 

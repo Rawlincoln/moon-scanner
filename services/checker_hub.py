@@ -238,25 +238,56 @@ def run_checker_hub(
     synthetic = bool(pair.get("is_pumpfun_synthetic"))
     vol_m5 = float((pair.get("volume") or {}).get("m5") or 0)
     liq = float((pair.get("liquidity") or {}).get("usd") or 0)
-    dex_fail = False
-    dex_warn = synthetic or vol_m5 < 100
+    all_tx = pair.get("txns") or {}
+    m5_txns = all_tx.get("m5") or {}
+    h1_txns = all_tx.get("h1") or {}
+    h6_txns = all_tx.get("h6") or {}
+    buys_m5 = int(m5_txns.get("buys") or 0)
+    sells_m5 = int(m5_txns.get("sells") or 0)
+    buys_h6 = int(h6_txns.get("buys") or h1_txns.get("buys") or 0)
+    sells_h6 = int(h6_txns.get("sells") or h1_txns.get("sells") or 0)
+    zero_sell = (buys_m5 >= 8 and sells_m5 == 0) or (
+        buys_h6 >= 20 and sells_h6 == 0
+    )
+    wash = buys_h6 >= 40 and buys_h6 / max(sells_h6, 1) >= 4.0
+    dex_fail = zero_sell or wash
+    dex_warn = synthetic or vol_m5 < 100 or (
+        not dex_fail and sells_m5 == 0 and buys_m5 > 0
+    )
     dex_details = []
     if not synthetic:
-        m5_txns = (pair.get("txns") or {}).get("m5") or {}
         dex_details = [
             f"5m volume ${vol_m5:,.0f}",
             f"Liquidity ${liq:,.0f}",
-            f"Buys {m5_txns.get('buys', 0)} / sells {m5_txns.get('sells', 0)} (5m)",
-            "Real DexScreener trade data ✓",
+            f"Buys {buys_m5} / sells {sells_m5} (5m)",
+            f"Buys {buys_h6} / sells {sells_h6} (h1/h6)",
         ]
+        if zero_sell:
+            dex_details.append("⚠ ZERO SELLERS — honeypot / fake green chart")
+        if wash:
+            dex_details.append("⚠ One-way buy flow — wash volume risk")
     else:
         dex_details = ["No DexScreener pair — too early to verify volume"]
+    dex_issues = []
+    if zero_sell:
+        dex_issues.append("No sellers with active buys — cannot verify exit")
+    if wash:
+        dex_issues.append("Extreme buy-only ratio — likely wash trading")
     dex_checker = _checker(
         "dexscreener",
         "DexScreener",
         _status_from_flags(dex_fail, dex_warn, synthetic),
-        "Verified trades" if not synthetic and not dex_warn else "Synthetic / low vol" if synthetic else "Low activity",
+        (
+            "No sellers / wash buys"
+            if dex_fail
+            else "Verified trades"
+            if not synthetic and not dex_warn
+            else "Synthetic / low vol"
+            if synthetic
+            else "Low activity"
+        ),
         details=dex_details,
+        issues=dex_issues,
         url=pair.get("url") or f"{DEXSCREENER}/{mint}",
     )
 

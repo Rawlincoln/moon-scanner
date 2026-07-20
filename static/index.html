@@ -19,7 +19,7 @@
       <span class="logo-icon">◈</span>
       <div>
         <h1>Moon Scanner</h1>
-        <p class="tagline">Learns every token · Entry/TP/SL · $6K radar</p>
+        <p class="tagline">Near migration first · Under $25k · Early lottery last</p>
       </div>
     </div>
     <div class="header-stats" id="headerStats">
@@ -93,9 +93,17 @@
     </div>
   </section>
 
-  <div class="status-bar" id="statusBar">Ready — only recommends tokens approaching $6K with real buyers (rejects sub-$4K rugs)</div>
+  <div class="status-bar" id="statusBar">Ready — Near Migration (can graduate ~$69k) ranked first; $6k lottery is last</div>
 
-  <main class="token-grid" id="tokenGrid"></main>
+  <main id="tokenMain">
+    <div class="section-nav" id="sectionNav" hidden>
+      <button type="button" class="sec-btn active" data-sec="all">All</button>
+      <button type="button" class="sec-btn" data-sec="near_migration">Near Migration</button>
+      <button type="button" class="sec-btn" data-sec="under_25k">Under $25k</button>
+      <button type="button" class="sec-btn" data-sec="early_lottery">Early Lottery</button>
+    </div>
+    <div class="token-sections" id="tokenSections"></div>
+  </main>
 
   <div class="modal-overlay" id="modalOverlay">
     <div class="modal" id="modal">

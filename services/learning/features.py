@@ -153,6 +153,21 @@ def extract_features(
         "has_desc": _b(len((pump.get("description") or "").strip()) >= 8),
     }
 
+    # $10M fingerprint flags (from alpha_setup.megaFingerprint)
+    fp = alpha.get("megaFingerprint") or {}
+    fp_tier = str(fp.get("tier") or alpha.get("metrics", {}).get("fingerprint_tier") or "NONE")
+    fp_check = fp.get("checklist") or {}
+    feats["mega_fingerprint"] = fp_tier
+    feats["organic_two_way"] = _b(fp_check.get("organic_two_way") or sells >= 3 and buys >= 8)
+    feats["clean_social_stack"] = _b(fp_check.get("clean_social") or feats.get("own_twitter"))
+    feats["deep_curve_sol"] = _b(fp_check.get("deep_curve") or quote_sol >= 10)
+    feats["solid_distribution"] = _b(fp_check.get("solid_dist") or (mid >= 5 and holders >= 40))
+    feats["external_narrative"] = _b(
+        fp_check.get("external_narrative") or feats.get("has_viral")
+    )
+    for tag in (fp.get("narrative_tags") or [])[:3]:
+        feats[f"narrative_{tag}"] = 1
+
     # Sniper from trench-style heuristic
     feats["sniper_risk"] = (
         "high" if max_non_pool > 22 else "med" if max_non_pool > 12 else "low"
@@ -221,4 +236,28 @@ def feature_keys_for_learning(feats: dict) -> list[str]:
     elif br < 0.95 and int(feats.get("sells_m5") or 0) >= 20:
         keys.append("sell_pressure")
 
+    # Mega fingerprint categorical
+    fp_tier = str(feats.get("mega_fingerprint") or "NONE")
+    if fp_tier and fp_tier != "NONE":
+        keys.append(f"mega_fingerprint:{fp_tier}")
+    for flag in (
+        "organic_two_way",
+        "clean_social_stack",
+        "deep_curve_sol",
+        "solid_distribution",
+        "external_narrative",
+    ):
+        if feats.get(flag) and flag not in keys:
+            keys.append(flag)
+    for k, v in feats.items():
+        if k.startswith("narrative_") and v:
+            tag = f"narrative:{k.replace('narrative_', '', 1)}"
+            if tag not in keys:
+                keys.append(tag)
+            # drop raw narrative_* binary key if present
+            if k in keys:
+                keys.remove(k)
+
+    # Drop duplicate mega_fingerprint raw if categorical form exists
+    keys = list(dict.fromkeys(keys))
     return keys

@@ -59,10 +59,17 @@ EXCLUDE_GRADUATED_DEFAULT = True
 EARLY_MCAP_MIN_USD = 1_500
 EARLY_MCAP_MAX_USD = 65_000
 
-# Drop tokens already past early window (user complaint: seeing $25k+ too late)
+# Early / under-$25k band (lottery + mid-curve structure)
 SCAN_MCAP_MAX_USD = 25_000
-# Prefer analyzing / ranking under this first
+# Prefer analyzing / ranking under this first for early section
 SCAN_MCAP_FOCUS_MAX_USD = 12_000
+# pump.fun graduation is ~$69k — near-migration tokens live ABOVE $25k
+GRADUATION_MCAP_USD = 69_000
+MIGRATION_MCAP_MAX_USD = 78_000  # allow almost-bonded through graduation
+# Bonding % toward Raydium/PumpSwap migration
+MIGRATION_CLIMBING_MIN_PCT = 15.0  # ~$10k+ — mid-curve climb (under $25k lane)
+MIGRATION_NEAR_MIN_PCT = 40.0  # ~$28k+ — primary "can migrate" zone
+MIGRATION_ALMOST_MIN_PCT = 55.0  # ~$38k+ — almost bonded
 # Skip DexScreener smart-money order fetch during bulk trenches (saves ~0.5–1s/token)
 FAST_SCAN_SKIP_DEX_ORDERS = True
 
@@ -76,10 +83,13 @@ SIXK_ENTRY_SWEET_MAX = 7_500
 BACKGROUND_SCAN_INTERVAL_SEC = 18
 BACKGROUND_SCAN_PER_COLUMN = 8
 
-# Pro trencher — only recommend tokens approaching $6k with real momentum
+# Pro trencher — early band still uses ~$6k; migration track uses bonding %
 TARGET_MCAP_USD = 6_000
 MCAP_INVEST_MIN_USD = 3_500  # start flagging earlier than $4k
 MCAP_INVEST_MAX_USD = 8_500  # still "entry" slightly past 6k
+# Under-$25k "structure" band (between lottery and near-migration)
+UNDER25K_MIN_USD = 8_000
+UNDER25K_MAX_USD = 25_000
 MIN_SURVIVAL_AGE_MINUTES = 0.75
 MIN_TOKEN_HOLDERS = 12
 MIN_DEX_VOL_M5_USD = 600

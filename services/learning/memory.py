@@ -281,10 +281,29 @@ class LearningMemory:
                 ).fetchone()
                 if not row:
                     return
-                # Only learn once per final outcome (allow upgrade SCAM over NEUTRAL)
+                # Learn once; allow upgrades toward better outcomes (NEUTRAL→WINNER→MEGA)
                 prev = row["outcome"]
-                if prev in ("WINNER", "RUNNER", "SCAM", "RUGGED", "DUMP") and prev == outcome:
+                _rank = {
+                    None: 0,
+                    "": 0,
+                    "NEUTRAL": 1,
+                    "DUMP": 2,
+                    "SCAM": 3,
+                    "RUGGED": 3,
+                    "RUNNER": 4,
+                    "WINNER": 5,
+                    "SUPER": 6,
+                    "MEGA": 7,
+                }
+                if prev == outcome:
                     return
+                # Don't downgrade MEGA/SUPER/WINNER to weaker labels
+                if _rank.get(prev, 0) >= 5 and _rank.get(outcome, 0) < _rank.get(prev, 0):
+                    return
+                # Same-tier bad labels already final
+                if prev in ("SCAM", "RUGGED", "DUMP") and outcome in ("SCAM", "RUGGED", "DUMP", "NEUTRAL"):
+                    if prev == outcome or _rank.get(outcome, 0) <= _rank.get(prev, 0):
+                        return
                 first = float(row["first_mcap"] or 0)
                 ath = float(row["ath_mcap"] or 0)
                 mult = max_multiple or (ath / first if first > 0 else 0)
@@ -302,7 +321,9 @@ class LearningMemory:
                         feats = json.loads(row["entry_features"])
                     except Exception:
                         feats = {}
-                if feats:
+                # Only inject feature_stats when first finalizing or upgrading rank
+                inject = prev is None or prev == "" or _rank.get(outcome, 0) > _rank.get(prev, 0)
+                if feats and inject:
                     from services.learning.features import feature_keys_for_learning
 
                     for fk in feature_keys_for_learning(feats):
@@ -316,6 +337,32 @@ class LearningMemory:
                             """,
                             (fk, outcome, mult),
                         )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_meta(self, key: str) -> str | None:
+        with self._lock:
+            conn = self._conn()
+            try:
+                row = conn.execute(
+                    "SELECT value FROM meta WHERE key=?", (key,)
+                ).fetchone()
+                return row["value"] if row else None
+            finally:
+                conn.close()
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self._lock:
+            conn = self._conn()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO meta(key, value) VALUES(?,?)
+                    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                    """,
+                    (key, value),
+                )
                 conn.commit()
             finally:
                 conn.close()

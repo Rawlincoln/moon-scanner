@@ -61,6 +61,16 @@ def classify_outcome(
         first_mcap = max(last_mcap, 1)
     mult = ath_mcap / first_mcap if first_mcap > 0 else 0
     crash = last_mcap / ath_mcap if ath_mcap > 0 else 1
+    # Absolute ATH tiers for mega learning
+    # Absolute ATH tiers — true multi‑$M first, then local mega
+    if ath_mcap >= 10_000_000 and mult >= 2.0:
+        return "MEGA"
+    if ath_mcap >= 1_000_000 and mult >= 2.0:
+        return "SUPER"
+    if ath_mcap >= 100_000 and mult >= 2.0:
+        return "SUPER"
+    if ath_mcap >= 50_000 and mult >= 2.5:
+        return "WINNER"
     if mult >= 3.0 and crash > 0.25:
         return "WINNER"
     if mult >= 1.5 and crash > 0.2:
@@ -272,29 +282,11 @@ class LearningEngine:
                 await asyncio.sleep(0.05)
         return updated
 
-    def seed_known_examples(self) -> int:
-        """Seed model with documented winners/scams so learning starts non-empty."""
-        seeds = [
-            # winners / runners
-            {
-                "mint": "FUY6RbdfrDfa82y1AS5ZQRtaoSr1ZVTGD2EkN11bpump",
-                "name": "The Addiction Bird",
-                "symbol": "KIWI",
-                "first_mcap": 5200,
-                "ath_mcap": 62489,
-                "outcome": "WINNER",
-                "features": {
-                    "has_viral": 1,
-                    "own_twitter": 1,
-                    "real_website": 1,
-                    "mid_bags_ge_5": 1,
-                    "holders_ge_100": 1,
-                    "mcap_bin:sweet_3.5_7.5k": 1,
-                    "alpha_bin:alpha_high": 1,
-                    "curve_sol_ge_5": 1,
-                    "buy_ratio_ge_1.3": 1,
-                },
-            },
+    def seed_known_examples(self, force: bool = False) -> int:
+        """Seed model with documented winners/scams + historical $10M+ megas."""
+        from services.learning.mega_seeds import MEGA_SEEDS, MEGA_SEEDS_VERSION
+
+        seeds: list[dict] = [
             # scams user flagged
             {
                 "mint": "62pzwoXyHi5Z1iEdD67RDPTT12spZ4ph8WsLU5y8pump",
@@ -372,13 +364,63 @@ class LearningEngine:
                     "mcap_bin:under_3.5k": 1,
                 },
             },
+            {
+                "mint": "BTU78ZNs11eDYsaUXysXnEPEJrCDYDobAkTfQQafpump",
+                "name": "USWR",
+                "symbol": "USWR",
+                "first_mcap": 6000,
+                "ath_mcap": 12000,
+                "outcome": "SCAM",
+                "features": {
+                    "own_twitter": 1,
+                    "real_website": 1,
+                    "holders_lt_15": 1,
+                    "mid_bags_lt_3": 1,
+                    "curve_sol_drained": 1,
+                    "buy_ratio_ge_1.3": 1,
+                    "mcap_bin:sweet_3.5_7.5k": 1,
+                },
+                "notes": "all-green wash / empty float",
+            },
+            {
+                "mint": "9Sj7Yi6oYCATrjC68or2Rqk3D6YkgKaqc9UepDogpump",
+                "name": "CUBEMAN",
+                "symbol": "CUBEMAN",
+                "first_mcap": 5000,
+                "ath_mcap": 15000,
+                "outcome": "SCAM",
+                "features": {
+                    "holders_ge_40": 1,
+                    "mid_bags_ge_5": 1,
+                    "creator_sold": 1,
+                    "buy_ratio_ge_1.3": 1,
+                    "mcap_bin:sweet_3.5_7.5k": 1,
+                },
+                "notes": "AI pitch + zero socials + wash",
+            },
         ]
+        # Historical multi‑$M tokens (idealized early fingerprint)
+        seeds.extend(MEGA_SEEDS)
+
+        ver = self.memory.get_meta("mega_seeds_version")
+        reseed_megas = force or ver != MEGA_SEEDS_VERSION
         n = 0
         for s in seeds:
             existing = self.memory.get_token(s["mint"])
-            if existing and existing.get("outcome"):
+            is_mega_seed = s.get("outcome") in ("MEGA", "SUPER") or (
+                float(s.get("ath_mcap") or 0) >= 1_000_000
+            )
+            already_same = (
+                existing
+                and existing.get("outcome") == s["outcome"]
+                and float(existing.get("ath_mcap") or 0) >= float(s.get("ath_mcap") or 0) * 0.5
+            )
+            if already_same and not force:
                 continue
-            # Build fake feature dict for keys
+            inject_stats = not (
+                existing and existing.get("outcome") == s["outcome"]
+            )
+            # Build feature dict for storage + key extraction
             feats = {
                 "has_viral": 0,
                 "own_twitter": 0,
@@ -388,25 +430,41 @@ class LearningEngine:
                 "adult_bait": 0,
                 "creator_sold": 0,
                 "mcap_bin": "sweet_3.5_7.5k",
-                "alpha_bin": "alpha_low",
+                "alpha_bin": "alpha_high" if is_mega_seed else "alpha_low",
                 "sniper_risk": "low",
-                "holders": 10,
-                "mid_bags": 0,
-                "quote_sol": 0.2,
-                "buy_ratio": 0.9,
-                "sells_m5": 50,
+                "holders": 80 if is_mega_seed else 10,
+                "mid_bags": 6 if is_mega_seed else 0,
+                "quote_sol": 12.0 if is_mega_seed else 0.2,
+                "buy_ratio": 1.6 if is_mega_seed else 0.9,
+                "buys_m5": 20 if is_mega_seed else 5,
+                "sells_m5": 12 if is_mega_seed else 50,
+                "organic_two_way": 1 if is_mega_seed else 0,
+                "clean_social_stack": 1 if is_mega_seed else 0,
+                "deep_curve_sol": 1 if is_mega_seed else 0,
+                "solid_distribution": 1 if is_mega_seed else 0,
+                "external_narrative": 1 if is_mega_seed else 0,
+                "mega_fingerprint": "MEGA_10M" if is_mega_seed else "NONE",
             }
-            # Map seed keys into feats for feature_keys_for_learning
             for k, v in s["features"].items():
                 if ":" in k:
                     base, val = k.split(":", 1)
                     feats[base] = val
-                elif k.endswith(("_ge_5", "_ge_3", "_ge_100", "_ge_40", "_ge_15", "_lt_15", "_lt_3", "_ge_1.3", "_drained")):
-                    # synthetic binary handled by keys list directly via finalize
+                elif k.endswith(
+                    (
+                        "_ge_5",
+                        "_ge_3",
+                        "_ge_100",
+                        "_ge_40",
+                        "_ge_15",
+                        "_lt_15",
+                        "_lt_3",
+                        "_ge_1.3",
+                        "_drained",
+                    )
+                ):
                     pass
                 else:
                     feats[k] = v
-            # Ensure binary flags
             for bk in (
                 "has_viral",
                 "own_twitter",
@@ -415,6 +473,11 @@ class LearningEngine:
                 "fake_website",
                 "adult_bait",
                 "creator_sold",
+                "organic_two_way",
+                "clean_social_stack",
+                "deep_curve_sol",
+                "solid_distribution",
+                "external_narrative",
             ):
                 if s["features"].get(bk):
                     feats[bk] = 1
@@ -426,41 +489,56 @@ class LearningEngine:
                 features=feats,
                 force_new_features=True,
             )
-            # set ath
             self.memory.upsert_token(
                 s["mint"], name=s["name"], symbol=s["symbol"], mcap=s["ath_mcap"]
             )
-            # Inject feature_stats for explicit keys in seed
             with self.memory._lock:
                 conn = self.memory._conn()
                 try:
-                    mult = s["ath_mcap"] / s["first_mcap"]
+                    mult = s["ath_mcap"] / max(s["first_mcap"], 1)
+                    from services.learning.features import feature_keys_for_learning
+
+                    keys = set(feature_keys_for_learning(feats))
                     for fk, val in s["features"].items():
                         if isinstance(val, int) and val == 0:
                             continue
-                        key = fk if isinstance(val, int) or ":" in fk else fk
                         if isinstance(val, int) and val == 1:
-                            key = fk
-                        conn.execute(
-                            """
-                            INSERT INTO feature_stats(feature, outcome, count, sum_multiple)
-                            VALUES(?,?,1,?)
-                            ON CONFLICT(feature, outcome) DO UPDATE SET
-                                count = count + 1,
-                                sum_multiple = sum_multiple + excluded.sum_multiple
-                            """,
-                            (key, s["outcome"], mult),
-                        )
+                            keys.add(fk)
+                        elif ":" in fk:
+                            keys.add(fk)
+                    if inject_stats:
+                        for key in keys:
+                            conn.execute(
+                                """
+                                INSERT INTO feature_stats(feature, outcome, count, sum_multiple)
+                                VALUES(?,?,1,?)
+                                ON CONFLICT(feature, outcome) DO UPDATE SET
+                                    count = count + 1,
+                                    sum_multiple = sum_multiple + excluded.sum_multiple
+                                """,
+                                (key, s["outcome"], mult),
+                            )
+                    notes = s.get("notes") or "seed"
                     conn.execute(
                         """
                         UPDATE tokens SET outcome=?, outcome_ts=?, max_multiple=?,
-                            active=0, notes='seed'
+                            active=0, notes=?, first_mcap=?, ath_mcap=?
                         WHERE mint=?
                         """,
-                        (s["outcome"], time.time(), mult, s["mint"]),
+                        (
+                            s["outcome"],
+                            time.time(),
+                            mult,
+                            notes,
+                            s["first_mcap"],
+                            s["ath_mcap"],
+                            s["mint"],
+                        ),
                     )
                     conn.commit()
                 finally:
                     conn.close()
             n += 1
+        self.memory.set_meta("mega_seeds_version", MEGA_SEEDS_VERSION)
+        logger.info("Seeded %s examples (mega catalog %s)", n, MEGA_SEEDS_VERSION)
         return n

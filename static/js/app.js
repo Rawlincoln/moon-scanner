@@ -29,9 +29,12 @@ function getApiModeLabel() {
 }
 
 const $ = (sel) => document.querySelector(sel);
-const grid = $("#tokenGrid");
+const grid = $("#tokenSections") || $("#tokenGrid");
+const sectionNav = $("#sectionNav");
 const statusBar = $("#statusBar");
 const statCount = $("#statCount");
+let sectionFilter = "all";
+let lastScanMeta = {};
 
 function initChains() {
   const container = $("#chainChips");
@@ -258,37 +261,96 @@ function tradePlanHtml(plan, compact = false) {
   </div>`;
 }
 
+function fingerprintHtml(fp, compact = false) {
+  if (!fp || !fp.score || fp.tier === "NONE") return "";
+  const tier = fp.tier || "NONE";
+  const cls = {
+    MEGA_10M: "fp-badge mega10m",
+    HIGH_10M: "fp-badge high10m",
+    BUILDING_10M: "fp-badge building10m",
+  }[tier] || "fp-badge";
+  const label = {
+    MEGA_10M: "💎 $10M FINGERPRINT",
+    HIGH_10M: "◎ High $10M path",
+    BUILDING_10M: "… Building $10M",
+  }[tier] || tier;
+  if (compact) {
+    return `<div class="fp-row" title="${fp.summary || ""}">
+      <span class="${cls}">${label} ${fp.score}</span>
+      ${(fp.narrative_tags || []).slice(0, 2).map((t) =>
+        `<span class="fp-tag">${String(t).replace(/_/g, " ")}</span>`
+      ).join("")}
+    </div>`;
+  }
+  const check = fp.checklist || {};
+  const items = Object.entries(check).map(([k, v]) =>
+    `<span class="fp-check ${v ? "on" : "off"}">${v ? "✓" : "✗"} ${k.replace(/_/g, " ")}</span>`
+  ).join("");
+  const tags = (fp.narrative_tags || []).map((t) =>
+    `<span class="fp-tag">${String(t).replace(/_/g, " ")}</span>`
+  ).join("");
+  const ladder = fp.tp_ladder || {};
+  const missing = (fp.missing || []).slice(0, 5).join(", ");
+  return `<div class="analysis-section fingerprint-panel">
+    <h4>${label} · ${fp.score}/100 · ${fp.checklist_hits || 0}/${fp.checklist_total || 0} checks</h4>
+    <p style="color:var(--accent);margin-bottom:8px">${fp.summary || ""}</p>
+    <div class="fp-tags">${tags}</div>
+    <div class="fp-checklist">${items}</div>
+    ${ladder.tp1_mcap ? `<div class="analysis-grid" style="margin:8px 0">
+      <div class="analysis-item"><div class="k">TP1</div><div class="v">${fmtUsd(ladder.tp1_mcap)} · sell ${ladder.sell_pct?.tp1 ?? 30}%</div></div>
+      <div class="analysis-item"><div class="k">TP2</div><div class="v">${fmtUsd(ladder.tp2_mcap)} · sell ${ladder.sell_pct?.tp2 ?? 25}%</div></div>
+      <div class="analysis-item"><div class="k">TP3</div><div class="v">${fmtUsd(ladder.tp3_mcap)} · sell ${ladder.sell_pct?.tp3 ?? 20}%</div></div>
+      <div class="analysis-item"><div class="k">Moon / mega</div><div class="v">${fmtUsd(ladder.moon_mcap || 0)} → ${fmtUsd(ladder.mega_band_mcap || 0)}</div></div>
+    </div>` : ""}
+    ${missing ? `<p class="fp-missing">Missing: ${missing}</p>` : ""}
+    ${ladder.notes ? `<p class="fp-notes">${ladder.notes}</p>` : ""}
+  </div>`;
+}
+
 function alphaSetupHtml(alpha, compact = false) {
   if (!alpha || alpha.tier === "WEAK" || alpha.tier === "SKIP" || !alpha.score) return "";
-  if (!alpha.highlight && alpha.score < 45) return "";
+  if (!alpha.highlight && alpha.score < 45 && !(alpha.megaFingerprint || {}).score) return "";
   const tier = alpha.tier || "SPEC";
+  const fp = alpha.megaFingerprint || {};
+  const is10m = alpha.is_mega_10m || fp.tier === "MEGA_10M" || alpha.ceiling === "10M_to_100M";
   const cls = {
+    MEGA_MOON: is10m ? "alpha-badge mega mega10m" : "alpha-badge mega",
     MOON_SETUP: "alpha-badge moon",
     ALPHA: "alpha-badge alpha",
     WATCH_ALPHA: "alpha-badge watch",
     SPEC: "alpha-badge spec",
   }[tier] || "alpha-badge";
   const label = {
+    MEGA_MOON: is10m ? "💎 MEGA $10M+" : "💎 MEGA MOON",
     MOON_SETUP: "🚀 MOON SETUP",
-    ALPHA: "✦ ALPHA early",
-    WATCH_ALPHA: "◎ Watch alpha",
-    SPEC: "Spec",
+    ALPHA: "✦ ALPHA",
+    WATCH_ALPHA: "◎ Building mega",
+    SPEC: "Spec (low ceiling)",
   }[tier] || tier;
+  const ceil = alpha.ceiling_label ? ` · ${alpha.ceiling_label}` : "";
   const win = (alpha.entry_window || "").replace(/_/g, " ");
   if (compact) {
     return `<div class="alpha-row" title="${alpha.summary || ""}">
-      <span class="${cls}">${label} ${alpha.score}</span>
+      <span class="${cls}">${label} ${alpha.score}${ceil}</span>
+      ${fp.score ? `<span class="fp-badge ${fp.tier === "MEGA_10M" ? "mega10m" : "high10m"}">FP ${fp.score}</span>` : ""}
       ${win ? `<span class="alpha-window">${win}</span>` : ""}
     </div>`;
   }
-  const reasons = (alpha.reasons || []).slice(0, 6).map((r) => `<li>${r}</li>`).join("");
+  const reasons = (alpha.reasons || []).slice(0, 8).map((r) => `<li>${r}</li>`).join("");
   const badges = (alpha.badges || []).map((b) =>
     `<span class="alpha-mini ${b.type || ""}">${b.label}</span>`
   ).join("");
+  const tps = alpha.tp_mcap_targets || {};
   return `<div class="analysis-section alpha-panel">
-    <h4>${label} · score ${alpha.score} · ${win || "timing n/a"}</h4>
+    <h4>${label} · score ${alpha.score} · ceiling ${alpha.ceiling_label || "n/a"}</h4>
     <p style="color:var(--accent);margin-bottom:8px">${alpha.summary || ""}</p>
     <div class="alpha-minis">${badges}</div>
+    ${tps.tp1_mcap ? `<div class="analysis-grid" style="margin:8px 0">
+      <div class="analysis-item"><div class="k">TP1 mcap</div><div class="v">${fmtUsd(tps.tp1_mcap)}${tps.sell_pct?.tp1 != null ? ` · sell ${tps.sell_pct.tp1}%` : ""}</div></div>
+      <div class="analysis-item"><div class="k">TP2 mcap</div><div class="v">${fmtUsd(tps.tp2_mcap)}${tps.sell_pct?.tp2 != null ? ` · sell ${tps.sell_pct.tp2}%` : ""}</div></div>
+      <div class="analysis-item"><div class="k">TP3 / moon</div><div class="v">${fmtUsd(tps.tp3_mcap || tps.moon_mcap)}${tps.mega_band_mcap ? ` → ${fmtUsd(tps.mega_band_mcap)}` : ""}</div></div>
+    </div>` : ""}
+    ${fingerprintHtml(fp, false)}
     <ul class="reason-list">${reasons}</ul>
   </div>`;
 }
@@ -492,6 +554,7 @@ function renderCard(token) {
     ${sourceBadgesHtml(token.sources)}
     ${socialBadgesHtml(social)}
     ${alphaSetupHtml(alpha, true)}
+    ${fingerprintHtml(alpha.megaFingerprint || {}, true)}
     ${tradePlanHtml(plan, true)}
     ${avoidBadgesHtml(avoid)}
     ${smartMoneyBadgesHtml(sm)}
@@ -551,41 +614,57 @@ function renderTrenchesCard(t) {
   const tier = t.safetyTier || "AVOID";
   const isPreview = t.preview || tier === "SCANNING";
   const card = document.createElement("article");
-  card.className = `token-card${social.highlight ? " token-card--narrative" : ""}${isPreview ? " token-card--scanning" : ""}${sm.anti_rug_signal ? " token-card--smart-money" : ""}${alpha.is_alpha || plan.action === "ENTER" ? " token-card--alpha" : ""}${avoid.avoid || plan.action === "SKIP" ? " token-card--avoid" : ""}`;
+  const mig = t.migrationPath || {};
+  const lane = tokenLane(t);
+  card.className = `token-card lane-${lane}${social.highlight ? " token-card--narrative" : ""}${isPreview ? " token-card--scanning" : ""}${sm.anti_rug_signal ? " token-card--smart-money" : ""}${lane === "near_migration" ? " token-card--migration" : ""}${alpha.is_alpha || plan.action === "ENTER" ? " token-card--alpha" : ""}${avoid.avoid || plan.action === "SKIP" ? " token-card--avoid" : ""}`;
   card.addEventListener("click", () => openTrenchesModal(t));
 
   const iconHtml = t.icon
     ? `<img class="token-icon" src="${t.icon}" alt="" onerror="this.style.display='none'" />`
     : `<div class="token-icon placeholder">◎</div>`;
 
+  const invSig = t.investSignal || "";
   const bannerCls = isPreview
     ? "WATCH"
-    : alpha.is_alpha
-      ? "STRONG_INVEST"
-      : tier === "SAFE_ENTRY"
+    : avoid.avoid || plan.action === "SKIP" || invSig === "AVOID"
+      ? "AVOID"
+      : lane === "near_migration" && (invSig === "STRONG_INVEST" || invSig === "INVEST" || (mig.score || 0) >= 55)
         ? "STRONG_INVEST"
-        : tier === "WATCH"
+        : lane === "early_lottery"
           ? "WATCH"
-          : "AVOID";
+          : invSig === "STRONG_INVEST" || invSig === "INVEST"
+            ? invSig
+            : tier === "SAFE_ENTRY"
+              ? "WATCH"
+              : tier === "WATCH"
+                ? "WATCH"
+                : "AVOID";
   const mcap = t.mcap_usd || 0;
   const sweet = t.entrySweet || (mcap >= 3500 && mcap <= 7500);
   const sixk = t.sixkRadar || (mcap >= 2000 && mcap <= 9000);
+  const bond = Number(t.bonding_progress ?? mig.bonding_pct ?? 0);
   const title = isPreview
-    ? (sweet ? "🎯 $6K SWEET ZONE" : sixk ? "$6K RADAR" : "SCANNING…")
-    : alpha.is_alpha
-      ? `${alpha.tier.replace(/_/g, " ")} (${alpha.score})`
-      : `${tier} (${t.safetyScore ?? 0}%)`;
+    ? (lane === "near_migration" ? `🚀 ${bond.toFixed(0)}% MIGRATION PATH` : sweet ? "🎯 $6K SWEET (lottery)" : sixk ? "$6K RADAR (lottery)" : "SCANNING…")
+    : lane === "near_migration"
+      ? `NEAR MIGRATION ${bond.toFixed(0)}% (mig ${mig.score ?? "—"})`
+      : lane === "early_lottery"
+        ? `EARLY LOTTERY · ${tier}`
+        : alpha.is_alpha
+          ? `${alpha.tier.replace(/_/g, " ")} (${alpha.score})`
+          : `${tier} (${t.safetyScore ?? 0}%)`;
   const action = isPreview
-    ? (sweet
-      ? `MCap ${fmtUsd(mcap)} — ideal entry band, safety running…`
+    ? (lane === "near_migration"
+      ? `MCap ${fmtUsd(mcap)} · ${bond.toFixed(0)}% bonded — analyzing…`
       : (rep.verdict || "RugCheck + Padre analysis running…"))
-    : (alpha.is_alpha ? alpha.summary : (rep.verdict || ""));
+    : (mig.summary || alpha.summary || rep.verdict || "");
 
   card.innerHTML = `
     ${sourceBadgesHtml([t.column ? `padre_trenches_${t.column}` : "pump.fun"])}
-    ${sixk ? `<div class="sixk-row"><span class="sixk-badge ${sweet ? "sweet" : ""}">${sweet ? "🎯 SWEET $3.5–7.5K" : "$6K RADAR"} · ${fmtUsd(mcap)}</span></div>` : ""}
+    ${migrationBadgeHtml(t)}
+    ${sixk && lane === "early_lottery" ? `<div class="sixk-row"><span class="sixk-badge ${sweet ? "sweet" : ""}">${sweet ? "🎯 LOTTERY $3.5–7.5K" : "EARLY LOTTERY"} · ${fmtUsd(mcap)}</span></div>` : ""}
     ${socialBadgesHtml(social)}
     ${alphaSetupHtml(alpha, true)}
+    ${fingerprintHtml(alpha.megaFingerprint || {}, true)}
     ${tradePlanHtml(plan, true)}
     ${avoidBadgesHtml(avoid)}
     ${smartMoneyBadgesHtml(sm)}
@@ -605,8 +684,8 @@ function renderTrenchesCard(t) {
     ${checkerHubHtml(hub, true)}
     <div class="metrics">
       <div class="metric"><div class="label">MCap</div><div class="value">${fmtUsd(t.mcap_usd)}</div></div>
+      <div class="metric"><div class="label">Bonding</div><div class="value">${bond ? bond.toFixed(0) + "%" : "—"}</div></div>
       <div class="metric"><div class="label">Age</div><div class="value">${t.age_minutes ?? "—"}m</div></div>
-      <div class="metric"><div class="label">Bundle</div><div class="value ${bundle.bundled ? "down" : "up"}">${bundle.bundled ? "YES" : "No"}</div></div>
       <div class="metric"><div class="label">Snipers</div><div class="value ${devRiskClass(snipers.risk_level)}">${snipers.risk_level || "—"}</div></div>
     </div>
     <div class="action-links">
@@ -637,6 +716,7 @@ function openTrenchesModal(t) {
     ${social.tiktok_url ? `<p style="margin-bottom:8px"><a href="${social.tiktok_url}" target="_blank" rel="noopener" style="color:#ff6b9d">TikTok →</a></p>` : ""}
     <p style="color:var(--muted);margin-bottom:16px">${rep.verdict || ""}</p>
     ${alphaSetupHtml(alpha)}
+    ${fingerprintHtml(alpha.megaFingerprint || {})}
     ${tradePlanHtml(t.tradePlan || {})}
     ${avoid.avoid ? `<div class="analysis-section"><h4>⛔ Avoid filters</h4>
       <p style="color:var(--danger)">${avoid.summary || ""}</p>
@@ -660,17 +740,47 @@ function flattenTrenchesData(data) {
   if (!data?.columns && data?.tokens) return data.tokens || [];
   if (!data?.columns) return data?.tokens || [];
   return [
+    ...(data.migration_picks || []),
+    ...(data.under25k_picks || []),
+    ...(data.early_lottery || []),
     ...(data.sixk_picks || []),
     ...(data.alpha_picks || []),
     ...(data.safe_picks || []),
+    ...(data.columns?.almost_bonded || []),
+    ...(data.columns?.under_25k || []),
     ...(data.columns?.sixk_radar || []),
     ...(data.columns?.new || []),
-    ...(data.columns?.almost_bonded || []),
     ...(data.columns?.recently_bonded || []),
   ].filter((tok, i, arr) => {
     const k = tok.tokenAddress;
     return k && arr.findIndex((x) => x.tokenAddress === k) === i;
   });
+}
+
+function groupByLane(tokens) {
+  const groups = {
+    near_migration: [],
+    under_25k: [],
+    early_lottery: [],
+    migrated: [],
+    other: [],
+  };
+  for (const t of tokens) {
+    const lane = tokenLane(t);
+    if (groups[lane]) groups[lane].push(t);
+    else groups.other.push(t);
+  }
+  // Prefer higher bonding within each group
+  for (const k of Object.keys(groups)) {
+    groups[k].sort((a, b) => {
+      const ba = Number(a.bonding_progress ?? a.migrationPath?.bonding_pct ?? 0);
+      const bb = Number(b.bonding_progress ?? b.migrationPath?.bonding_pct ?? 0);
+      const sa = a.migrationPath?.score || 0;
+      const sb = b.migrationPath?.score || 0;
+      return sb - sa || bb - ba || (b.mcap_usd || 0) - (a.mcap_usd || 0);
+    });
+  }
+  return groups;
 }
 
 function applyClientFilters(tokens) {
@@ -694,13 +804,24 @@ function applyClientFilters(tokens) {
 }
 
 function renderGrid(tokens) {
-  const visible = applyClientFilters(tokens);
+  let visible = applyClientFilters(tokens);
   const hidden = tokens.length - visible.length;
+  if (sectionFilter && sectionFilter !== "all") {
+    visible = visible.filter((t) => {
+      const lane = tokenLane(t);
+      if (sectionFilter === "near_migration") return lane === "near_migration" || lane === "migrated";
+      return lane === sectionFilter;
+    });
+  }
   grid.innerHTML = "";
+  if (sectionNav) sectionNav.hidden = !tokens.length;
+
   if (!visible.length) {
     let msg = "No tokens matched your filters.";
     if (tokens.length && hidden) {
       msg = `${tokens.length} tokens scanned but ${hidden} hidden by filters. Uncheck “Hide UNSAFE” or “Checker PASS only” to see more.`;
+    } else if (tokens.length && sectionFilter !== "all") {
+      msg = `No tokens in this section yet. Try “All” or re-scan — near-migration needs ~45%+ bonding (~$31k+).`;
     } else if (!tokens.length) {
       msg = $("#checkerPassOnly")?.checked
         ? "No tokens passed all security checkers. Try disabling filters or re-scan."
@@ -713,14 +834,67 @@ function renderGrid(tokens) {
       showAll.onclick = () => {
         $("#safeOnly").checked = false;
         $("#checkerPassOnly").checked = false;
+        sectionFilter = "all";
+        document.querySelectorAll(".sec-btn").forEach((b) => b.classList.toggle("active", b.dataset.sec === "all"));
         renderGrid(tokens);
       };
     }
     statCount.textContent = "0";
     return;
   }
-  visible.forEach((t) => grid.appendChild(t.safetyTier ? renderTrenchesCard(t) : renderCard(t)));
+
+  const groups = groupByLane(visible);
+  const sections = [
+    {
+      id: "near_migration",
+      title: "Near Migration",
+      hint: "Can actually graduate (~$69k). Primary focus — not $6k dust.",
+      tokens: [...groups.near_migration, ...groups.migrated],
+    },
+    {
+      id: "under_25k",
+      title: "Under $25k",
+      hint: "Mid-curve structure. Better than pure lottery; still must hold to migrate.",
+      tokens: groups.under_25k,
+    },
+    {
+      id: "early_lottery",
+      title: "Early Lottery ($2–8k)",
+      hint: "Most never migrate. Tiny size only — structure scoring, not conviction.",
+      tokens: [...groups.early_lottery, ...groups.other],
+    },
+  ];
+
+  for (const sec of sections) {
+    if (sectionFilter !== "all" && sectionFilter !== sec.id) {
+      if (!(sectionFilter === "near_migration" && sec.id === "near_migration")) continue;
+    }
+    if (!sec.tokens.length && sectionFilter === "all") continue;
+    if (!sec.tokens.length) continue;
+    const wrap = document.createElement("section");
+    wrap.className = `token-section sec-${sec.id}`;
+    wrap.innerHTML = `
+      <div class="section-head">
+        <h2>${sec.title} <span class="sec-count">${sec.tokens.length}</span></h2>
+        <p class="sec-hint">${sec.hint}</p>
+      </div>
+      <div class="token-grid sec-grid"></div>`;
+    const g = wrap.querySelector(".sec-grid");
+    sec.tokens.forEach((t) => g.appendChild(t.safetyTier || t.column || t.preview ? renderTrenchesCard(t) : renderCard(t)));
+    grid.appendChild(wrap);
+  }
   statCount.textContent = hidden > 0 ? `${visible.length}/${tokens.length}` : String(visible.length);
+}
+
+function initSectionNav() {
+  if (!sectionNav) return;
+  sectionNav.querySelectorAll(".sec-btn").forEach((btn) => {
+    btn.onclick = () => {
+      sectionFilter = btn.dataset.sec || "all";
+      sectionNav.querySelectorAll(".sec-btn").forEach((b) => b.classList.toggle("active", b === btn));
+      renderGrid(lastTokens);
+    };
+  });
 }
 
 function openModal(token) {
@@ -891,6 +1065,7 @@ function openModal(token) {
     </div>
 
     ${alphaSetupHtml(token.alphaSetup || {})}
+    ${fingerprintHtml((token.alphaSetup || {}).megaFingerprint || {})}
     ${tradePlanHtml(token.tradePlan || {})}
     ${smartMoneyPanelHtml(token.smartMoney || {})}
 
@@ -937,14 +1112,53 @@ function scheduleAutoRefresh() {
   }
 }
 
-const MAX_DISPLAY_MCAP = 25000;
+const MAX_EARLY_MCAP = 25000;
+const MAX_MIGRATION_MCAP = 78000;
 
-function filterEarlyMcap(tokens) {
+function tokenLane(t) {
+  const mig = t.migrationPath || {};
+  if (mig.lane) return mig.lane;
+  if (t.migrationLane) return t.migrationLane;
+  if (t.column === "almost_bonded" || t.column === "recently_bonded") return "near_migration";
+  if (t.column === "under_25k") return "under_25k";
+  const m = t.mcap_usd || 0;
+  const bond = Number(t.bonding_progress ?? mig.bonding_pct ?? 0);
+  if (t.column === "recently_bonded" || bond >= 99) return "migrated";
+  if (bond >= 45 || (m >= 30000 && m <= MAX_MIGRATION_MCAP)) return "near_migration";
+  if (m >= 8000 && m <= 25000) return "under_25k";
+  if (m > 0 && m < 8000) return "early_lottery";
+  return "under_25k";
+}
+
+function filterDisplayMcap(tokens) {
+  // Allow near-migration up to graduation (~$69k); early sections stay ≤$25k
   return tokens.filter((t) => {
     const m = t.mcap_usd ?? t.market?.pumpfun?.usd_market_cap ?? t.market?.marketCap ?? 0;
-    if (!m || m <= 0) return true; // brand new / unknown — keep
-    return m <= MAX_DISPLAY_MCAP;
+    if (!m || m <= 0) return true;
+    const lane = tokenLane(t);
+    if (lane === "near_migration" || lane === "migrated" || t.column === "almost_bonded" || t.column === "recently_bonded") {
+      return m <= MAX_MIGRATION_MCAP * 1.5;
+    }
+    return m <= MAX_EARLY_MCAP;
   });
+}
+
+function migrationBadgeHtml(t) {
+  const mig = t.migrationPath || {};
+  const bond = Number(t.bonding_progress ?? mig.bonding_pct ?? 0);
+  if (!bond && !mig.score) return "";
+  const lane = tokenLane(t);
+  const cls = lane === "near_migration" ? "mig-near" : lane === "under_25k" ? "mig-25k" : lane === "migrated" ? "mig-done" : "mig-early";
+  const label = lane === "near_migration"
+    ? `🚀 ${bond.toFixed(0)}% → migration`
+    : lane === "migrated"
+      ? "✓ Migrated"
+      : lane === "under_25k"
+        ? `${bond.toFixed(0)}% under $25k`
+        : `${bond.toFixed(0)}% lottery`;
+  return `<div class="mig-row"><span class="mig-badge ${cls}">${label}${mig.score ? ` · mig ${mig.score}` : ""}</span>
+    ${mig.to_graduation_usd != null && lane === "near_migration" ? `<span class="mig-meta">${fmtUsd(mig.to_graduation_usd)} to grad</span>` : ""}
+  </div>`;
 }
 
 async function loadFeedPreview(limit, maxAge) {
@@ -972,25 +1186,27 @@ async function loadFeedPreview(limit, maxAge) {
       preview = [...preview, ...flattenTrenchesData(data)];
     }
     const seen = new Set();
-    preview = filterEarlyMcap(preview).filter((t) => {
+    preview = filterDisplayMcap(preview).filter((t) => {
       const k = t.tokenAddress;
       if (!k || seen.has(k)) return false;
       seen.add(k);
       return true;
     });
-    // Sort: sweet $3.5–7.5k first
+    // Near migration / higher bonding first — not $6k dust
     preview.sort((a, b) => {
-      const ma = a.mcap_usd || 0;
-      const mb = b.mcap_usd || 0;
-      const sa = ma >= 3500 && ma <= 7500 ? 0 : ma >= 2000 && ma <= 9000 ? 1 : 2;
-      const sb = mb >= 3500 && mb <= 7500 ? 0 : mb >= 2000 && mb <= 9000 ? 1 : 2;
-      return sa - sb || Math.abs(ma - 6000) - Math.abs(mb - 6000);
+      const la = tokenLane(a);
+      const lb = tokenLane(b);
+      const lr = { near_migration: 0, migrated: 1, under_25k: 2, early_lottery: 3 };
+      const ba = Number(a.bonding_progress || 0);
+      const bb = Number(b.bonding_progress || 0);
+      return (lr[la] ?? 4) - (lr[lb] ?? 4) || bb - ba || (b.mcap_usd || 0) - (a.mcap_usd || 0);
     });
     if (preview.length) {
       lastTokens = preview;
       renderGrid(lastTokens);
+      const nearN = preview.filter((t) => tokenLane(t) === "near_migration").length;
       setStatus(
-        `$6K RADAR: ${sixkN} climbers (${sweetN} in sweet $3.5–7.5k) · ${preview.length} on screen — safety check…`,
+        `Preview: ${nearN} near migration · ${sixkN} early lottery ($6k) · ${preview.length} total — safety check…`,
         true
       );
       return true;
@@ -1032,11 +1248,15 @@ async function runScan(force = false, silent = false) {
     const data = await res.json();
     const isTrenches = Array.isArray(data.safe_picks) || data.columns;
     if (isTrenches) {
-      // $6k entry + alpha first so we don't surface tokens only after $30k
-      lastTokens = filterEarlyMcap([
-        ...(data.sixk_picks || []),
+      lastScanMeta = data.counts || {};
+      // Migration first, then under $25k, then early lottery
+      lastTokens = filterDisplayMcap([
+        ...(data.migration_picks || []),
+        ...(data.under25k_picks || []),
+        ...(data.early_lottery || []),
         ...(data.alpha_picks || []),
         ...(data.safe_picks || []),
+        ...(data.sixk_picks || []),
         ...flattenTrenchesData(data),
       ]);
       const seen = new Set();
@@ -1047,66 +1267,34 @@ async function runScan(force = false, silent = false) {
         return true;
       });
       lastTokens.sort((a, b) => {
-        const aTier = (a.alphaSetup || {}).tier || "";
-        const bTier = (b.alphaSetup || {}).tier || "";
-        const alphaR = { MOON_SETUP: 0, ALPHA: 1, WATCH_ALPHA: 2, SPEC: 3 };
-        const mcapA = a.mcap_usd || 0;
-        const mcapB = b.mcap_usd || 0;
-        const earlyA = mcapA > 0 && mcapA <= 12000 ? 0 : 1;
-        const earlyB = mcapB > 0 && mcapB <= 12000 ? 0 : 1;
-        const tier = { SAFE_ENTRY: 0, WATCH: 1, CAUTION: 2, HIGH_RISK: 3, AVOID: 4, UNSAFE: 5 };
-        const chk = { PASS: 0, WARN: 1, FAIL: 2 };
-        const smRank = (t) => {
-          const s = (t.smartMoney || {}).signal;
-          if (s === "MAJOR_TRADER") return 0;
-          if (s === "WHALE_BUY") return 1;
-          if (s === "DISTRIBUTED_WHALES") return 2;
-          if (s === "PAID_INTEREST") return 3;
-          return 4;
-        };
-        const av = chk[(a.checkerHub || {}).consensus?.verdict] ?? 3;
-        const bv = chk[(b.checkerHub || {}).consensus?.verdict] ?? 3;
-        return (
-          (alphaR[aTier] ?? 5) - (alphaR[bTier] ?? 5)
-          || ((b.alphaSetup || {}).score || 0) - ((a.alphaSetup || {}).score || 0)
-          || earlyA - earlyB
-          || (a.age_minutes ?? 999) - (b.age_minutes ?? 999)
-          || smRank(a) - smRank(b)
-          || av - bv
-          || (tier[a.safetyTier] ?? 9) - (tier[b.safetyTier] ?? 9)
-          || (b.safetyScore || 0) - (a.safetyScore || 0)
-          || mcapA - mcapB
-        );
+        const la = tokenLane(a);
+        const lb = tokenLane(b);
+        const lr = { near_migration: 0, migrated: 1, under_25k: 2, early_lottery: 3 };
+        const sa = a.migrationPath?.score || 0;
+        const sb = b.migrationPath?.score || 0;
+        const ba = Number(a.bonding_progress || 0);
+        const bb = Number(b.bonding_progress || 0);
+        return (lr[la] ?? 4) - (lr[lb] ?? 4) || sb - sa || bb - ba;
       });
     } else {
-      lastTokens = filterEarlyMcap(data.tokens || []);
+      lastTokens = filterDisplayMcap(data.tokens || []);
     }
     renderGrid(lastTokens);
     const visible = applyClientFilters(lastTokens).length;
     const t = new Date(data.scanned_at * 1000).toLocaleTimeString();
     const total = data.counts?.total ?? lastTokens.length;
-    const dropped = data.counts?.skipped_late_mcap ?? 0;
-    const alphaCount = data.counts?.alpha_picks
-      ?? lastTokens.filter((x) => (x.alphaSetup || {}).is_alpha).length;
-    const safeCount = isTrenches ? (data.safe_picks || []).length : lastTokens.filter((x) => ["STRONG_INVEST", "INVEST"].includes(x.investSignal?.signal)).length;
-    const narrCount = isTrenches ? (data.counts?.narrative_picks ?? 0) : lastTokens.filter((x) => x.socialSignals?.highlight).length;
+    const migN = data.counts?.migration_picks
+      ?? lastTokens.filter((x) => tokenLane(x) === "near_migration").length;
+    const u25 = data.counts?.under25k_picks
+      ?? lastTokens.filter((x) => tokenLane(x) === "under_25k").length;
+    const lotN = data.counts?.early_lottery
+      ?? lastTokens.filter((x) => tokenLane(x) === "early_lottery").length;
     const chkPass = data.counts?.checker_pass ?? lastTokens.filter((x) => (x.checkerHub || {}).consensus?.verdict === "PASS").length;
-    const chkFail = data.counts?.checker_fail ?? lastTokens.filter((x) => (x.checkerHub || {}).consensus?.verdict === "FAIL").length;
     const failNote = data.counts?.analyze_failures ? ` · ${data.counts.analyze_failures} analyze errors` : "";
-    const lateNote = dropped ? ` · dropped ${dropped} over $25K` : "";
     const staleNote = data.stale ? " · cached" : "";
-    const filterNote = visible < total ? ` · showing ${visible}/${total}` : "";
-    const sixkN = data.counts?.sixk_live ?? lastTokens.filter((x) => {
-      const m = x.mcap_usd || 0;
-      return m >= 2000 && m <= 9000;
-    }).length;
-    const sweetN = data.counts?.sixk_sweet ?? lastTokens.filter((x) => {
-      const m = x.mcap_usd || 0;
-      return m >= 3500 && m <= 7500;
-    }).length;
     setStatus(
-      `$6k radar: ${sixkN} live · ${sweetN} sweet zone · ${alphaCount} moon/alpha · showing ${visible}/${total} · ` +
-      `${safeCount} safe · ${chkPass} PASS · ${chkFail} FAIL${lateNote}${failNote} · ${t}` +
+      `🚀 Near migration: ${migN} · Under $25k: ${u25} · Early lottery: ${lotN} · showing ${visible}/${total} · ` +
+      `${chkPass} PASS${failNote} · ${t}` +
       staleNote +
       `${$("#autoRefresh").checked ? " · auto 15s" : ""}`
     );
@@ -1168,6 +1356,7 @@ document.addEventListener("click", (e) => {
 
 initChains();
 initBackendSync();
+initSectionNav();
 showLoadingGrid(
   getApiModeLabel() === "cloud" && !IS_CLOUD_HOST
     ? "Loading from cloud (same as Render)…"

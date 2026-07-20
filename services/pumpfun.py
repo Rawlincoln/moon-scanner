@@ -76,15 +76,24 @@ class PumpFunClient:
     @staticmethod
     def to_candidate(coin: dict) -> dict:
         mint = coin.get("mint", "")
+        mcap = float(coin.get("usd_market_cap") or 0)
+        progress = PumpFunClient.bonding_progress(coin)
+        # Ensure pump payload always carries bonding_progress for UI/lanes
+        pf = dict(coin)
+        pf["bonding_progress"] = progress
         return {
             "chainId": "solana",
             "tokenAddress": mint,
+            "name": coin.get("name", ""),
+            "symbol": coin.get("symbol", ""),
             "source": "pump.fun",
             "url": f"https://pump.fun/coin/{mint}",
             "description": coin.get("description", ""),
             "links": _extract_links(coin),
             "icon": coin.get("image_uri", ""),
-            "pumpfun": coin,
+            "pumpfun": pf,
+            "bonding_progress": progress,
+            "_mcap": mcap,
         }
 
     @staticmethod

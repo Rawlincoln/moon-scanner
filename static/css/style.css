@@ -509,11 +509,192 @@ select:focus, input:focus { outline: none; border-color: var(--accent2); }
   border-radius: 6px;
   border: 1px solid var(--border);
 }
+.alpha-badge.mega {
+  color: #e0b0ff;
+  border-color: rgba(224, 176, 255, 0.6);
+  background: rgba(180, 100, 255, 0.16);
+  box-shadow: 0 0 12px rgba(180, 100, 255, 0.2);
+}
+.alpha-badge.mega10m {
+  color: #ffd6ff;
+  border-color: rgba(255, 180, 255, 0.75);
+  background: linear-gradient(135deg, rgba(180, 80, 255, 0.22), rgba(255, 120, 200, 0.18));
+  box-shadow: 0 0 16px rgba(220, 100, 255, 0.35);
+}
+.fp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.fp-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.fp-badge.mega10m {
+  color: #ffd6ff;
+  border-color: rgba(255, 180, 255, 0.7);
+  background: rgba(200, 80, 255, 0.2);
+}
+.fp-badge.high10m {
+  color: #c9b0ff;
+  border-color: rgba(180, 140, 255, 0.5);
+  background: rgba(140, 100, 255, 0.12);
+}
+.fp-badge.building10m {
+  color: #9ab6ff;
+  border-color: rgba(120, 150, 255, 0.4);
+}
+.fp-tag {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: #c8b8ff;
+  text-transform: lowercase;
+}
+.fingerprint-panel {
+  border-left: 3px solid #d48cff;
+  padding-left: 12px;
+  margin: 10px 0;
+}
+.fp-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.fp-check {
+  font-size: 0.65rem;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+}
+.fp-check.on {
+  color: #00e5a0;
+  border-color: rgba(0, 229, 160, 0.35);
+}
+.fp-check.off {
+  color: var(--muted);
+  opacity: 0.75;
+}
+.fp-missing { color: var(--warn); font-size: 0.8rem; margin-top: 6px; }
+.fp-notes { color: var(--muted); font-size: 0.78rem; margin-top: 4px; }
+.fp-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.alpha-mini.mega10m, .alpha-mini.narrative {
+  color: #e8c4ff;
+  border-color: rgba(220, 150, 255, 0.45);
+}
+
+/* Sectioned trenches: Near Migration / Under $25k / Early Lottery */
+#tokenMain { padding: 0 1.25rem 2rem; max-width: 1400px; margin: 0 auto; }
+.section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 16px;
+}
+.sec-btn {
+  font-family: var(--font);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.sec-btn.active {
+  color: #fff;
+  border-color: rgba(0, 229, 160, 0.55);
+  background: rgba(0, 229, 160, 0.15);
+}
+.token-section { margin-bottom: 28px; }
+.section-head {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.section-head h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sec-count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface2);
+  color: var(--muted);
+  font-family: var(--mono);
+}
+.sec-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.sec-near_migration .section-head h2 { color: #7dffc0; }
+.sec-under_25k .section-head h2 { color: #9ab6ff; }
+.sec-early_lottery .section-head h2 { color: #c9a86c; }
+.token-card--migration {
+  border-color: rgba(0, 229, 160, 0.45);
+  box-shadow: 0 0 18px rgba(0, 229, 160, 0.12);
+}
+.mig-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.mig-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.mig-badge.mig-near {
+  color: #7dffc0;
+  border-color: rgba(0, 229, 160, 0.5);
+  background: rgba(0, 229, 160, 0.12);
+}
+.mig-badge.mig-25k {
+  color: #9ab6ff;
+  border-color: rgba(120, 150, 255, 0.45);
+  background: rgba(90, 120, 255, 0.1);
+}
+.mig-badge.mig-early {
+  color: #c9a86c;
+  border-color: rgba(200, 160, 80, 0.4);
+}
+.mig-badge.mig-done {
+  color: #b8ff9a;
+  border-color: rgba(150, 255, 100, 0.45);
+}
+.mig-meta {
+  font-size: 0.68rem;
+  font-family: var(--mono);
+  color: var(--muted);
+}
 .alpha-badge.moon {
   color: #ffd740;
   border-color: rgba(255, 215, 64, 0.55);
   background: rgba(255, 176, 32, 0.14);
 }
+.alpha-mini.mega { color: #e0b0ff; border-color: rgba(224, 176, 255, 0.4); }
 .alpha-badge.alpha {
   color: #00e5a0;
   border-color: rgba(0, 229, 160, 0.45);

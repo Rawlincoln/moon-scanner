@@ -27,10 +27,13 @@ from config import (
     EVM_CHAIN_IDS,
     EXCLUDE_GRADUATED_DEFAULT,
     FAST_SCAN_SKIP_DEX_ORDERS,
+    GRADUATION_MCAP_USD,
     IS_PRODUCTION,
     IS_RENDER,
     MAX_AGE_MINUTES_CAP,
     MAX_SCAN_LIMIT,
+    MIGRATION_MCAP_MAX_USD,
+    MIGRATION_NEAR_MIN_PCT,
     PADRE_TRADE_URL,
     SCAN_MCAP_FOCUS_MAX_USD,
     SCAN_MCAP_MAX_USD,
@@ -41,6 +44,8 @@ from config import (
     SUPPORTED_CHAINS,
     TRENCHES_CACHE_TTL,
     TRENCHES_CONCURRENCY,
+    UNDER25K_MAX_USD,
+    UNDER25K_MIN_USD,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -61,6 +66,7 @@ from services.safety_report import build_safety_report
 from services.checker_hub import run_checker_hub
 from services.alpha_setup import analyze_alpha_setup
 from services.avoid_filters import analyze_avoid_flags
+from services.migration_path import analyze_migration_path
 from services.smart_money import (
     analyze_smart_money,
     analyze_smart_money_async,
@@ -397,28 +403,78 @@ async def _analyze_token(
         smart_money=smart_money,
         mcap_usd=mcap_for_sm,
     )
-    # Boost invest signal when moon-setup matches KIWI-style early profile
-    if alpha.get("is_alpha") and invest.get("signal") in (
-        "WATCH",
-        "INVEST",
-        "STRONG_INVEST",
-        None,
-        "",
+    migration = analyze_migration_path(
+        mcap_usd=mcap_for_sm,
+        bonding_progress=(pump_coin or {}).get("bonding_progress"),
+        safety=safety,
+        pair=pair,
+        pump=pump_coin,
+        avoid=(safety.get("avoid") or {}),
+        alpha=alpha,
+        complete=bool((pump_coin or {}).get("complete")),
+    )
+    # Only boost invest for high-ceiling moons that are ON a migration path
+    # (user: recommended $6k tokens never reach migration)
+    bond_pct = float(migration.get("bonding_pct") or 0)
+    near_mig = migration.get("lane") in ("near_migration", "migrated")
+    climbing = bond_pct >= MIGRATION_NEAR_MIN_PCT * 0.6  # ~27%+
+    if (
+        alpha.get("tier") in ("MEGA_MOON", "MOON_SETUP")
+        and invest.get("signal") in (
+            "WATCH",
+            "INVEST",
+            "STRONG_INVEST",
+            None,
+            "",
+        )
     ):
         if not (safety.get("avoid") or {}).get("avoid"):
             invest = dict(invest)
-            invest["signal"] = alpha.get("signal") or invest.get("signal") or "INVEST"
+            if near_mig and migration.get("score", 0) >= 50:
+                invest["signal"] = "STRONG_INVEST"
+                invest["summary"] = (
+                    f"Near migration {bond_pct:.0f}% — "
+                    f"{migration.get('summary') or alpha.get('summary')}"
+                )
+            elif climbing and alpha.get("tier") == "MEGA_MOON":
+                invest["signal"] = "INVEST"
+                invest["summary"] = (
+                    f"Climbing toward migration ({bond_pct:.0f}%). "
+                    f"{alpha.get('summary') or ''}"
+                )
+            else:
+                # Early mega structure ≠ recommend as if it will migrate
+                invest["signal"] = "WATCH"
+                invest["summary"] = (
+                    f"Early structure only ({bond_pct:.0f}% bonded) — "
+                    f"most never migrate. Track under Early Lottery; "
+                    f"size tiny or wait for >{MIGRATION_NEAR_MIN_PCT:.0f}% curve."
+                )
             invest["confidence"] = max(
                 int(invest.get("confidence") or 0),
-                int(alpha.get("confidence") or 0),
+                int(alpha.get("confidence") or 0)
+                if near_mig
+                else min(55, int(alpha.get("confidence") or 0)),
             )
-            invest["summary"] = alpha.get("summary") or invest.get("summary")
             reasons = list(invest.get("reasons") or [])
-            for r in (alpha.get("reasons") or [])[:4]:
+            for r in (migration.get("reasons") or [])[:3] + (alpha.get("reasons") or [])[:3]:
                 if r not in reasons:
                     reasons.insert(0, r)
             invest["reasons"] = reasons[:8]
-            invest["alpha_boost"] = True
+            invest["alpha_boost"] = near_mig
+            invest["ceiling"] = alpha.get("ceiling_label")
+            invest["migration_lane"] = migration.get("lane")
+    elif alpha.get("tier") == "ALPHA" and invest.get("signal") in (
+        "STRONG_INVEST",
+        "INVEST",
+    ):
+        # Downgrade generic strong invests without mega stack
+        invest = dict(invest)
+        invest["signal"] = "WATCH"
+        invest["summary"] = (
+            (alpha.get("summary") or "")
+            + " — not full mega stack; most sub-$20k tops start here."
+        )
 
     links = _padre_links(chain_id, token_address)
 
@@ -435,6 +491,7 @@ async def _analyze_token(
         "socialSignals": social,
         "smartMoney": smart_money,
         "alphaSetup": alpha,
+        "migrationPath": migration,
         "checkerHub": checker_hub,
         "padre": links,
         "analyzedAt": time.time(),
@@ -460,19 +517,47 @@ async def _analyze_token(
                 result["investSignal"] = invest
             elif (
                 trade_plan.get("action") == "ENTER"
-                and invest.get("signal") in ("WATCH", "INVEST", "STRONG_INVEST", None, "")
+                and alpha.get("tier") in ("MEGA_MOON", "MOON_SETUP")
                 and not (safety.get("avoid") or {}).get("avoid")
             ):
                 invest = dict(invest)
-                if invest.get("signal") not in ("STRONG_INVEST", "INVEST"):
-                    invest["signal"] = "INVEST"
+                mig = result.get("migrationPath") or {}
+                if mig.get("lane") in ("near_migration", "migrated") and (
+                    mig.get("score") or 0
+                ) >= 50:
+                    invest["signal"] = "STRONG_INVEST"
+                    invest["summary"] = (
+                        f"{mig.get('summary') or ''} · {trade_plan.get('summary') or ''}"
+                    ).strip(" ·")
+                else:
+                    # Do not ENTER early lottery as STRONG — they rarely migrate
+                    invest["signal"] = "WATCH"
+                    invest["summary"] = (
+                        f"Learned structure OK but only "
+                        f"{mig.get('bonding_pct', 0):.0f}% bonded — "
+                        f"wait for near-migration or tiny lottery size only."
+                    )
                 invest["confidence"] = max(
                     int(invest.get("confidence") or 0),
                     int(trade_plan.get("confidence") or 0),
                 )
-                invest["summary"] = trade_plan.get("summary") or invest.get("summary")
                 invest["learned"] = True
+                invest["ceiling"] = trade_plan.get("ceiling_label") or alpha.get(
+                    "ceiling_label"
+                )
                 result["investSignal"] = invest
+            elif trade_plan.get("action") == "WATCH" and invest.get("signal") in (
+                "STRONG_INVEST",
+                "INVEST",
+            ):
+                # Learned model rejects low-ceiling FOMO
+                if alpha.get("tier") not in ("MEGA_MOON", "MOON_SETUP"):
+                    invest = dict(invest)
+                    invest["signal"] = "WATCH"
+                    invest["summary"] = trade_plan.get("summary") or invest.get(
+                        "summary"
+                    )
+                    result["investSignal"] = invest
     except Exception as exc:
         logger.debug("learning observe failed: %s", exc)
     return result
@@ -831,18 +916,41 @@ def _preview_from_candidate(column: str, cand: dict) -> dict:
     pf = cand.get("pumpfun") or {}
     mint = cand.get("tokenAddress", "")
     mcap = float(pf.get("usd_market_cap") or cand.get("_mcap") or 0)
+    bond = float(
+        cand.get("bonding_progress")
+        or pf.get("bonding_progress")
+        or (min(100.0, (mcap / GRADUATION_MCAP_USD) * 100) if mcap else 0)
+    )
     sixk = (
         column == "sixk_radar"
         or cand.get("_sixk_radar")
         or (SIXK_RADAR_MIN_USD <= mcap <= SIXK_RADAR_MAX_USD)
     )
     sweet = SIXK_ENTRY_SWEET_MIN <= mcap <= SIXK_ENTRY_SWEET_MAX
-    verdict = "Analyzing RugCheck + Padre…"
-    if sixk:
+    if bond >= MIGRATION_NEAR_MIN_PCT or column == "almost_bonded":
+        lane = "near_migration"
+    elif column == "under_25k" or (
+        UNDER25K_MIN_USD <= mcap <= UNDER25K_MAX_USD
+    ):
+        lane = "under_25k"
+    elif mcap > 0 and mcap < UNDER25K_MIN_USD:
+        lane = "early_lottery"
+    else:
+        lane = "early_lottery"
+    if lane == "near_migration":
         verdict = (
-            f"$6K RADAR — mcap ${mcap:,.0f} "
-            f"{'(SWEET ENTRY ZONE)' if sweet else '— full check running…'}"
+            f"Near migration {bond:.0f}% — ${mcap:,.0f} "
+            f"(~${max(0, GRADUATION_MCAP_USD - mcap):,.0f} to grad) — checking…"
         )
+    elif lane == "under_25k":
+        verdict = f"Under $25k · {bond:.0f}% bonded — ${mcap:,.0f} — checking…"
+    elif sixk:
+        verdict = (
+            f"Early lottery ${mcap:,.0f} "
+            f"{'(sweet $3.5–7.5k — rarely migrates)' if sweet else '— rarely migrates'}"
+        )
+    else:
+        verdict = "Analyzing RugCheck + Padre…"
     return {
         "column": column,
         "chainId": "solana",
@@ -852,7 +960,7 @@ def _preview_from_candidate(column: str, cand: dict) -> dict:
         "icon": cand.get("icon") or pf.get("image_uri"),
         "mcap_usd": mcap,
         "age_minutes": cand.get("_age_minutes") or cand.get("age_minutes"),
-        "bonding_progress": pf.get("bonding_progress"),
+        "bonding_progress": bond,
         "safetyTier": "SCANNING",
         "safetyScore": 0,
         "safetyReport": {
@@ -865,6 +973,16 @@ def _preview_from_candidate(column: str, cand: dict) -> dict:
         "sixkRadar": sixk,
         "entrySweet": sweet,
         "quickAlpha": cand.get("_quick_alpha", 0),
+        "migrationLane": lane,
+        "migrationPath": {
+            "lane": lane,
+            "bonding_pct": round(bond, 1),
+            "score": int(min(90, bond * 0.9))
+            if bond >= MIGRATION_NEAR_MIN_PCT
+            else int(bond * 0.4),
+            "summary": verdict,
+            "to_graduation_usd": round(max(0.0, GRADUATION_MCAP_USD - mcap)),
+        },
     }
 
 
@@ -889,6 +1007,7 @@ async def _fetch_trenches_feed(
         "counts": {
             "sixk_radar": sixk_n,
             "new": len(preview_columns.get("new") or []),
+            "under_25k": len(preview_columns.get("under_25k") or []),
             "almost_bonded": len(preview_columns.get("almost_bonded") or []),
             "recently_bonded": len(preview_columns.get("recently_bonded") or []),
             "total": total,
@@ -909,17 +1028,23 @@ async def _run_trenches_scan(
     analyzed_columns: dict[str, list] = {
         "sixk_radar": [],
         "new": [],
+        "under_25k": [],
         "almost_bonded": [],
         "recently_bonded": [],
     }
 
-    # Analyze $6k-band climbers FIRST so we don't miss $6k entry by minutes
+    # Analyze near-migration FIRST (user: recs never reached migration)
     work: list[tuple[str, dict]] = []
     dropped_high_mcap = 0
     for col, cands in columns.items():
         for cand in cands:
             pre = padre_feed._candidate_mcap(cand)
-            if pre > SCAN_MCAP_MAX_USD:
+            cap = (
+                MIGRATION_MCAP_MAX_USD
+                if col in ("almost_bonded", "recently_bonded", "under_25k")
+                else SCAN_MCAP_MAX_USD
+            )
+            if pre > cap:
                 dropped_high_mcap += 1
                 continue
             work.append((col, cand))
@@ -927,13 +1052,26 @@ async def _run_trenches_scan(
     def _work_priority(item: tuple[str, dict]) -> tuple:
         col, cand = item
         mcap = padre_feed._candidate_mcap(cand)
+        bond = float(cand.get("bonding_progress") or 0)
+        if bond <= 0 and mcap > 0:
+            bond = min(100.0, (mcap / GRADUATION_MCAP_USD) * 100)
         in_sixk = SIXK_RADAR_MIN_USD <= mcap <= SIXK_RADAR_MAX_USD
         sweet = SIXK_ENTRY_SWEET_MIN <= mcap <= SIXK_ENTRY_SWEET_MAX
+        # Priority: almost bonded → under 25k climbers → sixk → new dust
+        col_rank = {
+            "almost_bonded": 0,
+            "under_25k": 1,
+            "recently_bonded": 2,
+            "sixk_radar": 3,
+            "new": 4,
+        }.get(col, 5)
         return (
-            0 if col == "sixk_radar" or cand.get("_sixk_radar") else 1,
+            col_rank,
+            0 if bond >= MIGRATION_NEAR_MIN_PCT else 1,
+            -bond,
             0 if sweet else 1,
             0 if in_sixk else 2,
-            abs(mcap - 6000) if mcap else 99999,
+            abs(mcap - 6000) if mcap and col_rank >= 3 else 0,
             -cand.get("_quick_alpha", 0),
             float(cand.get("_age_minutes") or 999),
         )
@@ -998,14 +1136,35 @@ async def _run_trenches_scan(
                     or (result.get("market") or {}).get("marketCap")
                     or 0
                 )
-                if mcap > SCAN_MCAP_MAX_USD:
+                col_cap = (
+                    MIGRATION_MCAP_MAX_USD
+                    if column in ("almost_bonded", "recently_bonded", "under_25k")
+                    else SCAN_MCAP_MAX_USD
+                )
+                if mcap > col_cap:
                     return {
                         "column": column,
                         "skipped": True,
                         "mcap_usd": mcap,
                     }
+                bond = (result.get("market") or {}).get("pumpfun", {}).get(
+                    "bonding_progress"
+                )
+                if bond is None and mcap > 0:
+                    bond = min(100.0, (mcap / GRADUATION_MCAP_USD) * 100)
+                mig = result.get("migrationPath") or {}
+                # Re-bucket into the right UI lane by live bonding
+                lane = mig.get("lane") or ""
+                out_col = column
+                if column not in ("recently_bonded",) and lane == "near_migration":
+                    out_col = "almost_bonded"
+                elif (
+                    column in ("new", "sixk_radar")
+                    and UNDER25K_MIN_USD <= mcap <= UNDER25K_MAX_USD
+                ):
+                    out_col = "under_25k"
                 return {
-                    "column": column,
+                    "column": out_col,
                     "chainId": "solana",
                     "tokenAddress": cand["tokenAddress"],
                     "name": base.get("name") or cand.get("name"),
@@ -1014,9 +1173,7 @@ async def _run_trenches_scan(
                     "mcap_usd": mcap,
                     "age_minutes": (result.get("market") or {}).get("age_minutes")
                     or cand.get("_age_minutes"),
-                    "bonding_progress": (result.get("market") or {}).get(
-                        "pumpfun", {}
-                    ).get("bonding_progress"),
+                    "bonding_progress": bond,
                     "safetyTier": report["tier"],
                     "safetyScore": report["score"],
                     "safetyReport": report,
@@ -1031,11 +1188,13 @@ async def _run_trenches_scan(
                     "socialSignals": result.get("socialSignals") or {},
                     "smartMoney": smart_money,
                     "alphaSetup": result.get("alphaSetup") or {},
+                    "migrationPath": mig,
                     "checkerHub": checker_hub,
                     "sixkRadar": column == "sixk_radar"
                     or SIXK_RADAR_MIN_USD <= mcap <= SIXK_RADAR_MAX_USD,
                     "entrySweet": SIXK_ENTRY_SWEET_MIN <= mcap <= SIXK_ENTRY_SWEET_MAX,
                     "tradePlan": result.get("tradePlan") or {},
+                    "migrationLane": lane or out_col,
                 }
             except Exception:
                 return None
@@ -1051,40 +1210,58 @@ async def _run_trenches_scan(
         if r.get("skipped"):
             skipped_late += 1
             continue
-        analyzed_columns[r["column"]].append(r)
+        col = r.get("column") or "new"
+        if col not in analyzed_columns:
+            analyzed_columns[col] = []
+        analyzed_columns[col].append(r)
 
     for col in analyzed_columns:
-        # Prefer moon-setup alpha + early mcap — never rank high-mcap first
         def _alpha_rank(t: dict) -> int:
             a = (t.get("alphaSetup") or {}).get("tier") or ""
             return {
-                "MOON_SETUP": 0,
-                "ALPHA": 1,
-                "WATCH_ALPHA": 2,
-                "SPEC": 3,
-                "WEAK": 4,
-                "SKIP": 5,
-            }.get(a, 4)
+                "MEGA_MOON": 0,
+                "MOON_SETUP": 1,
+                "ALPHA": 2,
+                "WATCH_ALPHA": 3,
+                "SPEC": 4,
+                "WEAK": 5,
+                "SKIP": 6,
+            }.get(a, 5)
 
-        analyzed_columns[col].sort(
-            key=lambda t: (
-                _alpha_rank(t),
-                0 if (t.get("mcap_usd") or 0) <= SCAN_MCAP_FOCUS_MAX_USD else 1,
-                float(t.get("age_minutes") or 999),
-                {"SAFE_ENTRY": 0, "WATCH": 1, "CAUTION": 2, "HIGH_RISK": 3, "AVOID": 4, "UNSAFE": 5}.get(
-                    t["safetyTier"], 9
-                ),
-                -(t.get("alphaSetup") or {}).get("score", 0),
-                -t.get("safetyScore", 0),
-                t.get("mcap_usd") or 0,
+        # Near-migration: rank by bonding + migration score first
+        if col in ("almost_bonded", "under_25k"):
+            analyzed_columns[col].sort(
+                key=lambda t: (
+                    -(t.get("migrationPath") or {}).get("score", 0),
+                    -(float(t.get("bonding_progress") or 0)),
+                    _alpha_rank(t),
+                    {"SAFE_ENTRY": 0, "WATCH": 1, "CAUTION": 2, "HIGH_RISK": 3, "AVOID": 4, "UNSAFE": 5}.get(
+                        t.get("safetyTier"), 9
+                    ),
+                    -t.get("safetyScore", 0),
+                )
             )
-        )
+        else:
+            analyzed_columns[col].sort(
+                key=lambda t: (
+                    _alpha_rank(t),
+                    0 if (t.get("mcap_usd") or 0) <= SCAN_MCAP_FOCUS_MAX_USD else 1,
+                    float(t.get("age_minutes") or 999),
+                    {"SAFE_ENTRY": 0, "WATCH": 1, "CAUTION": 2, "HIGH_RISK": 3, "AVOID": 4, "UNSAFE": 5}.get(
+                        t.get("safetyTier"), 9
+                    ),
+                    -(t.get("alphaSetup") or {}).get("score", 0),
+                    -t.get("safetyScore", 0),
+                    t.get("mcap_usd") or 0,
+                )
+            )
 
     all_tokens = (
-        analyzed_columns.get("sixk_radar", [])
-        + analyzed_columns["new"]
-        + analyzed_columns["almost_bonded"]
-        + analyzed_columns["recently_bonded"]
+        analyzed_columns.get("almost_bonded", [])
+        + analyzed_columns.get("under_25k", [])
+        + analyzed_columns.get("sixk_radar", [])
+        + analyzed_columns.get("new", [])
+        + analyzed_columns.get("recently_bonded", [])
     )
     sixk_live = [
         t for t in all_tokens
@@ -1115,8 +1292,9 @@ async def _run_trenches_scan(
     safe_picks = _deduped_safe
     safe_picks.sort(
         key=lambda t: (
-            0 if (t.get("alphaSetup") or {}).get("tier") == "MOON_SETUP" else 1,
-            0 if (t.get("alphaSetup") or {}).get("is_alpha") else 2,
+            0 if (t.get("alphaSetup") or {}).get("tier") == "MEGA_MOON" else 1,
+            0 if (t.get("alphaSetup") or {}).get("tier") == "MOON_SETUP" else 2,
+            0 if (t.get("alphaSetup") or {}).get("is_alpha") else 3,
             -(t.get("alphaSetup") or {}).get("score", 0),
             -(t.get("socialSignals") or {}).get("highlight", False),
             -t["safetyScore"],
@@ -1126,13 +1304,69 @@ async def _run_trenches_scan(
 
     alpha_picks = [
         t for t in all_tokens
-        if (t.get("alphaSetup") or {}).get("highlight")
+        if (t.get("alphaSetup") or {}).get("tier") in (
+            "MEGA_MOON", "MOON_SETUP", "ALPHA", "WATCH_ALPHA"
+        )
     ]
     alpha_picks.sort(
         key=lambda t: (
-            0 if (t.get("alphaSetup") or {}).get("tier") == "MOON_SETUP" else 1,
+            0 if (t.get("migrationPath") or {}).get("lane") == "near_migration" else 1,
+            0 if (t.get("alphaSetup") or {}).get("tier") == "MEGA_MOON" else 1,
+            0 if (t.get("alphaSetup") or {}).get("tier") == "MOON_SETUP" else 2,
+            -(t.get("migrationPath") or {}).get("score", 0),
             -(t.get("alphaSetup") or {}).get("score", 0),
             t.get("mcap_usd") or 0,
+        )
+    )
+
+    # Primary recommendation: can actually migrate (bonding path)
+    migration_picks = [
+        t
+        for t in all_tokens
+        if (t.get("migrationPath") or {}).get("lane") == "near_migration"
+        and (t.get("migrationPath") or {}).get("score", 0) >= 40
+        and not ((t.get("safetyReport") or {}).get("tier") in ("UNSAFE", "AVOID"))
+    ]
+    migration_picks.sort(
+        key=lambda t: (
+            -(t.get("migrationPath") or {}).get("score", 0),
+            -(float(t.get("bonding_progress") or 0)),
+            -t.get("safetyScore", 0),
+        )
+    )
+    under25k_picks = [
+        t
+        for t in all_tokens
+        if (
+            (t.get("migrationPath") or {}).get("lane") == "under_25k"
+            or (
+                UNDER25K_MIN_USD
+                <= float(t.get("mcap_usd") or 0)
+                <= UNDER25K_MAX_USD
+            )
+        )
+        and (t.get("migrationPath") or {}).get("lane") != "near_migration"
+    ]
+    under25k_picks.sort(
+        key=lambda t: (
+            -(t.get("migrationPath") or {}).get("score", 0),
+            -(t.get("alphaSetup") or {}).get("score", 0),
+            -float(t.get("bonding_progress") or 0),
+        )
+    )
+    early_lottery = [
+        t
+        for t in all_tokens
+        if (t.get("migrationPath") or {}).get("lane") == "early_lottery"
+        or (
+            0 < float(t.get("mcap_usd") or 0) < UNDER25K_MIN_USD
+            and float(t.get("bonding_progress") or 0) < MIGRATION_NEAR_MIN_PCT
+        )
+    ]
+    early_lottery.sort(
+        key=lambda t: (
+            -(t.get("alphaSetup") or {}).get("score", 0),
+            float(t.get("age_minutes") or 999),
         )
     )
 
@@ -1166,16 +1400,24 @@ async def _run_trenches_scan(
         "padre_url": padre.trenches_url(),
         "scanned_at": time.time(),
         "columns": analyzed_columns,
+        # Order: migration first (what can graduate), then under $25k, then lottery
+        "migration_picks": migration_picks[:12],
+        "under25k_picks": under25k_picks[:12],
+        "early_lottery": early_lottery[:12],
         "safe_picks": safe_picks[:10],
         "alpha_picks": alpha_picks[:12],
         "sixk_picks": sixk_sweet[:15] or sixk_live[:15],
         "narrative_picks": narrative_picks[:15],
         "counts": {
             "sixk_radar": len(analyzed_columns.get("sixk_radar", [])),
-            "new": len(analyzed_columns["new"]),
-            "almost_bonded": len(analyzed_columns["almost_bonded"]),
-            "recently_bonded": len(analyzed_columns["recently_bonded"]),
+            "new": len(analyzed_columns.get("new", [])),
+            "under_25k": len(analyzed_columns.get("under_25k", [])),
+            "almost_bonded": len(analyzed_columns.get("almost_bonded", [])),
+            "recently_bonded": len(analyzed_columns.get("recently_bonded", [])),
             "total": len(all_tokens),
+            "migration_picks": len(migration_picks),
+            "under25k_picks": len(under25k_picks),
+            "early_lottery": len(early_lottery),
             "safe_picks": len(safe_picks),
             "alpha_picks": len(alpha_picks),
             "sixk_live": len(sixk_live),
@@ -1187,15 +1429,15 @@ async def _run_trenches_scan(
             "analyze_failures": analyze_failures,
             "skipped_late_mcap": skipped_late,
             "mcap_max_usd": SCAN_MCAP_MAX_USD,
+            "migration_mcap_max_usd": MIGRATION_MCAP_MAX_USD,
+            "graduation_mcap_usd": GRADUATION_MCAP_USD,
             "sixk_band": f"${SIXK_RADAR_MIN_USD:,.0f}–${SIXK_RADAR_MAX_USD:,.0f}",
         },
         "checker_picks": checker_pass[:12],
         "learning": _learning_memory.get_outcomes_summary(),
         "disclaimer": (
-            "Padre live WebSocket requires login — data mirrors Trenches via "
-            "pump.fun (NEW / Almost Bonded / Recently Bonded). "
-            "Not financial advice. Memecoins are extremely high risk. "
-            "Learned entry/TP/exit improve as more tokens are tracked."
+            "Sections: Near Migration (can graduate ~$69k) · Under $25k · Early Lottery. "
+            "Most $3–8k picks never migrate — size lottery tiny. Not financial advice."
         ),
     }
     _trenches_cache.update({"key": cache_key, "data": response, "ts": time.time()})
@@ -1219,13 +1461,39 @@ async def padre_trenches_feed(
 @app.get("/api/learning/stats")
 async def learning_stats():
     """How many tokens learned + outcome breakdown."""
+    from services.learning.mega_seeds import MEGA_SEEDS, MEGA_SEEDS_VERSION
+
     summary = _learning_memory.get_outcomes_summary()
-    recent = _learning_memory.recent_finalized(15)
+    recent = _learning_memory.recent_finalized(20)
+    mega_recent = [
+        r
+        for r in _learning_memory.recent_finalized(80)
+        if r.get("outcome") in ("MEGA", "SUPER")
+        or float(r.get("ath_mcap") or 0) >= 1_000_000
+    ][:15]
     return {
         "ok": True,
         "summary": summary,
         "recent": recent,
+        "mega_seeds": {
+            "version": MEGA_SEEDS_VERSION,
+            "applied": _learning_memory.get_meta("mega_seeds_version"),
+            "catalog_size": len(MEGA_SEEDS),
+            "in_db": mega_recent,
+        },
         "db": str(BASE_DIR / "data" / "learning.db"),
+    }
+
+
+@app.post("/api/learning/reseed")
+async def learning_reseed(force: bool = Query(False)):
+    """Re-apply historical mega + scam seeds into the learning DB."""
+    n = _learning.seed_known_examples(force=force)
+    return {
+        "ok": True,
+        "seeded": n,
+        "summary": _learning_memory.get_outcomes_summary(),
+        "version": _learning_memory.get_meta("mega_seeds_version"),
     }
 
 
