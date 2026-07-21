@@ -9,10 +9,17 @@ const SCAN_TIMEOUT_MS = 120000;
 const CLOUD_API = "https://moon-scanner-9tlz.onrender.com";
 const IS_CLOUD_HOST = /onrender\.com$/i.test(location.hostname);
 
+function defaultApiMode() {
+  // Localhost → local server (cloud free tier sleeps / times out)
+  if (IS_CLOUD_HOST) return "cloud";
+  if (/^(localhost|127\.0\.0\.1)$/i.test(location.hostname || "")) return "local";
+  return "cloud";
+}
+
 function getApiBase() {
   // On Render always use same origin (already the cloud backend)
   if (IS_CLOUD_HOST) return "";
-  const mode = localStorage.getItem("moon_api_mode") || "cloud";
+  const mode = localStorage.getItem("moon_api_mode") || defaultApiMode();
   if (mode === "local") return "";
   return CLOUD_API;
 }
@@ -25,7 +32,7 @@ function apiUrl(path) {
 
 function getApiModeLabel() {
   if (IS_CLOUD_HOST) return "cloud";
-  return localStorage.getItem("moon_api_mode") || "cloud";
+  return localStorage.getItem("moon_api_mode") || defaultApiMode();
 }
 
 const $ = (sel) => document.querySelector(sel);
@@ -33,6 +40,14 @@ const grid = $("#tokenSections") || $("#tokenGrid");
 const sectionNav = $("#sectionNav");
 const statusBar = $("#statusBar");
 const statCount = $("#statCount");
+
+function setGridHtml(html) {
+  if (!grid) {
+    console.error("tokenSections missing from page");
+    return;
+  }
+  grid.innerHTML = html;
+}
 let sectionFilter = "all";
 let lastScanMeta = {};
 let lastRunnerAlerts = [];
@@ -67,12 +82,16 @@ function saveStickyNearMig() {
 function isClientCrashedRunner(t) {
   const mcap = Number(t.mcap_usd || 0);
   const ath = Number(t.ath_mcap || t.ath_market_cap || t.pumpfun?.ath_market_cap || 0);
-  const peak = Math.max(ath, Number(t._peak_mcap || t.peak_mcap || 0), mcap);
+  const peakStored = Math.max(ath, Number(t._peak_mcap || t.peak_mcap || 0));
+  const peak = Math.max(peakStored, mcap);
   const rr = t.runnerRadar || {};
   if (rr.crashed || rr.stage === "crashed") return true;
-  if (mcap <= 0) return true;
+  // Unknown mcap (preview / loading) is NOT a crash — do not empty the UI
+  if (mcap <= 0) {
+    return peakStored >= 5000; // only if we previously knew a real peak
+  }
   // −45% from any peak ≥$4k
-  if (peak >= 4000 && mcap < peak * 0.55) return true;
+  if (peakStored >= 4000 && mcap < peakStored * 0.55) return true;
   // −60% hard crash
   if (peak >= 3500 && mcap < peak * 0.4) return true;
   const pc = t.priceChange || t.market?.priceChange || {};
@@ -194,13 +213,13 @@ function setStatus(msg, loading = false) {
 }
 
 function showLoadingGrid(msg = "Scanning Padre Trenches + RugCheck…") {
-  grid.innerHTML = `
+  setGridHtml(`
     <div class="loading-state">
       <div class="loading-spinner"></div>
       <p>${msg}</p>
-      <p class="loading-hint">First load can take 30–90s. Cached results load instantly.</p>
-    </div>`;
-  statCount.textContent = "…";
+      <p class="loading-hint">First load can take 30–90s. If stuck: start local server (start.bat) or switch Backend → Local.</p>
+    </div>`);
+  if (statCount) statCount.textContent = "…";
 }
 
 async function fetchWithTimeout(url, timeoutMs = SCAN_TIMEOUT_MS) {
@@ -953,6 +972,10 @@ function applyClientFilters(tokens) {
 }
 
 function renderGrid(tokens) {
+  if (!grid) {
+    setStatus("UI error: #tokenSections missing — hard-refresh (Ctrl+F5)");
+    return;
+  }
   let visible = purgeDumpedTokens(applyClientFilters(tokens));
   const hidden = tokens.length - visible.length;
   if (sectionFilter && sectionFilter !== "all") {
@@ -974,16 +997,16 @@ function renderGrid(tokens) {
   if (!visible.length) {
     let msg = "No tokens matched your filters.";
     if (tokens.length && hidden) {
-      msg = `${tokens.length} tokens scanned but ${hidden} hidden by filters. Uncheck “Hide UNSAFE” or “Checker PASS only” to see more.`;
+      msg = `${tokens.length} tokens scanned but ${hidden} hidden (dumps/filters). Uncheck filters or view All.`;
     } else if (tokens.length && sectionFilter !== "all") {
-      msg = `No tokens in this section yet. Try “All” or re-scan — near-migration needs ~45%+ bonding (~$31k+).`;
+      msg = `No tokens in this section yet. Try “All” or re-scan.`;
     } else if (!tokens.length) {
       msg = $("#checkerPassOnly")?.checked
-        ? "No tokens passed all security checkers. Try disabling filters or re-scan."
-        : "No trenches tokens found — re-scan in a few seconds.";
+        ? "No tokens passed checkers. Disable filters or re-scan."
+        : "No tokens found — re-scan. If stuck: run start.bat, Backend → Local, open http://127.0.0.1:8765";
     }
-    grid.innerHTML = `<div class="empty-state"><div class="icon">◈</div><p>${msg}</p>
-      ${tokens.length ? `<button class="btn btn-secondary" id="showAllBtn">Show all ${tokens.length} scanned</button>` : ""}</div>`;
+    setGridHtml(`<div class="empty-state"><div class="icon">◈</div><p>${msg}</p>
+      ${tokens.length ? `<button class="btn btn-secondary" id="showAllBtn">Show all ${tokens.length} scanned</button>` : ""}</div>`);
     const showAll = $("#showAllBtn");
     if (showAll) {
       showAll.onclick = () => {
@@ -994,7 +1017,7 @@ function renderGrid(tokens) {
         renderGrid(tokens);
       };
     }
-    statCount.textContent = "0";
+    if (statCount) statCount.textContent = "0";
     return;
   }
 
@@ -1608,9 +1631,15 @@ async function runScan(force = false, silent = false) {
     );
     scheduleAutoRefresh();
   } catch (err) {
-    setStatus(`Scan failed: ${err.message}`);
+    const tip =
+      getApiModeLabel() === "cloud"
+        ? " Cloud may be cold/slow — switch Backend → Local and run start.bat."
+        : " Is the local server running? Double-click start.bat then open http://127.0.0.1:8765";
+    setStatus(`Scan failed: ${err.message}.${tip}`);
     if (!lastTokens.length) {
-      grid.innerHTML = `<div class="empty-state"><div class="icon">◈</div><p>${err.message}</p><p>Click <strong>Scan Padre Trenches</strong> to retry.</p></div>`;
+      setGridHtml(`<div class="empty-state"><div class="icon">◈</div><p>${err.message}</p>
+        <p>${tip}</p>
+        <p>Click <strong>Scan Padre Trenches</strong> to retry.</p></div>`);
     }
   } finally {
     scanInFlight = false;
@@ -1686,12 +1715,20 @@ $("#runnerAlerts")?.addEventListener("change", () => {
     renderRunnerAlertBar([]);
   }
 });
+// Prefer local on first visit from localhost
+if (!IS_CLOUD_HOST && !localStorage.getItem("moon_api_mode")) {
+  localStorage.setItem("moon_api_mode", "local");
+}
+if ($("#apiBackend") && !IS_CLOUD_HOST) {
+  $("#apiBackend").value = getApiModeLabel();
+}
+updateBackendPill();
 showLoadingGrid(
   getApiModeLabel() === "cloud" && !IS_CLOUD_HOST
     ? "Loading from cloud (same as Render)…"
-    : "Scanning…"
+    : "Starting local scan…"
 );
-fetchWithTimeout("/api/health", 15000).then(async (res) => {
+fetchWithTimeout("/api/health", 8000).then(async (res) => {
   try {
     const h = await res.json();
     const mode = getApiModeLabel();
@@ -1703,11 +1740,22 @@ fetchWithTimeout("/api/health", 15000).then(async (res) => {
   } catch { /* ignore */ }
   runScan(false);
 }).catch(() => {
+  if (!IS_CLOUD_HOST && getApiModeLabel() === "local") {
+    setStatus(
+      "Local server not running — start start.bat, then refresh. Or switch Backend → Cloud.",
+      false
+    );
+    setGridHtml(`<div class="empty-state"><div class="icon">◈</div>
+      <p><strong>Local server is offline</strong></p>
+      <p>1. Double-click <code>C:\\Users\\MMghongo\\moon-scanner\\start.bat</code></p>
+      <p>2. Open <a href="http://127.0.0.1:8765">http://127.0.0.1:8765</a></p>
+      <p>3. Or set Backend → Cloud (synced) if Render is up</p></div>`);
+    return;
+  }
   if (!IS_CLOUD_HOST && getApiModeLabel() === "cloud") {
     setStatus("Cloud unreachable — falling back to local…", true);
     localStorage.setItem("moon_api_mode", "local");
-    const sel = $("#apiBackend");
-    if (sel) sel.value = "local";
+    const sel = $("#apiBackend");    if (sel) sel.value = "local";
     updateBackendPill();
   } else {
     setStatus("Server not reachable — starting scan anyway…", true);
