@@ -289,6 +289,14 @@ def predict_trade(
     climb_ok = bond >= 18 or mcap >= 12_000  # mid-climb entry also valid
     hard_avoid = bool(avoid.get("hard_avoid") or avoid.get("avoid"))
     crashed = bool(feats.get("already_crashed") or runner.get("crashed"))
+    # Early lottery: almost nothing clears $7k — never ENTER here
+    early_lottery_band = mcap > 0 and mcap < 8_000 and bond < 14
+    weak_early = (
+        early_lottery_band
+        and not is_mega_10m
+        and (alpha.get("score") or 0) < 80
+        and fp_tier not in ("MEGA_10M",)
+    )
 
     # --- Decision policy (learned LR + structure) ---
     if hard_avoid or safety.get("is_honeypot") or safety.get("rugged") or crashed:
@@ -298,6 +306,14 @@ def predict_trade(
             avoid.get("summary")
             or runner.get("crash_reason")
             or "Hard avoid / crashed — do not enter"
+        )
+    elif weak_early or (early_lottery_band and p_good < 0.55):
+        action = "SKIP" if p_bad >= 0.35 or feats.get("one_way_wash") else "WATCH"
+        confidence = 25 if action == "WATCH" else 70
+        summary = (
+            f"Early lottery ${mcap:,.0f} — most never clear $7k. "
+            f"{'SKIP' if action == 'SKIP' else 'WATCH only'}; size zero or dust. "
+            f"P(good)≈{p_good*100:.0f}%."
         )
     elif p_bad >= 0.55 and sample_n >= 12:
         action = "SKIP"
@@ -309,13 +325,23 @@ def predict_trade(
         action = "SKIP"
         confidence = 80
         summary = "Wash / one-way tape — learned pattern of dumps & scams"
+    elif early_lottery_band:
+        # Absolute ban: no ENTER under $8k / low bond (user feedback)
+        action = "WATCH"
+        confidence = 22
+        summary = (
+            f"Early lottery ${mcap:,.0f} — ENTER disabled until mid-climb (~$12k+ / 18%+ bond). "
+            f"Most die under $7k."
+        )
     elif (
         p_mega >= 0.22
         and p_bad < 0.42
         and sample_n >= 8
         and not hard_avoid
-        and (is_mega or is_mega_10m or climb_ok)
-        and (alpha.get("score") or 0) >= 55
+        and climb_ok
+        and mcap >= 10_000
+        and (is_mega or is_mega_10m or bond >= 18)
+        and (alpha.get("score") or 0) >= 58
     ):
         action = "ENTER"
         confidence = min(88, int(40 + p_mega * 90 + (10 if is_mega_10m else 0)))
@@ -323,7 +349,14 @@ def predict_trade(
             f"Learned ENTER — P(mega/win)≈{p_mega*100:.0f}% · P(bad)≈{p_bad*100:.0f}% "
             f"(n≈{sample_n}). {alpha.get('ceiling_label') or ceiling}."
         )
-    elif is_mega_10m and is_mega and (early_ok or climb_ok) and not hard_avoid and p_bad < 0.5:
+    elif (
+        is_mega_10m
+        and is_mega
+        and climb_ok
+        and mcap >= 10_000
+        and not hard_avoid
+        and p_bad < 0.5
+    ):
         action = "ENTER"
         confidence = min(90, int(alpha.get("confidence") or 80))
         tags = ", ".join((fp.get("narrative_tags") or [])[:3]) or "multi‑$M structure"
@@ -331,7 +364,7 @@ def predict_trade(
             f"MEGA $10M+ ENTER — FP {fp.get('score', '?')} ({tags}). "
             f"Learned P(mega)≈{p_mega*100:.0f}%."
         )
-    elif is_mega and (early_ok or climb_ok) and not hard_avoid and p_bad < 0.48:
+    elif is_mega and climb_ok and mcap >= 10_000 and not hard_avoid and p_bad < 0.48:
         action = "ENTER"
         confidence = min(86, int(alpha.get("confidence") or 75))
         summary = (
@@ -341,11 +374,12 @@ def predict_trade(
     elif (
         high_ceil
         and alpha.get("tier") in ("MEGA_MOON", "MOON_SETUP")
-        and (early_ok or climb_ok)
+        and climb_ok
+        and mcap >= 10_000
         and not hard_avoid
         and p_bad < 0.5
     ):
-        action = "ENTER" if p_good >= 0.18 else "WATCH"
+        action = "ENTER" if p_good >= 0.22 else "WATCH"
         confidence = min(82, int(alpha.get("confidence") or 68))
         summary = (
             f"High-ceiling {'ENTER' if action == 'ENTER' else 'WATCH'} — "

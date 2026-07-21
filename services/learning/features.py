@@ -78,6 +78,9 @@ def extract_features(
         mcap_bin = "unknown"
     elif mcap < 3500:
         mcap_bin = "under_3.5k"
+    elif mcap <= 7000:
+        # User feedback: almost nothing in this band survives past $7k
+        mcap_bin = "lottery_dies_under_7k"
     elif mcap <= 7500:
         mcap_bin = "sweet_3.5_7.5k"
     elif mcap <= 12000:

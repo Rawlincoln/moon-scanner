@@ -25,6 +25,7 @@ from config import (
     DEFAULT_MAX_AGE_MINUTES,
     NEAR_MIGRATION_MAX_STICKY,
     NEAR_MIGRATION_STICKY_TTL_SEC,
+    REQUEST_TIMEOUT,
     RUNNER_ALERT_TTL_SEC,
     RUNNER_RADAR_INTERVAL_SEC,
     DEFAULT_SCAN_LIMIT,
@@ -50,7 +51,9 @@ from config import (
     TRENCHES_CONCURRENCY,
     UNDER25K_MAX_USD,
     UNDER25K_MIN_USD,
+    USER_AGENT,
 )
+import httpx
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("moon-scanner")
@@ -248,14 +251,73 @@ async def _background_trenches_warm() -> None:
 
 
 async def _background_runner_alert_loop() -> None:
-    """Recompute sticky runner alerts from latest trenches cache often."""
+    """Recompute sticky runner alerts + revalidate near-mig mcaps from pump.fun."""
     await asyncio.sleep(10)
     while True:
         try:
+            await _revalidate_sticky_near_mig_live()
             await _refresh_runner_alerts_from_cache()
         except Exception as exc:
             logger.warning("Runner alert loop failed: %s", exc)
         await asyncio.sleep(RUNNER_RADAR_INTERVAL_SEC)
+
+
+async def _revalidate_sticky_near_mig_live() -> None:
+    """Fetch live mcap for pinned near-mig tokens; drop dumps immediately."""
+    async with _near_mig_lock:
+        mints = list(_near_mig_store.keys())
+    if not mints:
+        return
+    async with httpx.AsyncClient(
+        timeout=REQUEST_TIMEOUT,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Origin": "https://pump.fun",
+            "Accept": "application/json",
+        },
+    ) as client:
+        for mint in mints[:30]:
+            try:
+                resp = await client.get(
+                    f"https://frontend-api-v3.pump.fun/coins/{mint}"
+                )
+                if resp.status_code != 200:
+                    continue
+                coin = resp.json()
+                mcap = float(coin.get("usd_market_cap") or 0)
+                ath = float(coin.get("ath_market_cap") or 0)
+                async with _near_mig_lock:
+                    prev = _near_mig_store.get(mint)
+                    if not prev:
+                        continue
+                    peak = max(
+                        float(prev.get("_peak_mcap") or 0),
+                        ath,
+                        mcap,
+                        float(prev.get("mcap_usd") or 0),
+                    )
+                    prev["mcap_usd"] = mcap
+                    prev["ath_mcap"] = ath or prev.get("ath_mcap")
+                    prev["_peak_mcap"] = peak
+                    prev["_last_seen"] = time.time()
+                    bond = PumpFunClient.bonding_progress(coin)
+                    prev["bonding_progress"] = bond
+                    crashed, reason = is_crashed_runner(
+                        prev, mcap=mcap, ath=ath, peak=peak
+                    )
+                    if crashed or (peak >= 10_000 and mcap < peak * 0.55):
+                        logger.info(
+                            "Drop sticky near-mig %s: %s (mcap=%.0f peak=%.0f)",
+                            mint[:8],
+                            reason or "fade",
+                            mcap,
+                            peak,
+                        )
+                        _near_mig_store.pop(mint, None)
+                        async with _runner_alert_lock:
+                            _runner_alert_store.pop(mint, None)
+            except Exception:
+                continue
 
 
 async def _refresh_runner_alerts_from_cache() -> list[dict]:
@@ -397,7 +459,7 @@ async def lifespan(app: FastAPI):
         logger.warning("Learning seed failed: %s", exc)
     # Rebuild feature_stats periodically so new features + caps improve accuracy
     try:
-        ver = "learn_lr_v2_2026_07"
+        ver = "learn_lr_v3_lottery_dump_2026_07"
         if _learning_memory.get_meta("learn_model_version") != ver:
             rebuilt = _learning_memory.rebuild_feature_stats()
             _learning_memory.set_meta("learn_model_version", ver)
@@ -791,6 +853,21 @@ async def _analyze_token(
         trade_plan = _learning.observe_analysis(result)
         if trade_plan:
             result["tradePlan"] = trade_plan
+            # Never promote early lottery as invest (most die under $7k)
+            if mcap_for_sm > 0 and mcap_for_sm < 8_000:
+                trade_plan = dict(trade_plan)
+                if trade_plan.get("action") == "ENTER":
+                    trade_plan["action"] = "WATCH"
+                    trade_plan["summary"] = (
+                        f"Early lottery ${mcap_for_sm:,.0f} — ENTER blocked until mid-climb. "
+                        + (trade_plan.get("summary") or "")
+                    )
+                result["tradePlan"] = trade_plan
+                invest = dict(result.get("investSignal") or invest)
+                if invest.get("signal") in ("STRONG_INVEST", "INVEST"):
+                    invest["signal"] = "WATCH"
+                    invest["summary"] = trade_plan.get("summary")
+                    result["investSignal"] = invest
             # Align invest signal with learned plan when strong
             if trade_plan.get("action") == "SKIP":
                 invest = dict(invest)
@@ -1623,22 +1700,47 @@ async def _run_trenches_scan(
         )
     )
 
-    # Primary recommendation: can actually migrate (bonding path)
+    # Attach runner scores early so dump/lottery filters can use them
+    for t in all_tokens:
+        t["runnerRadar"] = score_runner_candidate(t)
+
+    def _not_dumped(t: dict) -> bool:
+        if (t.get("safetyReport") or {}).get("tier") in ("UNSAFE", "AVOID"):
+            return False
+        crashed, _ = is_crashed_runner(t)
+        if crashed:
+            return False
+        rr = t.get("runnerRadar") or {}
+        if rr.get("crashed") or rr.get("stage") == "crashed":
+            return False
+        peak = max(
+            float(t.get("_peak_mcap") or 0),
+            float(t.get("ath_mcap") or 0),
+            float(t.get("mcap_usd") or 0),
+        )
+        mcap = float(t.get("mcap_usd") or 0)
+        if peak >= 5_000 and mcap > 0 and mcap < peak * 0.55:
+            return False
+        return True
+
+    # Primary: near migration — quality + not dumped
     migration_picks = [
         t
         for t in all_tokens
         if _is_near_migration_token(t)
-        and not ((t.get("safetyReport") or {}).get("tier") in ("UNSAFE", "AVOID"))
+        and _not_dumped(t)
         and (
-            (t.get("migrationPath") or {}).get("score", 0) >= 35
+            (t.get("migrationPath") or {}).get("score", 0) >= 42
             or float(t.get("bonding_progress") or 0) >= MIGRATION_NEAR_MIN_PCT
             or t.get("column") in ("almost_bonded", "recently_bonded")
         )
+        and float(t.get("mcap_usd") or 0) >= 12_000
     ]
     migration_picks.sort(
         key=lambda t: (
             -(t.get("migrationPath") or {}).get("score", 0),
             -(float(t.get("bonding_progress") or 0)),
+            -(t.get("runnerRadar") or {}).get("score", 0),
             -t.get("safetyScore", 0),
         )
     )
@@ -1647,16 +1749,22 @@ async def _run_trenches_scan(
         sticky_near = await _pin_near_migration_tokens(
             migration_picks + (analyzed_columns.get("almost_bonded") or [])
         )
-        migration_picks = _merge_sticky_near_mig(migration_picks, sticky_near)
-        # Also re-inject sticky into almost_bonded column for UI flatten
+        # Drop dumps from sticky before merge
+        sticky_near = [t for t in sticky_near if _not_dumped(t)]
+        migration_picks = [
+            t for t in _merge_sticky_near_mig(migration_picks, sticky_near) if _not_dumped(t)
+        ]
         ab = analyzed_columns.get("almost_bonded") or []
-        analyzed_columns["almost_bonded"] = _merge_sticky_near_mig(ab, sticky_near)
+        analyzed_columns["almost_bonded"] = [
+            t for t in _merge_sticky_near_mig(ab, sticky_near) if _not_dumped(t)
+        ]
     except Exception as exc:
         logger.debug("near-mig sticky failed: %s", exc)
     under25k_picks = [
         t
         for t in all_tokens
-        if (
+        if _not_dumped(t)
+        and (
             (t.get("migrationPath") or {}).get("lane") == "under_25k"
             or (
                 UNDER25K_MIN_USD
@@ -1673,21 +1781,46 @@ async def _run_trenches_scan(
             -float(t.get("bonding_progress") or 0),
         )
     )
-    early_lottery = [
-        t
-        for t in all_tokens
-        if (t.get("migrationPath") or {}).get("lane") == "early_lottery"
-        or (
-            0 < float(t.get("mcap_usd") or 0) < UNDER25K_MIN_USD
-            and float(t.get("bonding_progress") or 0) < MIGRATION_NEAR_MIN_PCT
+    # Early lottery: quality only + never invest; most die under $7k
+    early_lottery = []
+    for t in all_tokens:
+        mcap = float(t.get("mcap_usd") or 0)
+        bond = float(t.get("bonding_progress") or 0)
+        if not (0 < mcap < UNDER25K_MIN_USD and bond < MIGRATION_NEAR_MIN_PCT):
+            if (t.get("migrationPath") or {}).get("lane") != "early_lottery":
+                continue
+        if not _not_dumped(t):
+            continue
+        # Require at least one real signal or hide garbage
+        alpha = t.get("alphaSetup") or {}
+        social = t.get("socialSignals") or {}
+        if (
+            (alpha.get("score") or 0) < 48
+            and not social.get("highlight")
+            and not (alpha.get("megaFingerprint") or {}).get("score", 0) >= 50
+        ):
+            continue
+        # Force non-invest presentation
+        t = dict(t)
+        t["investSignal"] = "WATCH"
+        t["investSummary"] = (
+            f"Early lottery ${mcap:,.0f} — most die under $7k. "
+            "No ENTER; watch structure only."
         )
-    ]
+        if t.get("tradePlan"):
+            tp = dict(t["tradePlan"])
+            if tp.get("action") == "ENTER":
+                tp["action"] = "WATCH"
+                tp["summary"] = t["investSummary"]
+            t["tradePlan"] = tp
+        early_lottery.append(t)
     early_lottery.sort(
         key=lambda t: (
             -(t.get("alphaSetup") or {}).get("score", 0),
             float(t.get("age_minutes") or 999),
         )
     )
+    early_lottery = early_lottery[:8]
 
     checker_pass = [
         t for t in all_tokens
@@ -1760,9 +1893,7 @@ async def _run_trenches_scan(
             "Runner radar alerts multi-stage $10M-path candidates. Not financial advice."
         ),
     }
-    # Tag every token with runnerRadar + refresh sticky alerts
-    for t in all_tokens:
-        t["runnerRadar"] = score_runner_candidate(t)
+    # runnerRadar already attached above
     _trenches_cache.update({"key": cache_key, "data": response, "ts": time.time()})
     try:
         alerts = await _refresh_runner_alerts_from_cache()

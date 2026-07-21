@@ -71,11 +71,22 @@ function isClientCrashedRunner(t) {
   const rr = t.runnerRadar || {};
   if (rr.crashed || rr.stage === "crashed") return true;
   if (mcap <= 0) return true;
-  if (peak >= 5000 && mcap < peak * 0.45) return true; // −55% from peak
+  // −45% from any peak ≥$4k
+  if (peak >= 4000 && mcap < peak * 0.55) return true;
+  // −60% hard crash
+  if (peak >= 3500 && mcap < peak * 0.4) return true;
   const pc = t.priceChange || t.market?.priceChange || {};
-  if (Number(pc.h1) <= -40 || Number(pc.m5) <= -40) return true;
-  if (peak >= 12000 && mcap < 4000) return true; // climbed then died
+  if (Number(pc.h1) <= -32 || Number(pc.m5) <= -28 || Number(pc.h6) <= -40) return true;
+  if (peak >= 12000 && mcap < 6000) return true; // climbed then died
+  if (peak >= 20000 && mcap < peak * 0.6) return true;
+  // Early fail: peaked under $15k then back to dust
+  if (peak >= 5500 && peak < 15000 && mcap < 3500) return true;
   return false;
+}
+
+/** Strip dumped tokens from every list before render */
+function purgeDumpedTokens(tokens) {
+  return (tokens || []).filter((t) => !isClientCrashedRunner(t));
 }
 
 function pinNearMigrationTokens(tokens) {
@@ -104,8 +115,12 @@ function pinNearMigrationTokens(tokens) {
       Number(t.mcap_usd || 0),
       Number(prev.mcap_usd || 0)
     );
-    // Drop sticky if collapsed after climb
-    if (peak >= 12000 && mcap > 0 && mcap < peak * 0.45) {
+    // Drop sticky if collapsed after climb (−45% from peak)
+    if (peak >= 5000 && mcap > 0 && mcap < peak * 0.55) {
+      delete stickyNearMig[t.tokenAddress];
+      continue;
+    }
+    if (peak >= 12000 && mcap < 6000) {
       delete stickyNearMig[t.tokenAddress];
       continue;
     }
@@ -746,14 +761,17 @@ function renderTrenchesCard(t) {
     : `<div class="token-icon placeholder">◎</div>`;
 
   const invSig = t.investSignal || "";
+  // Never show ENTER/STRONG on early lottery (most die under $7k)
+  const lottery = lane === "early_lottery";
+  const dumped = isClientCrashedRunner(t);
   const bannerCls = isPreview
     ? "WATCH"
-    : avoid.avoid || plan.action === "SKIP" || invSig === "AVOID"
+    : dumped || avoid.avoid || plan.action === "SKIP" || invSig === "AVOID"
       ? "AVOID"
-      : lane === "near_migration" && (invSig === "STRONG_INVEST" || invSig === "INVEST" || (mig.score || 0) >= 55)
-        ? "STRONG_INVEST"
-        : lane === "early_lottery"
-          ? "WATCH"
+      : lottery
+        ? "WATCH"
+        : lane === "near_migration" && (invSig === "STRONG_INVEST" || invSig === "INVEST" || (mig.score || 0) >= 55)
+          ? "STRONG_INVEST"
           : invSig === "STRONG_INVEST" || invSig === "INVEST"
             ? invSig
             : tier === "SAFE_ENTRY"
@@ -766,19 +784,27 @@ function renderTrenchesCard(t) {
   const sixk = t.sixkRadar || (mcap >= 2000 && mcap <= 9000);
   const bond = Number(t.bonding_progress ?? mig.bonding_pct ?? 0);
   const title = isPreview
-    ? (lane === "near_migration" ? `🚀 ${bond.toFixed(0)}% MIGRATION PATH` : sweet ? "🎯 $6K SWEET (lottery)" : sixk ? "$6K RADAR (lottery)" : "SCANNING…")
-    : lane === "near_migration"
-      ? `NEAR MIGRATION ${bond.toFixed(0)}% (mig ${mig.score ?? "—"})`
-      : lane === "early_lottery"
-        ? `EARLY LOTTERY · ${tier}`
-        : alpha.is_alpha
-          ? `${alpha.tier.replace(/_/g, " ")} (${alpha.score})`
-          : `${tier} (${t.safetyScore ?? 0}%)`;
+    ? (lane === "near_migration" ? `🚀 ${bond.toFixed(0)}% MIGRATION PATH` : sweet ? "🎯 LOTTERY (no ENTER)" : sixk ? "EARLY LOTTERY" : "SCANNING…")
+    : dumped
+      ? "DUMPED — skip"
+      : lottery
+        ? `EARLY LOTTERY · no ENTER · ${tier}`
+        : lane === "near_migration"
+          ? `NEAR MIGRATION ${bond.toFixed(0)}% (mig ${mig.score ?? "—"})`
+          : alpha.is_alpha
+            ? `${alpha.tier.replace(/_/g, " ")} (${alpha.score})`
+            : `${tier} (${t.safetyScore ?? 0}%)`;
   const action = isPreview
     ? (lane === "near_migration"
       ? `MCap ${fmtUsd(mcap)} · ${bond.toFixed(0)}% bonded — analyzing…`
-      : (rep.verdict || "RugCheck + Padre analysis running…"))
-    : (mig.summary || alpha.summary || rep.verdict || "");
+      : lottery
+        ? `Most die under $7k — watch only · ${fmtUsd(mcap)}`
+        : (rep.verdict || "RugCheck + Padre analysis running…"))
+    : dumped
+      ? "Already dumped from peak — removed from recommendations"
+      : lottery
+        ? (t.investSummary || plan.summary || "Early lottery — most never clear $7k. No ENTER.")
+        : (mig.summary || alpha.summary || plan.summary || rep.verdict || "");
 
   card.innerHTML = `
     ${sourceBadgesHtml([t.column ? `padre_trenches_${t.column}` : "pump.fun"])}
@@ -927,7 +953,7 @@ function applyClientFilters(tokens) {
 }
 
 function renderGrid(tokens) {
-  let visible = applyClientFilters(tokens);
+  let visible = purgeDumpedTokens(applyClientFilters(tokens));
   const hidden = tokens.length - visible.length;
   if (sectionFilter && sectionFilter !== "all") {
     visible = visible.filter((t) => {
@@ -1003,9 +1029,9 @@ function renderGrid(tokens) {
     },
     {
       id: "early_lottery",
-      title: "Early Lottery ($2–8k)",
-      hint: "Most never migrate. Tiny size only — structure scoring, not conviction.",
-      tokens: [...groups.early_lottery, ...groups.other],
+      title: "Early Lottery ($2–8k) — no ENTER",
+      hint: "Historically most die under $7k. Shown for structure watch only — never size as a conviction play.",
+      tokens: purgeDumpedTokens([...groups.early_lottery, ...groups.other]),
     },
   ];
 
@@ -1538,7 +1564,7 @@ async function runScan(force = false, silent = false) {
       });
       // Keep near-migration on screen across brief empty / partial polls
       lastTokens = mergeStickyNearMigration(lastTokens);
-      lastTokens = filterDisplayMcap(lastTokens);
+      lastTokens = purgeDumpedTokens(filterDisplayMcap(lastTokens));
       lastTokens.sort((a, b) => {
         const la = tokenLane(a);
         const lb = tokenLane(b);

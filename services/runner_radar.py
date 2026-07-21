@@ -21,10 +21,11 @@ from config import (
     SIXK_ENTRY_SWEET_MIN,
 )
 
-# Dump thresholds — once hit, drop from runners tab / sticky
-CRASH_FROM_ATH_FRAC = 0.45  # −55% from ATH = dead as a runner
-CRASH_FROM_PEAK_FRAC = 0.50  # −50% from our tracked peak
-HARD_CRASH_FRAC = 0.35  # −65% from ATH = hard crash
+# Dump thresholds — once hit, drop from ALL display lanes / sticky
+CRASH_FROM_ATH_FRAC = 0.55  # −45% from ATH = dead (was 0.45 / −55%)
+CRASH_FROM_PEAK_FRAC = 0.58  # −42% from tracked peak
+SOFT_FADE_FRAC = 0.70  # −30% from peak = not a clean runner
+HARD_CRASH_FRAC = 0.40  # −60% from ATH
 
 
 def _f(val: Any, default: float = 0.0) -> float:
@@ -57,22 +58,26 @@ def is_crashed_runner(
     ath: float | None = None,
     peak: float | None = None,
 ) -> tuple[bool, str]:
-    """Return (crashed, reason) — used to purge runners tab."""
+    """Return (crashed, reason) — purge from runners / near-mig / lottery."""
     mcap = _f(mcap if mcap is not None else token.get("mcap_usd"))
     ath = _f(ath if ath is not None else extract_ath_mcap(token))
-    peak = _f(peak if peak is not None else token.get("_peak_mcap") or token.get("peak_mcap"))
+    peak = _f(
+        peak
+        if peak is not None
+        else token.get("_peak_mcap") or token.get("peak_mcap")
+    )
     high = max(ath, peak, mcap)
 
     if mcap <= 0:
         return True, "No mcap — dead / unknown"
 
-    # Price change dumps (DexScreener)
+    # Price change dumps (DexScreener) — tighter than before
     mkt = token.get("market") or {}
     pc = mkt.get("priceChange") or token.get("priceChange") or {}
-    for key in ("m5", "h1", "h6"):
+    for key, thr in (("m5", -28), ("h1", -32), ("h6", -40)):
         ch = _f(pc.get(key))
-        if ch <= -40:
-            return True, f"Crashed {ch:.0f}% ({key})"
+        if ch <= thr:
+            return True, f"Dumped {ch:.0f}% ({key})"
 
     avoid = (
         (token.get("safetyReport") or {}).get("avoid")
@@ -88,36 +93,69 @@ def is_crashed_runner(
             "drained_curve",
             "creator_dumped",
             "blocklist",
+            "sell_pressure",
         )
     ):
         return True, avoid.get("summary") or "Avoid crash flags"
 
-    if high >= 5_000 and mcap < high * CRASH_FROM_ATH_FRAC:
+    # Any meaningful peak then −45%
+    if high >= 4_000 and mcap < high * CRASH_FROM_ATH_FRAC:
         dump_pct = (1 - mcap / high) * 100
-        return True, f"Crashed {dump_pct:.0f}% from peak ${high:,.0f} → ${mcap:,.0f}"
+        return True, f"Dumped {dump_pct:.0f}% from peak ${high:,.0f} → ${mcap:,.0f}"
 
-    # Bonding collapsed while sticky near-mig (was climbing, now dust)
+    # Hard crash −60%
+    if high >= 3_500 and mcap < high * HARD_CRASH_FRAC:
+        return True, f"Hard crash from ${high:,.0f} → ${mcap:,.0f}"
+
     bond = _f(token.get("bonding_progress"))
     if bond <= 0 and mcap > 0:
         bond = min(100.0, (mcap / GRADUATION_MCAP_USD) * 100)
     was_near = (
         token.get("column") in ("almost_bonded", "recently_bonded")
-        or _f(token.get("_peak_mcap")) >= 15_000
-        or ath >= 15_000
+        or _f(token.get("_peak_mcap")) >= 12_000
+        or ath >= 12_000
+        or high >= 20_000
     )
-    if was_near and mcap < 4_000 and bond < 12:
-        return True, f"Collapsed to ${mcap:,.0f} after climb — not a runner"
+    if was_near and mcap < 6_000:
+        return True, f"Collapsed to ${mcap:,.0f} after climb — remove"
+    if was_near and bond < 15 and mcap < high * 0.5:
+        return True, f"Bonding collapsed {bond:.0f}% after peak"
 
-    # Curve drained
+    # Early lottery that already failed (user: none go past 7k)
+    if high >= 5_500 and mcap < 3_500 and high < 15_000:
+        return True, f"Early fail ${high:,.0f}→${mcap:,.0f} — not a runner"
+
     quote = _f(
         token.get("quote_sol")
         or (token.get("safety") or {}).get("lp_quote_sol")
         or (token.get("safetyReport") or {}).get("lp_quote_sol")
     )
-    if 0 < quote < 0.4 and mcap < 8_000 and high >= 10_000:
+    if 0 < quote < 0.5 and high >= 8_000:
         return True, f"Curve drained ({quote:.2f} SOL) after peak"
 
     return False, ""
+
+
+def is_fading_not_runner(
+    token: dict[str, Any],
+    *,
+    mcap: float | None = None,
+    peak: float | None = None,
+) -> bool:
+    """−30% from peak: keep off runner alerts (may still show under dump filter)."""
+    mcap = _f(mcap if mcap is not None else token.get("mcap_usd"))
+    peak = _f(
+        peak
+        if peak is not None
+        else max(
+            extract_ath_mcap(token),
+            _f(token.get("_peak_mcap") or token.get("peak_mcap")),
+            mcap,
+        )
+    )
+    if peak >= 6_000 and mcap > 0 and mcap < peak * SOFT_FADE_FRAC:
+        return True
+    return False
 
 
 def score_runner_candidate(token: dict[str, Any]) -> dict[str, Any]:
@@ -147,6 +185,24 @@ def score_runner_candidate(token: dict[str, Any]) -> dict[str, Any]:
             "peak_mcap": round(peak) if peak else None,
             "bonding_pct": round(bond, 1),
         }
+    # Early lottery dust — never alert as runner (user: nothing past $7k)
+    if mcap > 0 and mcap < 8_000 and peak < 12_000 and bond < 14:
+        return {
+            "score": max(0, min(40, int(bond * 2))),
+            "stage": "early_lottery",
+            "alert": False,
+            "priority": 90,
+            "summary": f"Early lottery ${mcap:,.0f} — most die under $7k; not a runner alert",
+            "reasons": ["Sub-$8k lottery — no runner alert"],
+            "crashed": False,
+            "mcap_usd": round(mcap),
+            "ath_mcap": round(ath) if ath else None,
+            "peak_mcap": round(peak) if peak else None,
+            "bonding_pct": round(bond, 1),
+        }
+    if is_fading_not_runner(token, mcap=mcap, peak=peak):
+        # Allow scoring but never alert
+        pass
 
     avoid = (
         (token.get("safetyReport") or {}).get("avoid")
@@ -252,37 +308,50 @@ def score_runner_candidate(token: dict[str, Any]) -> dict[str, Any]:
         score += 5
 
     # Require still above a floor of its peak for mid/near stages
-    if stage in ("mid_climb", "near_migration", "post_migration") and peak >= 10_000:
-        if mcap < peak * 0.70:
-            score -= 20
+    if stage in ("mid_climb", "near_migration", "post_migration") and peak >= 8_000:
+        if mcap < peak * SOFT_FADE_FRAC:
+            score -= 25
             reasons.append("Fading from peak — not a clean runner")
+
+    # Early structure / lottery: very hard to alert (most die under $7k)
+    if stage in ("early_structure", "too_early") and mcap < 10_000:
+        score = min(score, 58)
+        reasons.append("Early band — historically rarely clears $7k")
 
     score = int(max(0, min(100, score)))
 
     alert = False
     priority = 50
-    # Never alert if soft-fading hard
-    fading = peak >= 10_000 and mcap < peak * 0.70
-    if not fading:
-        if stage == "near_migration" and score >= 48:
+    fading = is_fading_not_runner(token, mcap=mcap, peak=peak)
+    if not fading and stage != "early_lottery":
+        if stage == "near_migration" and score >= 52 and mcap >= peak * 0.75:
             alert = True
             priority = 0
-        elif stage == "mid_climb" and score >= 55:
+        elif stage == "mid_climb" and score >= 60 and mcap >= 12_000:
             alert = True
             priority = 1
-        elif stage == "early_structure" and score >= 62 and tier in (
-            "MEGA_MOON",
-            "MOON_SETUP",
-            "ALPHA",
+        elif (
+            stage == "early_structure"
+            and score >= 78
+            and tier in ("MEGA_MOON", "MOON_SETUP")
+            and fp_score >= 72
+            and mcap >= 5_000
         ):
+            # Only extreme structure early — still rare
             alert = True
             priority = 2
-        elif stage == "post_migration" and score >= 50 and mcap < 500_000:
+        elif stage == "post_migration" and score >= 55 and mcap < 500_000 and mcap >= 40_000:
             alert = True
             priority = 3
-        elif fp_score >= 78 and mcap <= 20_000 and score >= 58:
+        elif (
+            fp_score >= 80
+            and mcap >= 10_000
+            and mcap <= 40_000
+            and score >= 65
+            and not fading
+        ):
             alert = True
-            priority = 2
+            priority = 1
 
     summary = (
         f"RUNNER {stage.replace('_', ' ').upper()} · score {score} · "
