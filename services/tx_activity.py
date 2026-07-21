@@ -117,10 +117,16 @@ def score_tx_activity(
     zone = "dead"
 
     # --- Total activity band (learned) ---
+    # One-way wash never counts as sweet volume
+    one_way = sells_m5 == 0 and buys_m5 >= 10
     if total < TX_DEAD_TOTAL_MAX:
         score += 0
         zone = "dead"
         reasons.append(f"Dead book {total} tx/5m — no interest (learned ~3% win rate)")
+    elif one_way:
+        score += 5
+        zone = "wash"
+        reasons.append(f"High buys but 0 sells ({buys_m5}B) — wash, not interest")
     elif TX_SWEET_TOTAL_MIN <= total <= TX_SWEET_TOTAL_MAX:
         score += 42
         zone = "sweet"
