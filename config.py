@@ -48,13 +48,13 @@ REQUEST_TIMEOUT = 12.0  # fail fast — don't wait on slow rugcheck/padre
 PUMPFUN_API_URL = "https://frontend-api-v3.pump.fun"
 PADRE_API_URL = "https://backend.padre.gg"
 PADRE_TRADE_URL = "https://trade.padre.gg"
-DEFAULT_MAX_AGE_MINUTES = 15  # tighter window = catch tokens earlier
+DEFAULT_MAX_AGE_MINUTES = 40  # longer window — runners climb for 20–90+ min
 MAX_AGE_MINUTES_CAP = 180
-CACHE_TTL = 10
+CACHE_TTL = 8
 # Short cache so we don't re-show tokens that already pumped
 # Keep cache short on both local + Render so scans stay aligned with live market
-TRENCHES_CACHE_TTL = 15
-TRENCHES_CONCURRENCY = 12 if IS_PRODUCTION else 24
+TRENCHES_CACHE_TTL = 10
+TRENCHES_CONCURRENCY = 16 if IS_PRODUCTION else 28
 EXCLUDE_GRADUATED_DEFAULT = True
 EARLY_MCAP_MIN_USD = 1_500
 EARLY_MCAP_MAX_USD = 65_000
@@ -79,9 +79,12 @@ SIXK_RADAR_MIN_USD = 2_000
 SIXK_RADAR_MAX_USD = 9_000
 SIXK_ENTRY_SWEET_MIN = 3_500
 SIXK_ENTRY_SWEET_MAX = 7_500
-# Continuous local warm of the $6k band so UI isn't minutes behind
-BACKGROUND_SCAN_INTERVAL_SEC = 18
-BACKGROUND_SCAN_PER_COLUMN = 8
+# Continuous warm so UI isn't minutes behind climbers
+BACKGROUND_SCAN_INTERVAL_SEC = 12
+BACKGROUND_SCAN_PER_COLUMN = 12
+# Dedicated runner-radar poll (multi-stage $10M–$100M watch)
+RUNNER_RADAR_INTERVAL_SEC = 10
+RUNNER_ALERT_TTL_SEC = 45 * 60  # keep sticky alerts 45 min
 
 # Pro trencher — early band still uses ~$6k; migration track uses bonding %
 TARGET_MCAP_USD = 6_000

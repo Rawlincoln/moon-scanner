@@ -23,6 +23,8 @@ from config import (
     BACKGROUND_SCAN_PER_COLUMN,
     CACHE_TTL,
     DEFAULT_MAX_AGE_MINUTES,
+    RUNNER_ALERT_TTL_SEC,
+    RUNNER_RADAR_INTERVAL_SEC,
     DEFAULT_SCAN_LIMIT,
     EVM_CHAIN_IDS,
     EXCLUDE_GRADUATED_DEFAULT,
@@ -67,6 +69,7 @@ from services.checker_hub import run_checker_hub
 from services.alpha_setup import analyze_alpha_setup
 from services.avoid_filters import analyze_avoid_flags
 from services.migration_path import analyze_migration_path
+from services.runner_radar import build_runner_alerts, score_runner_candidate
 from services.smart_money import (
     analyze_smart_money,
     analyze_smart_money_async,
@@ -79,22 +82,110 @@ from services.learning.tracker import LearningEngine
 _learning_memory = LearningMemory(BASE_DIR / "data" / "learning.db")
 _learning = LearningEngine(_learning_memory)
 
+# Sticky runner alerts (mint → alert dict) — survives across scans
+_runner_alert_store: dict[str, dict[str, Any]] = {}
+_runner_alert_lock = asyncio.Lock()
+
 
 async def _background_trenches_warm() -> None:
-    """Keep $6k radar warm so we don't miss climbers by minutes."""
-    await asyncio.sleep(8)
+    """Keep trenches + runner band warm so climbers aren't minutes late."""
+    await asyncio.sleep(6)
     while True:
         try:
-            logger.info("Background $6k radar refresh starting")
+            logger.info("Background trenches/runner refresh starting")
             await _analyze_trenches(
                 per_column=BACKGROUND_SCAN_PER_COLUMN,
-                max_age_minutes=max(DEFAULT_MAX_AGE_MINUTES, 30),
+                max_age_minutes=max(DEFAULT_MAX_AGE_MINUTES, 60),
                 force=True,
             )
-            logger.info("Background $6k radar refresh done")
+            logger.info("Background trenches/runner refresh done")
         except Exception as exc:
-            logger.warning("Background $6k radar refresh failed: %s", exc)
+            logger.warning("Background trenches refresh failed: %s", exc)
         await asyncio.sleep(BACKGROUND_SCAN_INTERVAL_SEC)
+
+
+async def _background_runner_alert_loop() -> None:
+    """Recompute sticky runner alerts from latest trenches cache often."""
+    await asyncio.sleep(10)
+    while True:
+        try:
+            await _refresh_runner_alerts_from_cache()
+        except Exception as exc:
+            logger.warning("Runner alert loop failed: %s", exc)
+        await asyncio.sleep(RUNNER_RADAR_INTERVAL_SEC)
+
+
+async def _refresh_runner_alerts_from_cache() -> list[dict]:
+    """Update sticky alert store from latest trenches scan cache."""
+    cached = _trenches_cache.get("data") or {}
+    tokens: list[dict] = []
+    for key in (
+        "migration_picks",
+        "under25k_picks",
+        "early_lottery",
+        "alpha_picks",
+        "safe_picks",
+        "sixk_picks",
+    ):
+        tokens.extend(cached.get(key) or [])
+    cols = cached.get("columns") or {}
+    for col in ("almost_bonded", "under_25k", "sixk_radar", "new", "recently_bonded"):
+        tokens.extend(cols.get(col) or [])
+    # Dedupe
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for t in tokens:
+        m = t.get("tokenAddress") or ""
+        if not m or m in seen or t.get("skipped"):
+            continue
+        seen.add(m)
+        # Attach runner score on the token for UI
+        rr = score_runner_candidate(t)
+        t["runnerRadar"] = rr
+        deduped.append(t)
+
+    prev = set(_runner_alert_store.keys())
+    fresh = build_runner_alerts(deduped, prev_mints=prev)
+    now = time.time()
+    async with _runner_alert_lock:
+        # Update / insert
+        for item in fresh:
+            mint = item["tokenAddress"]
+            existing = _runner_alert_store.get(mint)
+            if existing:
+                item["is_new_alert"] = False
+                item["first_seen"] = existing.get("first_seen") or existing.get(
+                    "alerted_at"
+                )
+            else:
+                item["is_new_alert"] = True
+                item["first_seen"] = now
+            item["alerted_at"] = now
+            _runner_alert_store[mint] = item
+        # Expire stale
+        dead = [
+            m
+            for m, v in _runner_alert_store.items()
+            if now - float(v.get("alerted_at") or 0) > RUNNER_ALERT_TTL_SEC
+        ]
+        for m in dead:
+            _runner_alert_store.pop(m, None)
+        # Drop if no longer scoring as alert and older than 3 min
+        for mint in list(_runner_alert_store.keys()):
+            still = next((x for x in fresh if x["tokenAddress"] == mint), None)
+            if not still:
+                age = now - float(_runner_alert_store[mint].get("first_seen") or 0)
+                if age > 180:
+                    # keep sticky 3+ min only if still in store from recent scan
+                    pass
+        ordered = sorted(
+            _runner_alert_store.values(),
+            key=lambda x: (
+                x.get("runnerRadar", {}).get("priority", 99),
+                -(x.get("runnerRadar", {}).get("score") or 0),
+            ),
+        )
+        return ordered
 
 
 async def _background_learning_loop() -> None:
@@ -124,6 +215,8 @@ async def lifespan(app: FastAPI):
     if BACKGROUND_SCAN_INTERVAL_SEC > 0 and BACKGROUND_SCAN_PER_COLUMN > 0:
         tasks.append(asyncio.create_task(_background_trenches_warm()))
     tasks.append(asyncio.create_task(_background_learning_loop()))
+    if RUNNER_RADAR_INTERVAL_SEC > 0:
+        tasks.append(asyncio.create_task(_background_runner_alert_loop()))
     yield
     logger.info("Moon Scanner shutting down")
     for task in tasks:
@@ -636,6 +729,8 @@ async def health():
         "trenches_refreshing": _trenches_refreshing,
         "cache_age_sec": round(cache_age, 1) if cache_age is not None else None,
         "background_scan": BACKGROUND_SCAN_INTERVAL_SEC > 0,
+        "runner_radar": True,
+        "runner_alerts": len(_runner_alert_store),
         "learning": {
             "tracked": learn.get("total_tracked", 0),
             "active": learn.get("active", 0),
@@ -1408,6 +1503,7 @@ async def _run_trenches_scan(
         "alpha_picks": alpha_picks[:12],
         "sixk_picks": sixk_sweet[:15] or sixk_live[:15],
         "narrative_picks": narrative_picks[:15],
+        "runner_alerts": [],  # filled below after sticky store update
         "counts": {
             "sixk_radar": len(analyzed_columns.get("sixk_radar", [])),
             "new": len(analyzed_columns.get("new", [])),
@@ -1436,10 +1532,36 @@ async def _run_trenches_scan(
         "checker_picks": checker_pass[:12],
         "learning": _learning_memory.get_outcomes_summary(),
         "disclaimer": (
-            "Sections: Near Migration (can graduate ~$69k) · Under $25k · Early Lottery. "
-            "Most $3–8k picks never migrate — size lottery tiny. Not financial advice."
+            "Sections: Near Migration · Under $25k · Early Lottery. "
+            "Runner radar alerts multi-stage $10M-path candidates. Not financial advice."
         ),
     }
+    # Tag every token with runnerRadar + refresh sticky alerts
+    for t in all_tokens:
+        t["runnerRadar"] = score_runner_candidate(t)
+    _trenches_cache.update({"key": cache_key, "data": response, "ts": time.time()})
+    try:
+        alerts = await _refresh_runner_alerts_from_cache()
+        response["runner_alerts"] = alerts[:15]
+        response["counts"]["runner_alerts"] = len(alerts)
+        # Promote high-score runner alerts into migration_picks if missing
+        alert_mints = {a["tokenAddress"] for a in alerts}
+        have = {t.get("tokenAddress") for t in migration_picks}
+        for a in alerts:
+            if a["tokenAddress"] in have:
+                continue
+            # Find full token
+            full = next(
+                (t for t in all_tokens if t.get("tokenAddress") == a["tokenAddress"]),
+                None,
+            )
+            if full and (full.get("runnerRadar") or {}).get("score", 0) >= 55:
+                migration_picks.insert(0, full)
+        response["migration_picks"] = migration_picks[:15]
+        response["counts"]["migration_picks"] = len(migration_picks)
+        _ = alert_mints  # silence lint
+    except Exception as exc:
+        logger.debug("runner alerts attach failed: %s", exc)
     _trenches_cache.update({"key": cache_key, "data": response, "ts": time.time()})
     return response
 
@@ -1456,6 +1578,28 @@ async def padre_trenches_feed(
         per_column=per_column,
         max_age_minutes=max_age_minutes,
     )
+
+
+@app.get("/api/runner-radar")
+async def runner_radar():
+    """Sticky multi-stage alerts for $10M–$100M path candidates.
+
+    Poll this every ~10s from the UI for browser notifications.
+    """
+    alerts = await _refresh_runner_alerts_from_cache()
+    new_only = [a for a in alerts if a.get("is_new_alert")]
+    return {
+        "ok": True,
+        "alerts": alerts[:20],
+        "new_alerts": new_only[:10],
+        "count": len(alerts),
+        "new_count": len(new_only),
+        "ts": time.time(),
+        "hint": (
+            "Multi-stage: early structure · mid climb · near migration · post-migration. "
+            "Enable browser notifications in the UI."
+        ),
+    }
 
 
 @app.get("/api/learning/stats")

@@ -35,6 +35,9 @@ const statusBar = $("#statusBar");
 const statCount = $("#statCount");
 let sectionFilter = "all";
 let lastScanMeta = {};
+let lastRunnerAlerts = [];
+let notifiedMints = new Set(JSON.parse(localStorage.getItem("moon_notified_mints") || "[]"));
+let runnerPollTimer = null;
 
 function initChains() {
   const container = $("#chainChips");
@@ -661,6 +664,7 @@ function renderTrenchesCard(t) {
   card.innerHTML = `
     ${sourceBadgesHtml([t.column ? `padre_trenches_${t.column}` : "pump.fun"])}
     ${migrationBadgeHtml(t)}
+    ${(t.runnerRadar || {}).alert || (t.runnerRadar || {}).score >= 55 ? `<div class="runner-score-row"><span class="runner-score-badge">⚡ RUNNER ${t.runnerRadar.score} · ${(t.runnerRadar.stage || "").replace(/_/g, " ")}</span></div>` : ""}
     ${sixk && lane === "early_lottery" ? `<div class="sixk-row"><span class="sixk-badge ${sweet ? "sweet" : ""}">${sweet ? "🎯 LOTTERY $3.5–7.5K" : "EARLY LOTTERY"} · ${fmtUsd(mcap)}</span></div>` : ""}
     ${socialBadgesHtml(social)}
     ${alphaSetupHtml(alpha, true)}
@@ -809,6 +813,9 @@ function renderGrid(tokens) {
   if (sectionFilter && sectionFilter !== "all") {
     visible = visible.filter((t) => {
       const lane = tokenLane(t);
+      if (sectionFilter === "runners") {
+        return (t.runnerRadar || {}).alert || (t.runnerRadar || {}).score >= 55;
+      }
       if (sectionFilter === "near_migration") return lane === "near_migration" || lane === "migrated";
       return lane === sectionFilter;
     });
@@ -844,7 +851,17 @@ function renderGrid(tokens) {
   }
 
   const groups = groupByLane(visible);
+  const runners = visible
+    .filter((t) => (t.runnerRadar || {}).alert || (t.runnerRadar || {}).score >= 55)
+    .sort((a, b) => ((b.runnerRadar || {}).score || 0) - ((a.runnerRadar || {}).score || 0));
+
   const sections = [
+    {
+      id: "runners",
+      title: "⚡ Runner Radar ($10M–$100M path)",
+      hint: "Multi-stage alerts: early structure · mid climb · near migration. Act fast.",
+      tokens: runners,
+    },
     {
       id: "near_migration",
       title: "Near Migration",
@@ -866,10 +883,7 @@ function renderGrid(tokens) {
   ];
 
   for (const sec of sections) {
-    if (sectionFilter !== "all" && sectionFilter !== sec.id) {
-      if (!(sectionFilter === "near_migration" && sec.id === "near_migration")) continue;
-    }
-    if (!sec.tokens.length && sectionFilter === "all") continue;
+    if (sectionFilter !== "all" && sectionFilter !== sec.id) continue;
     if (!sec.tokens.length) continue;
     const wrap = document.createElement("section");
     wrap.className = `token-section sec-${sec.id}`;
@@ -1107,8 +1121,130 @@ function openModal(token) {
 function scheduleAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   if ($("#autoRefresh").checked) {
-    // 15s — $6k climbers leave the zone in minutes
-    refreshTimer = setInterval(() => runScan(false, true), 15000);
+    // 10s — climbers leave entry/mid bands fast
+    refreshTimer = setInterval(() => runScan(false, true), 10000);
+  }
+  scheduleRunnerPoll();
+}
+
+function scheduleRunnerPoll() {
+  if (runnerPollTimer) clearInterval(runnerPollTimer);
+  if ($("#runnerAlerts")?.checked === false) return;
+  runnerPollTimer = setInterval(() => pollRunnerRadar(false), 10000);
+}
+
+function playRunnerBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.frequency.value = 880;
+    g.gain.value = 0.06;
+    o.start();
+    setTimeout(() => {
+      o.frequency.value = 1175;
+    }, 90);
+    setTimeout(() => {
+      o.stop();
+      ctx.close();
+    }, 220);
+  } catch {
+    /* audio blocked until user gesture */
+  }
+}
+
+function notifyRunner(alert) {
+  const mint = alert.tokenAddress;
+  if (!mint || notifiedMints.has(mint)) return;
+  notifiedMints.add(mint);
+  // Cap stored set
+  const arr = [...notifiedMints].slice(-80);
+  notifiedMints = new Set(arr);
+  localStorage.setItem("moon_notified_mints", JSON.stringify(arr));
+  playRunnerBeep();
+  const rr = alert.runnerRadar || {};
+  const title = `⚡ RUNNER: $${alert.symbol || "?"} · ${rr.stage || ""}`;
+  const body = rr.summary || `${fmtUsd(alert.mcap_usd)} · score ${rr.score || "?"}`;
+  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+    try {
+      const n = new Notification(title, { body, tag: mint });
+      n.onclick = () => {
+        window.focus();
+        n.close();
+      };
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function renderRunnerAlertBar(alerts) {
+  const bar = $("#runnerAlertBar");
+  const list = $("#runnerAlertList");
+  const countEl = $("#runnerAlertCount");
+  if (!bar || !list) return;
+  lastRunnerAlerts = alerts || [];
+  if (!lastRunnerAlerts.length || $("#runnerAlerts")?.checked === false) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  if (countEl) countEl.textContent = String(lastRunnerAlerts.length);
+  list.innerHTML = lastRunnerAlerts
+    .slice(0, 12)
+    .map((a) => {
+      const rr = a.runnerRadar || {};
+      const isNew = a.is_new_alert ? " is-new" : "";
+      const stage = (rr.stage || "").replace(/_/g, " ");
+      return `<button type="button" class="runner-chip${isNew}" data-mint="${a.tokenAddress}" title="${(rr.summary || "").replace(/"/g, "'")}">
+        <span class="rc-sym">$${a.symbol || "?"}</span>
+        <span class="rc-stage">${stage}</span>
+        <span class="rc-meta">${fmtUsd(a.mcap_usd)} · ${Number(a.bonding_progress || rr.bonding_pct || 0).toFixed(0)}% · ${rr.score ?? "—"}</span>
+      </button>`;
+    })
+    .join("");
+  list.querySelectorAll(".runner-chip").forEach((btn) => {
+    btn.onclick = () => {
+      const mint = btn.dataset.mint;
+      const tok =
+        lastTokens.find((t) => t.tokenAddress === mint) ||
+        lastRunnerAlerts.find((t) => t.tokenAddress === mint);
+      if (tok) {
+        if (tok.safetyTier) openTrenchesModal(tok);
+        else openModal(tok);
+      } else if (mint) {
+        $("#lookupAddress").value = mint;
+        $("#lookupChain").value = "solana";
+        runLookup();
+      }
+    };
+  });
+}
+
+async function pollRunnerRadar(silent = true) {
+  if ($("#runnerAlerts")?.checked === false) return;
+  try {
+    const res = await fetchWithTimeout("/api/runner-radar", 12000);
+    const data = await res.json();
+    const alerts = data.alerts || [];
+    renderRunnerAlertBar(alerts);
+    for (const a of data.new_alerts || []) {
+      if (a.is_new_alert) notifyRunner(a);
+    }
+    // Also notify high-score first-seen from full list if not yet notified
+    for (const a of alerts) {
+      if ((a.runnerRadar || {}).score >= 62 && a.is_new_alert) notifyRunner(a);
+    }
+    if (!silent && alerts.length) {
+      setStatus(
+        `⚡ ${alerts.length} runner alert(s) · ${(data.new_count || 0)} new · multi-stage radar live`,
+        true
+      );
+    }
+  } catch {
+    /* non-fatal */
   }
 }
 
@@ -1292,11 +1428,20 @@ async function runScan(force = false, silent = false) {
     const chkPass = data.counts?.checker_pass ?? lastTokens.filter((x) => (x.checkerHub || {}).consensus?.verdict === "PASS").length;
     const failNote = data.counts?.analyze_failures ? ` · ${data.counts.analyze_failures} analyze errors` : "";
     const staleNote = data.stale ? " · cached" : "";
+    const runN = data.counts?.runner_alerts ?? (data.runner_alerts || []).length;
+    if (data.runner_alerts?.length) {
+      renderRunnerAlertBar(data.runner_alerts);
+      for (const a of data.runner_alerts) {
+        if (a.is_new_alert) notifyRunner(a);
+      }
+    } else {
+      pollRunnerRadar(true);
+    }
     setStatus(
-      `🚀 Near migration: ${migN} · Under $25k: ${u25} · Early lottery: ${lotN} · showing ${visible}/${total} · ` +
+      `⚡ Runners: ${runN} · Near mig: ${migN} · Under $25k: ${u25} · Lottery: ${lotN} · ${visible}/${total} · ` +
       `${chkPass} PASS${failNote} · ${t}` +
       staleNote +
-      `${$("#autoRefresh").checked ? " · auto 15s" : ""}`
+      `${$("#autoRefresh").checked ? " · auto 10s" : ""}`
     );
     scheduleAutoRefresh();
   } catch (err) {
@@ -1357,6 +1502,27 @@ document.addEventListener("click", (e) => {
 initChains();
 initBackendSync();
 initSectionNav();
+$("#enableNotifBtn")?.addEventListener("click", async () => {
+  if (typeof Notification === "undefined") {
+    setStatus("Notifications not supported in this browser");
+    return;
+  }
+  const perm = await Notification.requestPermission();
+  setStatus(
+    perm === "granted"
+      ? "🔔 Runner notifications ON — keep this tab open"
+      : "Notifications blocked — enable in browser settings"
+  );
+  if (perm === "granted") playRunnerBeep();
+});
+$("#runnerAlerts")?.addEventListener("change", () => {
+  if ($("#runnerAlerts").checked) {
+    pollRunnerRadar(false);
+    scheduleRunnerPoll();
+  } else {
+    renderRunnerAlertBar([]);
+  }
+});
 showLoadingGrid(
   getApiModeLabel() === "cloud" && !IS_CLOUD_HOST
     ? "Loading from cloud (same as Render)…"

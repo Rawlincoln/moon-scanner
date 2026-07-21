@@ -689,6 +689,92 @@ select:focus, input:focus { outline: none; border-color: var(--accent2); }
   font-family: var(--mono);
   color: var(--muted);
 }
+
+/* Runner radar alerts */
+.runner-alert-bar {
+  max-width: 1400px;
+  margin: 0 auto 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 200, 80, 0.45);
+  background: linear-gradient(135deg, rgba(255, 160, 40, 0.14), rgba(180, 60, 255, 0.12));
+  box-shadow: 0 0 24px rgba(255, 160, 40, 0.12);
+}
+.runner-alert-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.runner-alert-head strong {
+  color: #ffd06a;
+  letter-spacing: 0.02em;
+}
+.runner-alert-count {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 180, 40, 0.25);
+  color: #ffe6a8;
+}
+.runner-alert-sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.runner-alert-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.runner-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 200, 100, 0.35);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  cursor: pointer;
+  font-family: var(--font);
+  text-align: left;
+  min-width: 140px;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.runner-chip:hover {
+  border-color: #ffd06a;
+  transform: translateY(-1px);
+}
+.runner-chip.is-new {
+  border-color: #00e5a0;
+  box-shadow: 0 0 12px rgba(0, 229, 160, 0.25);
+  animation: runnerPulse 1.2s ease-in-out 3;
+}
+@keyframes runnerPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 229, 160, 0.2); }
+  50% { box-shadow: 0 0 18px rgba(0, 229, 160, 0.45); }
+}
+.rc-sym { font-weight: 700; font-size: 0.85rem; color: #ffe6a8; }
+.rc-stage { font-size: 0.68rem; text-transform: uppercase; color: #7dffc0; }
+.rc-meta { font-size: 0.65rem; font-family: var(--mono); color: var(--muted); }
+.runner-score-row { margin-bottom: 6px; }
+.runner-score-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: #ffe6a8;
+  border: 1px solid rgba(255, 200, 80, 0.55);
+  background: rgba(255, 160, 40, 0.16);
+}
+.sec-runners .section-head h2 { color: #ffd06a; }
+.token-card--migration.token-card--alpha {
+  border-color: rgba(255, 200, 80, 0.5);
+}
 .alpha-badge.moon {
   color: #ffd740;
   border-color: rgba(255, 215, 64, 0.55);

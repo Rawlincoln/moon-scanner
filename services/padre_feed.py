@@ -248,18 +248,32 @@ class PadreFeedClient:
         radar_limit = max(per_column * 3, 24)
         sixk_task = self.fetch_sixk_radar(
             limit=radar_limit,
-            max_age_minutes=max(max_age_minutes, 40),
+            max_age_minutes=max(max_age_minutes, 50),
         )
         new_task = self._from_pumpfun_new(
             per_column * 2, max_age_minutes, exclude_graduated=True
         )
-        almost_task = self._from_pumpfun_almost_bonded(per_column, max_age_minutes)
+        almost_task = self._from_pumpfun_almost_bonded(
+            max(per_column, 16), max(max_age_minutes, 90)
+        )
         bonded_task = self._from_pumpfun_recently_bonded(
-            max(5, per_column // 2), max_age_minutes
+            max(8, per_column // 2), max_age_minutes
         )
-        sixk, new, almost, bonded = await asyncio.gather(
-            sixk_task, new_task, almost_task, bonded_task
+        # Wide market-cap sweep — catches mid-curve climbers $10k–$70k
+        runner_task = self.fetch_runner_band(
+            limit=max(per_column * 3, 30),
+            max_age_minutes=max(max_age_minutes, 120),
         )
+        sixk, new, almost, bonded, runners = await asyncio.gather(
+            sixk_task, new_task, almost_task, bonded_task, runner_task
+        )
+        # Merge runner-band into almost so they get analyzed
+        almost = list(almost) + [
+            r
+            for r in runners
+            if r.get("tokenAddress")
+            not in {c.get("tokenAddress") for c in almost}
+        ]
 
         def prepare(
             items: list[dict],
@@ -454,6 +468,77 @@ class PadreFeedClient:
             )
         )
         return out
+
+    async def fetch_runner_band(
+        self,
+        limit: int = 30,
+        max_age_minutes: float = 120.0,
+    ) -> list[dict]:
+        """Wide net for $10M-path candidates: $8k–$75k on-curve, active trades.
+
+        This is the band where runners are still catchable before migration.
+        """
+        coins: list[dict] = []
+        for sort_key in ("market_cap", "last_trade_timestamp"):
+            batch = await self._fetch_pump_sorted(sort_key, max(limit * 6, 60))
+            coins.extend(batch or [])
+        out: list[dict] = []
+        seen: set[str] = set()
+        for coin in coins:
+            mint = coin.get("mint", "")
+            if not mint or mint in seen or mint in BLOCKED_MINTS:
+                continue
+            if coin.get("complete") or coin.get("is_banned"):
+                continue
+            mcap = float(coin.get("usd_market_cap") or 0)
+            if mcap < UNDER25K_MIN_USD * 0.75 or mcap > MIGRATION_MCAP_MAX_USD:
+                continue
+            age = self.pump.coin_age_minutes(coin)
+            if age > max_age_minutes or age < 1.0:
+                continue
+            progress = self.pump.bonding_progress(coin)
+            # Prefer tokens that already proved some demand
+            tw = str(coin.get("twitter") or "")
+            web = str(coin.get("website") or "")
+            desc = (coin.get("description") or "").strip()
+            has_signal = bool(tw or web or len(desc) >= 12) or progress >= 12
+            if not has_signal and mcap < 15_000:
+                continue
+            seen.add(mint)
+            cand = self.pump.to_candidate(coin)
+            cand["sources"] = [SOURCE_PUMPFUN, "runner_band"]
+            cand["_sort_priority"] = 0
+            cand["_age_minutes"] = age
+            cand["_mcap"] = mcap
+            cand["bonding_progress"] = progress
+            cand["_runner_band"] = True
+            cand["_migration_lane"] = (
+                "almost"
+                if progress >= MIGRATION_ALMOST_MIN_PCT
+                else "near"
+                if progress >= MIGRATION_NEAR_MIN_PCT
+                else "climbing"
+            )
+            # Quick quality score for sort
+            own_x = "status/" not in tw.lower() and (
+                "x.com/" in tw.lower() or "twitter.com/" in tw.lower()
+            )
+            cand["_quick_alpha"] = (
+                int(own_x)
+                + int(bool(web))
+                + int(progress >= 20)
+                + int(mcap >= 15_000)
+                + int(any(h in desc.lower() for h in ("tiktok", "youtube", "viral")))
+            )
+            out.append(cand)
+        out.sort(
+            key=lambda c: (
+                -(float(c.get("bonding_progress") or 0)),
+                -c.get("_quick_alpha", 0),
+                -(c.get("_mcap") or 0),
+            )
+        )
+        return out[:limit]
 
     async def _from_pumpfun_almost_bonded(
         self, limit: int, max_age_minutes: float

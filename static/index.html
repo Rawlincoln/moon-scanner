@@ -19,7 +19,7 @@
       <span class="logo-icon">◈</span>
       <div>
         <h1>Moon Scanner</h1>
-        <p class="tagline">Near migration first · Under $25k · Early lottery last</p>
+        <p class="tagline">Runner radar · Near migration · Don't miss $10M–$100M</p>
       </div>
     </div>
     <div class="header-stats" id="headerStats">
@@ -55,25 +55,37 @@
       <div class="control-group inline">
         <label>Max age</label>
         <select id="maxAge">
-          <option value="10">10 min</option>
-          <option value="15" selected>15 min</option>
+          <option value="15">15 min</option>
           <option value="30">30 min</option>
+          <option value="40" selected>40 min</option>
           <option value="60">1 hour</option>
+          <option value="90">90 min</option>
         </select>
       </div>
       <div class="control-group inline">
         <label>Limit</label>
         <select id="scanLimit">
-          <option value="8" selected>8 (fast)</option>
+          <option value="8">8 (fast)</option>
           <option value="10">10</option>
+          <option value="12" selected>12</option>
           <option value="15">15</option>
           <option value="25">25</option>
         </select>
       </div>
       <div class="control-group inline">
         <label>
-          <input type="checkbox" id="autoRefresh" checked /> Auto-refresh 15s
+          <input type="checkbox" id="autoRefresh" checked /> Auto-refresh 10s
         </label>
+      </div>
+      <div class="control-group inline">
+        <label>
+          <input type="checkbox" id="runnerAlerts" checked /> Runner alerts
+        </label>
+      </div>
+      <div class="control-group inline">
+        <button type="button" class="btn btn-secondary" id="enableNotifBtn" title="Browser notifications for new runners">
+          🔔 Notify
+        </button>
       </div>
       <div class="control-group inline">
         <label>Backend</label>
@@ -93,11 +105,21 @@
     </div>
   </section>
 
-  <div class="status-bar" id="statusBar">Ready — Near Migration (can graduate ~$69k) ranked first; $6k lottery is last</div>
+  <div class="status-bar" id="statusBar">Ready — runner radar watches early structure + mid climb + near migration</div>
+
+  <div id="runnerAlertBar" class="runner-alert-bar" hidden>
+    <div class="runner-alert-head">
+      <strong>⚡ RUNNER ALERTS</strong>
+      <span id="runnerAlertCount" class="runner-alert-count">0</span>
+      <span class="runner-alert-sub">$10M–$100M path · multi-stage</span>
+    </div>
+    <div id="runnerAlertList" class="runner-alert-list"></div>
+  </div>
 
   <main id="tokenMain">
     <div class="section-nav" id="sectionNav" hidden>
       <button type="button" class="sec-btn active" data-sec="all">All</button>
+      <button type="button" class="sec-btn" data-sec="runners">⚡ Runners</button>
       <button type="button" class="sec-btn" data-sec="near_migration">Near Migration</button>
       <button type="button" class="sec-btn" data-sec="under_25k">Under $25k</button>
       <button type="button" class="sec-btn" data-sec="early_lottery">Early Lottery</button>
