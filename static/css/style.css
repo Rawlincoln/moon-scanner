@@ -675,6 +675,32 @@ select:focus, input:focus { outline: none; border-color: var(--accent2); }
   border-style: dashed;
   opacity: 0.95;
 }
+.tx-row { margin-bottom: 6px; }
+.tx-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+}
+.tx-badge.tx-sweet {
+  color: #7dffc0;
+  border-color: rgba(0, 229, 160, 0.55);
+  background: rgba(0, 229, 160, 0.12);
+}
+.tx-badge.tx-up {
+  color: #9ab6ff;
+  border-color: rgba(120, 160, 255, 0.45);
+  background: rgba(90, 130, 255, 0.1);
+}
+.tx-badge.tx-down {
+  color: #ff8a8a;
+  border-color: rgba(255, 100, 100, 0.4);
+  background: rgba(255, 80, 80, 0.08);
+}
+.alpha-mini.tx { color: #7dffc0; border-color: rgba(0, 229, 160, 0.4); }
 .mig-badge.mig-25k {
   color: #9ab6ff;
   border-color: rgba(120, 150, 255, 0.45);

@@ -20,6 +20,7 @@ from config import (
     SIXK_ENTRY_SWEET_MAX,
     SIXK_ENTRY_SWEET_MIN,
 )
+from services.tx_activity import score_tx_activity
 
 # Dump thresholds — once hit, drop from ALL display lanes / sticky
 CRASH_FROM_ATH_FRAC = 0.55  # −45% from ATH = dead (was 0.45 / −55%)
@@ -271,6 +272,31 @@ def score_runner_candidate(token: dict[str, Any]) -> dict[str, Any]:
         stage = "too_early"
         score += 5
 
+    # Transaction interest (learned sweet spot ~30–60 tx/5m, ratio 1.5–2.5)
+    pair_like = {
+        "txns": token.get("txns")
+        or {
+            "m5": {
+                "buys": (token.get("metrics") or {}).get("buys_m5")
+                or (alpha.get("metrics") or {}).get("buys_m5"),
+                "sells": (token.get("metrics") or {}).get("sells_m5")
+                or (alpha.get("metrics") or {}).get("sells_m5"),
+            }
+        },
+        "priceChange": token.get("priceChange") or {},
+    }
+    # Prefer alpha txActivity if already computed
+    tx_act = alpha.get("txActivity") or score_tx_activity(pair=pair_like)
+    if tx_act.get("in_sweet_spot"):
+        score += 16
+        reasons.append("Tx sweet spot — active two-way interest")
+    elif tx_act.get("tilt") == "UP":
+        score += 10
+        reasons.append(tx_act.get("summary") or "Healthy tx interest")
+    elif tx_act.get("tilt") == "DOWN" or tx_act.get("zone") in ("dead", "wash", "one_way"):
+        score -= 20
+        reasons.append(tx_act.get("summary") or "Dead/wash txs — low interest")
+
     # Structure / mega fingerprint
     if tier in ("MEGA_MOON", "MOON_SETUP"):
         score += 18
@@ -331,7 +357,8 @@ def score_runner_candidate(token: dict[str, Any]) -> dict[str, Any]:
     alert = False
     priority = 50
     fading = is_fading_not_runner(token, mcap=mcap, peak=peak)
-    if not fading and stage != "early_lottery":
+    tx_supports = tx_act.get("tilt") == "UP" or tx_act.get("in_sweet_spot")
+    if not fading and stage != "early_lottery" and tx_supports:
         if stage == "near_migration" and score >= 52 and mcap >= peak * 0.75:
             alert = True
             priority = 0
@@ -344,8 +371,9 @@ def score_runner_candidate(token: dict[str, Any]) -> dict[str, Any]:
             and tier in ("MEGA_MOON", "MOON_SETUP")
             and fp_score >= 72
             and mcap >= 5_000
+            and tx_act.get("in_sweet_spot")
         ):
-            # Only extreme structure early — still rare
+            # Only extreme structure early with live interest
             alert = True
             priority = 2
         elif stage == "post_migration" and score >= 55 and mcap < 500_000 and mcap >= 40_000:
@@ -384,6 +412,14 @@ def score_runner_candidate(token: dict[str, Any]) -> dict[str, Any]:
         "migration_score": mig_score,
         "alpha_tier": tier,
         "narrative_tags": tags[:4],
+        "txActivity": {
+            "score": tx_act.get("score"),
+            "zone": tx_act.get("zone"),
+            "tilt": tx_act.get("tilt"),
+            "total_m5": tx_act.get("total_m5"),
+            "in_sweet_spot": tx_act.get("in_sweet_spot"),
+            "buy_ratio_m5": tx_act.get("buy_ratio_m5"),
+        },
     }
 
 

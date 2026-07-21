@@ -200,6 +200,27 @@ def extract_features(
     feats["two_way_flow"] = _b(two_way)
     feats["one_way_wash"] = _b(one_way_wash)
     feats["extreme_wash"] = _b(extreme_wash)
+    # Learned tx activity bands (total buys+sells / 5m)
+    total_tx = buys + sells
+    if total_tx < 5:
+        feats["tx_band"] = "tx_0_4_dead"
+    elif total_tx < 15:
+        feats["tx_band"] = "tx_5_14"
+    elif total_tx < 30:
+        feats["tx_band"] = "tx_15_29"
+    elif total_tx <= 80:
+        feats["tx_band"] = "tx_30_80_sweet"
+    elif total_tx <= 150:
+        feats["tx_band"] = "tx_81_150"
+    else:
+        feats["tx_band"] = "tx_150_plus"
+    if 1.15 <= buy_ratio <= 2.6 and sells >= 4 and buys >= 12:
+        feats["tx_ratio_sweet"] = 1
+    else:
+        feats["tx_ratio_sweet"] = 0
+    feats["tx_sweet_spot"] = _b(
+        25 <= total_tx <= 80 and 1.15 <= buy_ratio <= 2.6 and sells >= 4
+    )
     feats["bond_bin"] = bond_bin
     feats["bonding_pct"] = round(bond, 1)
     feats["migration_lane"] = str(migration.get("lane") or "unknown")
@@ -305,6 +326,10 @@ def feature_keys_for_learning(feats: dict) -> list[str]:
         keys.append("already_crashed")
     if feats.get("fading_from_ath"):
         keys.append("fading_from_ath")
+    if feats.get("tx_sweet_spot"):
+        keys.append("tx_sweet_spot")
+    if feats.get("tx_ratio_sweet"):
+        keys.append("tx_ratio_sweet")
 
     # Mega fingerprint categorical
     fp_tier = str(feats.get("mega_fingerprint") or "NONE")

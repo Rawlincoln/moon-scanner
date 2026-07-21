@@ -1616,6 +1616,9 @@ async def _run_trenches_scan(
                     "bonding_progress": bond,
                     "priceChange": (result.get("market") or {}).get("priceChange")
                     or {},
+                    "txns_m5": (result.get("market") or {}).get("txns_m5") or {},
+                    "txActivity": (result.get("alphaSetup") or {}).get("txActivity")
+                    or {},
                     "safetyTier": report["tier"],
                     "safetyScore": report["score"],
                     "safetyReport": report,

@@ -47,6 +47,10 @@ _FEATURE_WEIGHT = {
     "curve_sol_drained": 2.0,
     "organic_two_way": 1.6,
     "two_way_flow": 1.5,
+    "tx_sweet_spot": 1.8,
+    "tx_ratio_sweet": 1.5,
+    "tx_band:tx_30_80_sweet": 1.6,
+    "tx_band:tx_0_4_dead": 1.7,
     "deep_curve_sol": 1.5,
     "curve_sol_ge_15": 1.4,
     "solid_distribution": 1.5,
@@ -333,6 +337,16 @@ def predict_trade(
             f"Early lottery ${mcap:,.0f} — ENTER disabled until mid-climb (~$12k+ / 18%+ bond). "
             f"Most die under $7k."
         )
+    elif feats.get("tx_band") == "tx_0_4_dead" or (
+        int(feats.get("buys_m5") or 0) + int(feats.get("sells_m5") or 0) < 8
+        and mcap < 25_000
+    ):
+        action = "SKIP" if p_bad >= 0.3 else "WATCH"
+        confidence = 28
+        summary = (
+            "Low transaction interest (<8 tx/5m) — learned dead books almost never run. "
+            f"P(good)≈{p_good*100:.0f}%."
+        )
     elif (
         p_mega >= 0.22
         and p_bad < 0.42
@@ -342,6 +356,11 @@ def predict_trade(
         and mcap >= 10_000
         and (is_mega or is_mega_10m or bond >= 18)
         and (alpha.get("score") or 0) >= 58
+        and (
+            feats.get("tx_sweet_spot")
+            or feats.get("two_way_flow")
+            or (alpha.get("txActivity") or {}).get("tilt") == "UP"
+        )
     ):
         action = "ENTER"
         confidence = min(88, int(40 + p_mega * 90 + (10 if is_mega_10m else 0)))

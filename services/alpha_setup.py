@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 from config import SCAN_MCAP_FOCUS_MAX_USD, SCAN_MCAP_MAX_USD, TARGET_MCAP_USD
 from services.mega_fingerprint import analyze_mega_fingerprint
+from services.tx_activity import score_tx_activity
 
 # Known launch communities that produced runners
 KNOWN_LAUNCH_DISCORD = (
@@ -315,23 +316,36 @@ def analyze_alpha_setup(
             score += 8
             reasons.append("Graduated with deep SOL liquidity")
 
-    # --- Momentum (require two-way market — "all green no sellers" is a trap) ---
+    # --- Transaction interest (learned sweet spot: ~30–60 tx/5m, ratio ~1.5–2.5) ---
+    tx_act = score_tx_activity(pair=pair, pump=pump, buys_m5=buys_m5, sells_m5=sells_m5)
     real_two_way = buys_m5 >= 8 and sells_m5 >= 3 and 1.05 <= buy_ratio <= 3.2
+    if tx_act.get("in_sweet_spot"):
+        score += 20
+        reasons.append(tx_act.get("summary") or "Tx sweet spot — active interest")
+        badges.extend(tx_act.get("badges") or [])
+        badges.append({"id": "tx_interest", "label": "Tx interest UP", "type": "tx"})
+    elif tx_act.get("tilt") == "UP":
+        score += 12
+        reasons.append(tx_act.get("summary") or "Healthy transaction interest")
+        badges.extend(tx_act.get("badges") or [])
+    elif tx_act.get("tilt") == "DOWN":
+        score -= 18
+        reasons.append(tx_act.get("summary") or "Weak/wash transaction activity")
+    else:
+        score += 2
+
     if buys_m5 >= 10 and sells_m5 == 0:
         score -= 30
         reasons.append("All buys / zero sells — wash or no exit (not a moon)")
     elif buy_ratio >= 4.0 and buys_m5 >= 20:
         score -= 20
         reasons.append(f"One-way buys {buy_ratio:.1f}x — wash risk, not organic moon")
-    elif real_two_way:
-        score += 16
+    elif real_two_way and not tx_act.get("in_sweet_spot"):
+        score += 10
         reasons.append(
-            f"Real two-way market {buy_ratio:.1f}x · {buys_m5}B/{sells_m5}S — organic flow"
+            f"Two-way market {buy_ratio:.1f}x · {buys_m5}B/{sells_m5}S"
         )
         badges.append({"id": "buys", "label": f"{buys_m5}B/{sells_m5}S", "type": "momentum"})
-    elif buy_ratio >= 1.15 and buys_m5 >= 5 and sells_m5 >= 1:
-        score += 8
-        reasons.append(f"Positive flow {buy_ratio:.1f}x with some sells")
 
     if vol_m5 >= 5000 and real_two_way:
         score += 10
@@ -414,13 +428,18 @@ def analyze_alpha_setup(
     organic_flow = real_two_way or (
         buys_m5 >= 12 and sells_m5 >= 4 and buy_ratio <= 3.5
     )
-    mega_stack = deep_curve and solid_dist and clean_social and organic_flow
+    # Require healthy tx interest for mega (learned: dead books almost never run)
+    tx_ok = tx_act.get("tilt") == "UP" or tx_act.get("in_sweet_spot")
+    mega_stack = (
+        deep_curve and solid_dist and clean_social and organic_flow and tx_ok
+    )
     high_stack = (
         (quote_sol >= 6 or (not on_curve and quote_sol >= 25))
         and len(mid_bags) >= 4
         and holders >= 25
         and clean_social
         and sells_m5 >= 2
+        and (tx_act.get("score") or 0) >= 40
     )
 
     if mega_stack:
@@ -632,6 +651,7 @@ def analyze_alpha_setup(
         "high_stack": high_stack,
         "tp_mcap_targets": tp_targets,
         "megaFingerprint": fingerprint,
+        "txActivity": tx_act,
         "metrics": {
             "mcap": round(mcap),
             "holders": holders,
@@ -641,6 +661,10 @@ def analyze_alpha_setup(
             "buys_m5": buys_m5,
             "sells_m5": sells_m5,
             "buy_ratio": round(buy_ratio, 2),
+            "tx_total_m5": tx_act.get("total_m5"),
+            "tx_zone": tx_act.get("zone"),
+            "tx_tilt": tx_act.get("tilt"),
+            "tx_sweet": tx_act.get("in_sweet_spot"),
             "real_two_way": real_two_way,
             "viral": viral,
             "own_twitter": _is_own_twitter(twitter),

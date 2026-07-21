@@ -829,6 +829,7 @@ function renderTrenchesCard(t) {
   card.innerHTML = `
     ${sourceBadgesHtml([t.column ? `padre_trenches_${t.column}` : "pump.fun"])}
     ${migrationBadgeHtml(t)}
+    ${txActivityBadgeHtml(t)}
     ${(t.runnerRadar || {}).alert || (t.runnerRadar || {}).score >= 55 ? `<div class="runner-score-row"><span class="runner-score-badge">⚡ RUNNER ${t.runnerRadar.score} · ${(t.runnerRadar.stage || "").replace(/_/g, " ")}</span></div>` : ""}
     ${sixk && lane === "early_lottery" ? `<div class="sixk-row"><span class="sixk-badge ${sweet ? "sweet" : ""}">${sweet ? "🎯 LOTTERY $3.5–7.5K" : "EARLY LOTTERY"} · ${fmtUsd(mcap)}</span></div>` : ""}
     ${socialBadgesHtml(social)}
@@ -1458,6 +1459,31 @@ function filterDisplayMcap(tokens) {
     }
     return m <= MAX_EARLY_MCAP;
   });
+}
+
+function txActivityBadgeHtml(t) {
+  const tx = t.txActivity || t.alphaSetup?.txActivity || t.runnerRadar?.txActivity || {};
+  if (!tx.total_m5 && tx.total_m5 !== 0) {
+    const m5 = t.txns_m5 || {};
+    const b = Number(m5.buys || 0);
+    const s = Number(m5.sells || 0);
+    if (b + s <= 0) return "";
+    tx.total_m5 = b + s;
+    tx.buys_m5 = b;
+    tx.sells_m5 = s;
+    tx.buy_ratio_m5 = b / Math.max(s, 1);
+  }
+  if (tx.total_m5 == null) return "";
+  const zone = tx.zone || (tx.in_sweet_spot ? "sweet" : "");
+  const tilt = tx.tilt || "";
+  let cls = "tx-badge";
+  if (tx.in_sweet_spot || zone === "sweet") cls += " tx-sweet";
+  else if (tilt === "UP") cls += " tx-up";
+  else if (tilt === "DOWN" || zone === "dead" || zone === "wash") cls += " tx-down";
+  const label = tx.in_sweet_spot
+    ? `📊 ${tx.total_m5} tx SWEET · ${tx.buys_m5 || "?"}B/${tx.sells_m5 || "?"}S`
+    : `📊 ${tx.total_m5} tx/5m · ${Number(tx.buy_ratio_m5 || 0).toFixed(1)}x${tilt ? " · " + tilt : ""}`;
+  return `<div class="tx-row"><span class="${cls}" title="${(tx.summary || tx.sweet_band?.learned || "").replace(/"/g, "'")}">${label}</span></div>`;
 }
 
 function migrationBadgeHtml(t) {
