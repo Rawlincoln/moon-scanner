@@ -85,6 +85,10 @@ BACKGROUND_SCAN_PER_COLUMN = 12
 # Dedicated runner-radar poll (multi-stage $10M–$100M watch)
 RUNNER_RADAR_INTERVAL_SEC = 10
 RUNNER_ALERT_TTL_SEC = 45 * 60  # keep sticky alerts 45 min
+# Near-migration tokens vanish too fast if only shown when present in the latest
+# pump.fun poll — pin them so the UI keeps them visible while they climb/dump.
+NEAR_MIGRATION_STICKY_TTL_SEC = 25 * 60  # pin 25 min after last sighting
+NEAR_MIGRATION_MAX_STICKY = 24
 
 # Pro trencher — early band still uses ~$6k; migration track uses bonding %
 TARGET_MCAP_USD = 6_000

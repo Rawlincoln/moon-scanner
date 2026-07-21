@@ -23,6 +23,8 @@ from config import (
     BACKGROUND_SCAN_PER_COLUMN,
     CACHE_TTL,
     DEFAULT_MAX_AGE_MINUTES,
+    NEAR_MIGRATION_MAX_STICKY,
+    NEAR_MIGRATION_STICKY_TTL_SEC,
     RUNNER_ALERT_TTL_SEC,
     RUNNER_RADAR_INTERVAL_SEC,
     DEFAULT_SCAN_LIMIT,
@@ -85,6 +87,117 @@ _learning = LearningEngine(_learning_memory)
 # Sticky runner alerts (mint → alert dict) — survives across scans
 _runner_alert_store: dict[str, dict[str, Any]] = {}
 _runner_alert_lock = asyncio.Lock()
+# Sticky near-migration tokens (mint → token snapshot) — survive missed polls
+_near_mig_store: dict[str, dict[str, Any]] = {}
+_near_mig_lock = asyncio.Lock()
+
+
+def _is_near_migration_token(t: dict[str, Any]) -> bool:
+    if t.get("skipped"):
+        return False
+    mig = t.get("migrationPath") or {}
+    lane = mig.get("lane") or t.get("migrationLane") or ""
+    bond = float(t.get("bonding_progress") or mig.get("bonding_pct") or 0)
+    mcap = float(t.get("mcap_usd") or 0)
+    if lane in ("near_migration", "migrated"):
+        return True
+    if t.get("column") in ("almost_bonded", "recently_bonded"):
+        return True
+    if bond >= MIGRATION_NEAR_MIN_PCT:
+        return True
+    # ~$28k+ still on path to graduation
+    if mcap >= GRADUATION_MCAP_USD * (MIGRATION_NEAR_MIN_PCT / 100.0) and mcap <= MIGRATION_MCAP_MAX_USD:
+        return True
+    return False
+
+
+async def _pin_near_migration_tokens(tokens: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pin near-migration tokens so they stay on screen across brief polls."""
+    now = time.time()
+    async with _near_mig_lock:
+        for t in tokens:
+            if not _is_near_migration_token(t):
+                continue
+            mint = t.get("tokenAddress") or ""
+            if not mint:
+                continue
+            prev = _near_mig_store.get(mint) or {}
+            snap = dict(t)
+            snap["_sticky_near_mig"] = True
+            snap["_first_seen"] = prev.get("_first_seen") or now
+            snap["_last_seen"] = now
+            # Prefer fresher mcap/bonding if higher confidence
+            _near_mig_store[mint] = snap
+
+        # Expire old pins
+        dead = [
+            m
+            for m, v in _near_mig_store.items()
+            if now - float(v.get("_last_seen") or 0) > NEAR_MIGRATION_STICKY_TTL_SEC
+        ]
+        for m in dead:
+            _near_mig_store.pop(m, None)
+
+        # Cap size — keep highest bonding / most recent
+        if len(_near_mig_store) > NEAR_MIGRATION_MAX_STICKY:
+            ranked = sorted(
+                _near_mig_store.values(),
+                key=lambda x: (
+                    -(float(x.get("bonding_progress") or 0)),
+                    -float(x.get("_last_seen") or 0),
+                ),
+            )
+            keep = {t.get("tokenAddress") for t in ranked[:NEAR_MIGRATION_MAX_STICKY]}
+            for m in list(_near_mig_store.keys()):
+                if m not in keep:
+                    _near_mig_store.pop(m, None)
+
+        return list(_near_mig_store.values())
+
+
+def _merge_sticky_near_mig(
+    live: list[dict[str, Any]], sticky: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Live scan wins; sticky fills gaps so tokens don't flash and vanish."""
+    by_mint: dict[str, dict] = {}
+    for t in sticky:
+        m = t.get("tokenAddress")
+        if m:
+            by_mint[m] = t
+    for t in live:
+        m = t.get("tokenAddress")
+        if not m:
+            continue
+        if m in by_mint:
+            # Merge: keep sticky first_seen, update live fields
+            prev = by_mint[m]
+            merged = dict(t)
+            merged["_sticky_near_mig"] = True
+            merged["_first_seen"] = prev.get("_first_seen")
+            merged["_last_seen"] = time.time()
+            merged["_pinned_sec"] = int(
+                time.time() - float(prev.get("_first_seen") or time.time())
+            )
+            by_mint[m] = merged
+        else:
+            by_mint[m] = t
+    # Sticky-only (missed this poll) — still show, mark as pinned
+    out = list(by_mint.values())
+    for t in out:
+        if t.get("_last_seen") and time.time() - float(t["_last_seen"]) > 15:
+            t["_pinned_stale"] = True
+            # Soft banner so user knows it's held from a prior scan
+            if not t.get("investSummary"):
+                t["investSummary"] = (
+                    "Pinned near-migration — still tracking (may have left live feed)"
+                )
+    out.sort(
+        key=lambda x: (
+            -(float(x.get("bonding_progress") or 0)),
+            -(float(x.get("mcap_usd") or 0)),
+        )
+    )
+    return out
 
 
 async def _background_trenches_warm() -> None:
@@ -162,22 +275,21 @@ async def _refresh_runner_alerts_from_cache() -> list[dict]:
                 item["first_seen"] = now
             item["alerted_at"] = now
             _runner_alert_store[mint] = item
-        # Expire stale
+        # Expire only by first_seen age (not last poll) so brief misses don't wipe
         dead = [
             m
             for m, v in _runner_alert_store.items()
-            if now - float(v.get("alerted_at") or 0) > RUNNER_ALERT_TTL_SEC
+            if now - float(v.get("first_seen") or v.get("alerted_at") or 0)
+            > RUNNER_ALERT_TTL_SEC
         ]
         for m in dead:
             _runner_alert_store.pop(m, None)
-        # Drop if no longer scoring as alert and older than 3 min
-        for mint in list(_runner_alert_store.keys()):
-            still = next((x for x in fresh if x["tokenAddress"] == mint), None)
-            if not still:
-                age = now - float(_runner_alert_store[mint].get("first_seen") or 0)
-                if age > 180:
-                    # keep sticky 3+ min only if still in store from recent scan
-                    pass
+        # Keep tokens that dropped from this poll still sticky (update last_miss only)
+        fresh_mints = {x["tokenAddress"] for x in fresh}
+        for mint, item in list(_runner_alert_store.items()):
+            if mint not in fresh_mints:
+                item["is_new_alert"] = False
+                item["_missed_poll"] = True
         ordered = sorted(
             _runner_alert_store.values(),
             key=lambda x: (
@@ -1418,9 +1530,13 @@ async def _run_trenches_scan(
     migration_picks = [
         t
         for t in all_tokens
-        if (t.get("migrationPath") or {}).get("lane") == "near_migration"
-        and (t.get("migrationPath") or {}).get("score", 0) >= 40
+        if _is_near_migration_token(t)
         and not ((t.get("safetyReport") or {}).get("tier") in ("UNSAFE", "AVOID"))
+        and (
+            (t.get("migrationPath") or {}).get("score", 0) >= 35
+            or float(t.get("bonding_progress") or 0) >= MIGRATION_NEAR_MIN_PCT
+            or t.get("column") in ("almost_bonded", "recently_bonded")
+        )
     ]
     migration_picks.sort(
         key=lambda t: (
@@ -1429,6 +1545,17 @@ async def _run_trenches_scan(
             -t.get("safetyScore", 0),
         )
     )
+    # Pin near-migration so a missed poll doesn't wipe the section
+    try:
+        sticky_near = await _pin_near_migration_tokens(
+            migration_picks + (analyzed_columns.get("almost_bonded") or [])
+        )
+        migration_picks = _merge_sticky_near_mig(migration_picks, sticky_near)
+        # Also re-inject sticky into almost_bonded column for UI flatten
+        ab = analyzed_columns.get("almost_bonded") or []
+        analyzed_columns["almost_bonded"] = _merge_sticky_near_mig(ab, sticky_near)
+    except Exception as exc:
+        logger.debug("near-mig sticky failed: %s", exc)
     under25k_picks = [
         t
         for t in all_tokens
@@ -1496,7 +1623,7 @@ async def _run_trenches_scan(
         "scanned_at": time.time(),
         "columns": analyzed_columns,
         # Order: migration first (what can graduate), then under $25k, then lottery
-        "migration_picks": migration_picks[:12],
+        "migration_picks": migration_picks[:20],
         "under25k_picks": under25k_picks[:12],
         "early_lottery": early_lottery[:12],
         "safe_picks": safe_picks[:10],
@@ -1557,8 +1684,9 @@ async def _run_trenches_scan(
             )
             if full and (full.get("runnerRadar") or {}).get("score", 0) >= 55:
                 migration_picks.insert(0, full)
-        response["migration_picks"] = migration_picks[:15]
+        response["migration_picks"] = migration_picks[:20]
         response["counts"]["migration_picks"] = len(migration_picks)
+        response["counts"]["near_mig_sticky"] = len(_near_mig_store)
         _ = alert_mints  # silence lint
     except Exception as exc:
         logger.debug("runner alerts attach failed: %s", exc)

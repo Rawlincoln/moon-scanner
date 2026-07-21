@@ -38,6 +38,85 @@ let lastScanMeta = {};
 let lastRunnerAlerts = [];
 let notifiedMints = new Set(JSON.parse(localStorage.getItem("moon_notified_mints") || "[]"));
 let runnerPollTimer = null;
+/** Client sticky near-migration — survive brief empty polls (ms) */
+const NEAR_MIG_STICKY_MS = 25 * 60 * 1000;
+let stickyNearMig = loadStickyNearMig();
+
+function loadStickyNearMig() {
+  try {
+    const raw = JSON.parse(localStorage.getItem("moon_sticky_near_mig") || "{}");
+    const now = Date.now();
+    const out = {};
+    for (const [mint, t] of Object.entries(raw)) {
+      if (now - (t._clientPinnedAt || 0) < NEAR_MIG_STICKY_MS) out[mint] = t;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveStickyNearMig() {
+  try {
+    localStorage.setItem("moon_sticky_near_mig", JSON.stringify(stickyNearMig));
+  } catch {
+    /* quota */
+  }
+}
+
+function pinNearMigrationTokens(tokens) {
+  const now = Date.now();
+  for (const t of tokens) {
+    const lane = tokenLane(t);
+    const bond = Number(t.bonding_progress ?? t.migrationPath?.bonding_pct ?? 0);
+    const mcap = t.mcap_usd || 0;
+    const isNear =
+      lane === "near_migration" ||
+      lane === "migrated" ||
+      t.column === "almost_bonded" ||
+      t.column === "recently_bonded" ||
+      bond >= 40 ||
+      (mcap >= 28000 && mcap <= 78000);
+    if (!isNear || !t.tokenAddress) continue;
+    const prev = stickyNearMig[t.tokenAddress] || {};
+    stickyNearMig[t.tokenAddress] = {
+      ...t,
+      _clientPinnedAt: now,
+      _clientFirstSeen: prev._clientFirstSeen || now,
+      _sticky_near_mig: true,
+    };
+  }
+  // Expire
+  for (const mint of Object.keys(stickyNearMig)) {
+    if (now - (stickyNearMig[mint]._clientPinnedAt || 0) > NEAR_MIG_STICKY_MS) {
+      delete stickyNearMig[mint];
+    }
+  }
+  saveStickyNearMig();
+}
+
+function mergeStickyNearMigration(tokens) {
+  pinNearMigrationTokens(tokens);
+  const by = new Map();
+  // Sticky first (older snapshots)
+  for (const t of Object.values(stickyNearMig)) {
+    if (t.tokenAddress) by.set(t.tokenAddress, t);
+  }
+  // Live scan overwrites
+  for (const t of tokens) {
+    if (!t.tokenAddress) continue;
+    const prev = by.get(t.tokenAddress);
+    if (prev?._clientFirstSeen) {
+      t._clientFirstSeen = prev._clientFirstSeen;
+      t._sticky_near_mig = true;
+      t._pinned_sec = Math.round((Date.now() - prev._clientFirstSeen) / 1000);
+    }
+    by.set(t.tokenAddress, t);
+  }
+  // Refresh pin timestamps for live near-mig
+  pinNearMigrationTokens([...by.values()]);
+  return [...by.values()];
+}
 
 function initChains() {
   const container = $("#chainChips");
@@ -1285,15 +1364,18 @@ function migrationBadgeHtml(t) {
   if (!bond && !mig.score) return "";
   const lane = tokenLane(t);
   const cls = lane === "near_migration" ? "mig-near" : lane === "under_25k" ? "mig-25k" : lane === "migrated" ? "mig-done" : "mig-early";
+  const pinned = t._sticky_near_mig || t._pinned_stale;
+  const pinSec = t._pinned_sec;
   const label = lane === "near_migration"
-    ? `🚀 ${bond.toFixed(0)}% → migration`
+    ? `🚀 ${bond.toFixed(0)}% → migration${pinned ? " · pinned" : ""}`
     : lane === "migrated"
       ? "✓ Migrated"
       : lane === "under_25k"
         ? `${bond.toFixed(0)}% under $25k`
         : `${bond.toFixed(0)}% lottery`;
-  return `<div class="mig-row"><span class="mig-badge ${cls}">${label}${mig.score ? ` · mig ${mig.score}` : ""}</span>
+  return `<div class="mig-row"><span class="mig-badge ${cls}${pinned ? " pinned" : ""}">${label}${mig.score ? ` · mig ${mig.score}` : ""}</span>
     ${mig.to_graduation_usd != null && lane === "near_migration" ? `<span class="mig-meta">${fmtUsd(mig.to_graduation_usd)} to grad</span>` : ""}
+    ${pinned && pinSec != null ? `<span class="mig-meta">held ${Math.max(1, Math.round(pinSec / 60))}m</span>` : ""}
   </div>`;
 }
 
@@ -1402,6 +1484,9 @@ async function runScan(force = false, silent = false) {
         seen.add(k);
         return true;
       });
+      // Keep near-migration on screen across brief empty / partial polls
+      lastTokens = mergeStickyNearMigration(lastTokens);
+      lastTokens = filterDisplayMcap(lastTokens);
       lastTokens.sort((a, b) => {
         const la = tokenLane(a);
         const lb = tokenLane(b);
@@ -1413,7 +1498,7 @@ async function runScan(force = false, silent = false) {
         return (lr[la] ?? 4) - (lr[lb] ?? 4) || sb - sa || bb - ba;
       });
     } else {
-      lastTokens = filterDisplayMcap(data.tokens || []);
+      lastTokens = mergeStickyNearMigration(filterDisplayMcap(data.tokens || []));
     }
     renderGrid(lastTokens);
     const visible = applyClientFilters(lastTokens).length;

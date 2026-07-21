@@ -671,6 +671,10 @@ select:focus, input:focus { outline: none; border-color: var(--accent2); }
   border-color: rgba(0, 229, 160, 0.5);
   background: rgba(0, 229, 160, 0.12);
 }
+.mig-badge.pinned {
+  border-style: dashed;
+  opacity: 0.95;
+}
 .mig-badge.mig-25k {
   color: #9ab6ff;
   border-color: rgba(120, 150, 255, 0.45);
