@@ -39,6 +39,7 @@ BLOCKED_MINTS: set[str] = {
     "BTU78ZNs11eDYsaUXysXnEPEJrCDYDobAkTfQQafpump",  # USWR — all green, no real sellers/holders
     "9Sj7Yi6oYCATrjC68or2Rqk3D6YkgKaqc9UepDogpump",  # CUBEMAN — AI pitch, no socials, wash buys, creator dumped
     "Bw1gX5ih2DJFtXggXnnGbWqqpBte1uvb9jurUSecpump",  # Cashoty — status X + empty desc, flash ATH then dump
+    "P5PhPnXd6AS9JgTiZJzi4Y2CuDYF5nvPNrWpuUFUKgX",  # USWR relaunch — ATH ~$31k then −93% dump
 }
 
 # Adult-bait / shock names — almost always pure attention rugs (CEO of Sex, etc.)

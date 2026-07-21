@@ -181,6 +181,12 @@ class PadreFeedClient:
             cand["_sort_priority"] = 0
             cand["_age_minutes"] = age
             cand["_mcap"] = mcap
+            cand["_ath_mcap"] = float(coin.get("ath_market_cap") or 0)
+            cand["ath_market_cap"] = cand["_ath_mcap"]
+            # Drop already-dumped climbers from $6k radar
+            ath = cand["_ath_mcap"]
+            if ath >= 3500 and mcap > 0 and mcap < ath * 0.60:
+                continue
             cand["_mcap_closeness"] = max(0, 100 - abs(mcap - TARGET_MCAP_USD) / 60)
             cand["_sixk_radar"] = True
             # Quick narrative flags (no RugCheck) for instant feed ranking
@@ -510,6 +516,8 @@ class PadreFeedClient:
             cand["_sort_priority"] = 0
             cand["_age_minutes"] = age
             cand["_mcap"] = mcap
+            cand["_ath_mcap"] = float(coin.get("ath_market_cap") or 0)
+            cand["ath_market_cap"] = cand["_ath_mcap"]
             cand["bonding_progress"] = progress
             cand["_runner_band"] = True
             cand["_migration_lane"] = (
@@ -595,7 +603,13 @@ class PadreFeedClient:
             cand["_sort_priority"] = 1
             cand["_age_minutes"] = age
             cand["_mcap"] = mcap
+            cand["_ath_mcap"] = float(coin.get("ath_market_cap") or 0)
+            cand["ath_market_cap"] = cand["_ath_mcap"]
             cand["bonding_progress"] = progress
+            # Skip already-dumped almost-bonded before analysis (save work + UI)
+            ath = cand["_ath_mcap"]
+            if ath >= 3500 and mcap > 0 and mcap < ath * 0.60:
+                continue
             cand["_migration_lane"] = (
                 "almost"
                 if progress >= MIGRATION_ALMOST_MIN_PCT

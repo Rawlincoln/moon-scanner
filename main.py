@@ -563,12 +563,24 @@ def _format_pair_summary(pair: dict) -> dict:
     }
 
     if pump_coin:
+        # Keep ATH + socials so dump filters / avoid rules actually work
         summary["pumpfun"] = {
+            "mint": pump_coin.get("mint"),
+            "name": pump_coin.get("name"),
+            "symbol": pump_coin.get("symbol"),
+            "description": pump_coin.get("description"),
+            "twitter": pump_coin.get("twitter"),
+            "website": pump_coin.get("website"),
+            "telegram": pump_coin.get("telegram"),
             "bonding_progress": round(PumpFunClient.bonding_progress(pump_coin), 1),
             "usd_market_cap": pump_coin.get("usd_market_cap"),
+            "ath_market_cap": pump_coin.get("ath_market_cap"),
+            "ath_market_cap_timestamp": pump_coin.get("ath_market_cap_timestamp"),
+            "created_timestamp": pump_coin.get("created_timestamp"),
             "reply_count": pump_coin.get("reply_count", 0),
             "complete": pump_coin.get("complete", False),
             "creator": pump_coin.get("creator"),
+            "real_sol_reserves": pump_coin.get("real_sol_reserves"),
             "pump_url": f"https://pump.fun/coin/{pump_coin.get('mint', '')}",
         }
 
@@ -1483,31 +1495,42 @@ async def _run_trenches_scan(
                 mkt = result.get("market") or {}
                 # Hide already-dumped charts (ATH vs live mcap) — user request
                 pf_early = mkt.get("pumpfun") or {}
+                cand_pf = cand.get("pumpfun") or {}
                 mcap_early = float(
                     result.get("mcap_usd")
                     or pf_early.get("usd_market_cap")
+                    or cand_pf.get("usd_market_cap")
                     or mkt.get("marketCap")
                     or 0
                 )
                 ath_early = float(
                     pf_early.get("ath_market_cap")
+                    or cand_pf.get("ath_market_cap")
                     or cand.get("ath_market_cap")
-                    or (cand.get("pumpfun") or {}).get("ath_market_cap")
+                    or cand.get("_ath_mcap")
                     or 0
                 )
                 dump_probe = {
                     "mcap_usd": mcap_early,
                     "ath_mcap": ath_early,
+                    "peak_mcap": ath_early,
+                    "_peak_mcap": ath_early,
                     "priceChange": mkt.get("priceChange") or {},
                     "safetyReport": {"avoid": avoid},
                     "column": column,
+                    "pumpfun": {**cand_pf, **pf_early},
                 }
                 dumped, dump_why = is_crashed_runner(dump_probe)
-                if dumped:
+                if dumped or (
+                    ath_early >= 3_500
+                    and mcap_early > 0
+                    and mcap_early < ath_early * 0.60
+                ):
                     return {
                         "column": column,
                         "skipped": True,
-                        "skipReason": dump_why or "already_dumped",
+                        "skipReason": dump_why
+                        or f"Dumped from ATH ${ath_early:,.0f} → ${mcap_early:,.0f}",
                         "mcap_usd": mcap_early,
                     }
                 pair = {
@@ -1586,7 +1609,8 @@ async def _run_trenches_scan(
                     "icon": result.get("icon") or cand.get("icon"),
                     "mcap_usd": mcap,
                     "ath_mcap": ath_mcap or None,
-                    "peak_mcap": max(ath_mcap, mcap) or None,
+                    "peak_mcap": ath_mcap or None,  # peak = ATH only (never current mcap)
+                    "_peak_mcap": ath_mcap or None,
                     "age_minutes": (result.get("market") or {}).get("age_minutes")
                     or cand.get("_age_minutes"),
                     "bonding_progress": bond,

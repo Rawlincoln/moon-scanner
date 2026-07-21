@@ -80,20 +80,25 @@ function saveStickyNearMig() {
 }
 
 function isClientCrashedRunner(t) {
-  const mcap = Number(t.mcap_usd || 0);
-  const ath = Number(t.ath_mcap || t.ath_market_cap || t.pumpfun?.ath_market_cap || 0);
+  const mcap = Number(t.mcap_usd || t.pumpfun?.usd_market_cap || t.market?.marketCap || 0);
+  const ath = Number(
+    t.ath_mcap
+    || t.ath_market_cap
+    || t.pumpfun?.ath_market_cap
+    || t.market?.pumpfun?.ath_market_cap
+    || 0
+  );
   // Peak = historical high only (never max with current mcap — that hides dumps)
   const peak = Math.max(ath, Number(t._peak_mcap || t.peak_mcap || 0));
   const rr = t.runnerRadar || {};
   if (rr.crashed || rr.stage === "crashed") return true;
   if (mcap <= 0) return peak >= 5000;
-  // −40% from ATH/peak
+  // −40% from ATH/peak (USWR-class: 31k → 2k)
   if (peak >= 3500 && mcap < peak * 0.6) return true;
-  // −55% hard crash
   if (peak >= 3000 && mcap < peak * 0.45) return true;
   const pc = t.priceChange || t.market?.priceChange || {};
   if (Number(pc.h1) <= -30 || Number(pc.m5) <= -25 || Number(pc.h6) <= -35) return true;
-  if (peak >= 12000 && mcap < 6000) return true;
+  if (peak >= 10000 && mcap < 7000) return true;
   if (peak >= 20000 && mcap < peak * 0.65) return true;
   if (peak >= 5500 && peak < 15000 && mcap < 3500) return true;
   return false;
