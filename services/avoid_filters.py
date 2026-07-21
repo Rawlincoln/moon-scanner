@@ -528,6 +528,7 @@ def analyze_avoid_flags(
                 flags.append(flag)
                 reasons.append(f"RugCheck {level}: {risk.get('name')}")
 
+    # Hard = invest-blocking (still shown in UI unless fatal for trenches hide)
     hard_set = {
         "blocklist",
         "banned",
@@ -542,20 +543,29 @@ def analyze_avoid_flags(
         "mint_authority",
         "spam_deploy_tool",
         "flash_pump_dump",
-        "social_spoof_scam",
         "post_ath_crash",
-        "entry_trap_social",
         "adult_bait",
+        "extreme_wash",
+        "ai_pitch_no_socials",
+        "dev_out_green_chart",
+    }
+    # Soft packaging — warn but don't treat as automatic hard hide
+    soft_hardish = {
+        "social_spoof_scam",
+        "entry_trap_social",
         "parabolic_no_community",
         "zero_sellers",
         "wash_buys",
-        "extreme_wash",
         "empty_distribution",
-        "ai_pitch_no_socials",
         "bot_holder_cluster",
-        "dev_out_green_chart",
     }
     hard = bool(hard_set & set(flags))
+    # Status+empty desc is hard for invest, but only if also no real website
+    # (Cashoty-class is on blocklist; generic status tweets with real sites = soft)
+    if "entry_trap_social" in flags and "fake_website" in flags:
+        hard = True
+    elif "entry_trap_social" in flags and not has_real_social:
+        hard = True
 
     soft_combo = {
         "dead_book",
@@ -565,7 +575,7 @@ def analyze_avoid_flags(
         "fake_twitter",
         "fake_website",
         "sell_pressure",
-    }
+    } | soft_hardish
     soft = bool(flags) and not hard
 
     avoid = hard or (soft and len(soft_combo & set(flags)) >= 2)

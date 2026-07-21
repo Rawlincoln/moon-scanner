@@ -1459,8 +1459,21 @@ async def _run_trenches_scan(
                 trench = inv.get("trench") or result.get("trenchAnalysis")
                 safety = result.get("safety") or {}
                 avoid = safety.get("avoid") or {}
-                # Drop blocklist / ghost launches from trenches results
-                if avoid.get("hard_avoid") or avoid.get("avoid"):
+                # Only hide absolute junk — soft avoids (entry traps, packaging)
+                # still display with AVOID badge so the UI is never empty.
+                fatal_flags = {
+                    "blocklist",
+                    "banned",
+                    "honeypot",
+                    "rugged",
+                    "flash_pump_dump",
+                    "drained_curve",
+                    "lp_unlocked",
+                    "lp_not_locked",
+                    "adult_bait",
+                }
+                flags = set(avoid.get("flags") or [])
+                if flags & fatal_flags:
                     return {
                         "column": column,
                         "skipped": True,
