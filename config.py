@@ -42,7 +42,8 @@ WEIGHT_EARLY = 0.20
 # Scan limits
 DEFAULT_SCAN_LIMIT = 10
 MAX_SCAN_LIMIT = 50
-REQUEST_TIMEOUT = 12.0  # fail fast — don't wait on slow rugcheck/padre
+REQUEST_TIMEOUT = 6.0  # fail fast bulk scans (was 12)
+REQUEST_TIMEOUT_HEAVY = 10.0  # single-token deep analyze
 
 # Early-entry mode (real-time fresh launches)
 PUMPFUN_API_URL = "https://frontend-api-v3.pump.fun"
@@ -53,8 +54,8 @@ MAX_AGE_MINUTES_CAP = 180
 CACHE_TTL = 8
 # Short cache so we don't re-show tokens that already pumped
 # Keep cache short on both local + Render so scans stay aligned with live market
-TRENCHES_CACHE_TTL = 10
-TRENCHES_CONCURRENCY = 16 if IS_PRODUCTION else 28
+TRENCHES_CACHE_TTL = 8
+TRENCHES_CONCURRENCY = 14 if IS_PRODUCTION else 20  # avoid RugCheck 429 + faster
 EXCLUDE_GRADUATED_DEFAULT = True
 EARLY_MCAP_MIN_USD = 1_500
 EARLY_MCAP_MAX_USD = 65_000
@@ -68,8 +69,16 @@ GRADUATION_MCAP_USD = 69_000
 MIGRATION_MCAP_MAX_USD = 78_000  # allow almost-bonded through graduation
 # Bonding % toward Raydium/PumpSwap migration
 MIGRATION_CLIMBING_MIN_PCT = 15.0  # ~$10k+ — mid-curve climb (under $25k lane)
-MIGRATION_NEAR_MIN_PCT = 40.0  # ~$28k+ — primary "can migrate" zone
+MIGRATION_NEAR_MIN_PCT = 42.0  # ~$29k+ — primary "can migrate" zone
 MIGRATION_ALMOST_MIN_PCT = 55.0  # ~$38k+ — almost bonded
+# Must stay within this fraction of ATH to appear / recommend (user: no dumps)
+DUMP_HIDE_FRAC = 0.70  # hide if mcap < 70% of ATH (−30%+)
+DUMP_HARD_FRAC = 0.55  # hard dump −45%+
+# Near-migration BUY needs this quality
+NEAR_MIG_BUY_MIN_SCORE = 72
+NEAR_MIG_BUY_MIN_BOND = 45.0
+NEAR_MIG_MIN_MCAP = 18_000
+NEAR_ATH_BUY_FRAC = 0.80  # must be ≥80% of ATH to recommend buy
 # Skip DexScreener smart-money order fetch during bulk trenches (saves ~0.5–1s/token)
 FAST_SCAN_SKIP_DEX_ORDERS = True
 
@@ -87,8 +96,8 @@ RUNNER_RADAR_INTERVAL_SEC = 10
 RUNNER_ALERT_TTL_SEC = 45 * 60  # keep sticky alerts 45 min
 # Near-migration tokens vanish too fast if only shown when present in the latest
 # pump.fun poll — pin them so the UI keeps them visible while they climb/dump.
-NEAR_MIGRATION_STICKY_TTL_SEC = 25 * 60  # pin 25 min after last sighting
-NEAR_MIGRATION_MAX_STICKY = 24
+NEAR_MIGRATION_STICKY_TTL_SEC = 8 * 60  # short pin — dumps must vanish fast
+NEAR_MIGRATION_MAX_STICKY = 12
 
 # Pro trencher — early band still uses ~$6k; migration track uses bonding %
 TARGET_MCAP_USD = 6_000

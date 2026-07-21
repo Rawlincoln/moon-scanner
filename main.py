@@ -37,8 +37,13 @@ from config import (
     IS_RENDER,
     MAX_AGE_MINUTES_CAP,
     MAX_SCAN_LIMIT,
+    DUMP_HIDE_FRAC,
     MIGRATION_MCAP_MAX_USD,
     MIGRATION_NEAR_MIN_PCT,
+    NEAR_ATH_BUY_FRAC,
+    NEAR_MIG_BUY_MIN_BOND,
+    NEAR_MIG_BUY_MIN_SCORE,
+    NEAR_MIG_MIN_MCAP,
     PADRE_TRADE_URL,
     SCAN_MCAP_FOCUS_MAX_USD,
     SCAN_MCAP_MAX_USD,
@@ -74,6 +79,7 @@ from services.checker_hub import run_checker_hub
 from services.alpha_setup import analyze_alpha_setup
 from services.avoid_filters import analyze_avoid_flags
 from services.migration_path import analyze_migration_path
+from services.deep_analysis import build_deep_analysis
 from services.runner_radar import (
     build_runner_alerts,
     extract_ath_mcap,
@@ -642,31 +648,82 @@ async def _analyze_token(
     # Early drop: skip heavy analysis if feed already shows mcap too high
     if candidate:
         pre_mcap = _token_mcap({}, candidate)
-        if pre_mcap > SCAN_MCAP_MAX_USD:
+        cand_pf = (candidate or {}).get("pumpfun") or {}
+        pre_ath = float(
+            cand_pf.get("ath_market_cap")
+            or candidate.get("ath_market_cap")
+            or candidate.get("_ath_mcap")
+            or 0
+        )
+        if pre_mcap > SCAN_MCAP_MAX_USD and (candidate or {}).get("column") not in (
+            "almost_bonded",
+            "recently_bonded",
+            "under_25k",
+        ):
+            # allow migration columns higher via col cap later
+            if pre_mcap > MIGRATION_MCAP_MAX_USD:
+                return {
+                    "chainId": chain_id,
+                    "tokenAddress": token_address,
+                    "skipped": True,
+                    "skipReason": f"mcap ${pre_mcap:,.0f} too high",
+                    "mcap_usd": pre_mcap,
+                    "analyzedAt": time.time(),
+                }
+        # Instant dump skip before RugCheck (speed + accuracy)
+        if pre_ath >= 3_000 and pre_mcap > 0 and pre_mcap < pre_ath * DUMP_HIDE_FRAC:
             return {
                 "chainId": chain_id,
                 "tokenAddress": token_address,
                 "skipped": True,
-                "skipReason": f"mcap ${pre_mcap:,.0f} > ${SCAN_MCAP_MAX_USD:,.0f}",
+                "skipReason": (
+                    f"Already dumped −{(1 - pre_mcap / pre_ath) * 100:.0f}% "
+                    f"(${pre_ath:,.0f}→${pre_mcap:,.0f})"
+                ),
                 "mcap_usd": pre_mcap,
                 "analyzedAt": time.time(),
             }
 
-    # Parallel market resolve + Padre audit
+    # Market resolve + Padre (timeout Padre so bulk doesn't stall)
+    async def _padre_safe():
+        try:
+            return await asyncio.wait_for(
+                padre.get_token_audit(chain_id, token_address),
+                timeout=2.5 if fast else 5.0,
+            )
+        except Exception:
+            return None
+
     pair, padre_audit = await asyncio.gather(
         _resolve_pair(chain_id, token_address, candidate),
-        padre.get_token_audit(chain_id, token_address),
+        _padre_safe(),
     )
     pump_coin = pair.get("pumpfun") or (candidate or {}).get("pumpfun")
     mcap_for_sm = _token_mcap(pair, candidate)
+    ath_live = float((pump_coin or {}).get("ath_market_cap") or 0)
 
-    # Late drop after live mcap resolve
-    if mcap_for_sm > SCAN_MCAP_MAX_USD:
+    # Dump skip after live resolve
+    if ath_live >= 3_000 and mcap_for_sm > 0 and mcap_for_sm < ath_live * DUMP_HIDE_FRAC:
         return {
             "chainId": chain_id,
             "tokenAddress": token_address,
             "skipped": True,
-            "skipReason": f"live mcap ${mcap_for_sm:,.0f} > ${SCAN_MCAP_MAX_USD:,.0f}",
+            "skipReason": (
+                f"Already dumped −{(1 - mcap_for_sm / ath_live) * 100:.0f}% "
+                f"(ATH ${ath_live:,.0f}→${mcap_for_sm:,.0f})"
+            ),
+            "mcap_usd": mcap_for_sm,
+            "market": _format_pair_summary(pair),
+            "analyzedAt": time.time(),
+        }
+
+    # Late drop after live mcap resolve
+    if mcap_for_sm > MIGRATION_MCAP_MAX_USD:
+        return {
+            "chainId": chain_id,
+            "tokenAddress": token_address,
+            "skipped": True,
+            "skipReason": f"live mcap ${mcap_for_sm:,.0f} > ${MIGRATION_MCAP_MAX_USD:,.0f}",
             "mcap_usd": mcap_for_sm,
             "market": _format_pair_summary(pair),
             "analyzedAt": time.time(),
@@ -677,6 +734,7 @@ async def _analyze_token(
             token_address,
             pump_coin=pump_coin,
             padre_audit=padre_audit,
+            fast=fast,
         )
     elif chain_id in EVM_CHAIN_IDS:
         safety = await evm.analyze(
@@ -773,68 +831,53 @@ async def _analyze_token(
         alpha=alpha,
         complete=bool((pump_coin or {}).get("complete")),
     )
-    # Only boost invest for high-ceiling moons that are ON a migration path
-    # (user: recommended $6k tokens never reach migration)
+    # Capital protection: default WATCH. BUY only multi-gate deep analysis.
     bond_pct = float(migration.get("bonding_pct") or 0)
-    near_mig = migration.get("lane") in ("near_migration", "migrated")
-    climbing = bond_pct >= MIGRATION_NEAR_MIN_PCT * 0.6  # ~27%+
-    if (
-        alpha.get("tier") in ("MEGA_MOON", "MOON_SETUP")
-        and invest.get("signal") in (
-            "WATCH",
-            "INVEST",
-            "STRONG_INVEST",
-            None,
-            "",
-        )
-    ):
-        if not (safety.get("avoid") or {}).get("avoid"):
-            invest = dict(invest)
-            if near_mig and migration.get("score", 0) >= 50:
-                invest["signal"] = "STRONG_INVEST"
-                invest["summary"] = (
-                    f"Near migration {bond_pct:.0f}% — "
-                    f"{migration.get('summary') or alpha.get('summary')}"
-                )
-            elif climbing and alpha.get("tier") == "MEGA_MOON":
-                invest["signal"] = "INVEST"
-                invest["summary"] = (
-                    f"Climbing toward migration ({bond_pct:.0f}%). "
-                    f"{alpha.get('summary') or ''}"
-                )
-            else:
-                # Early mega structure ≠ recommend as if it will migrate
-                invest["signal"] = "WATCH"
-                invest["summary"] = (
-                    f"Early structure only ({bond_pct:.0f}% bonded) — "
-                    f"most never migrate. Track under Early Lottery; "
-                    f"size tiny or wait for >{MIGRATION_NEAR_MIN_PCT:.0f}% curve."
-                )
-            invest["confidence"] = max(
-                int(invest.get("confidence") or 0),
-                int(alpha.get("confidence") or 0)
-                if near_mig
-                else min(55, int(alpha.get("confidence") or 0)),
-            )
-            reasons = list(invest.get("reasons") or [])
-            for r in (migration.get("reasons") or [])[:3] + (alpha.get("reasons") or [])[:3]:
-                if r not in reasons:
-                    reasons.insert(0, r)
-            invest["reasons"] = reasons[:8]
-            invest["alpha_boost"] = near_mig
-            invest["ceiling"] = alpha.get("ceiling_label")
-            invest["migration_lane"] = migration.get("lane")
-    elif alpha.get("tier") == "ALPHA" and invest.get("signal") in (
-        "STRONG_INVEST",
-        "INVEST",
-    ):
-        # Downgrade generic strong invests without mega stack
-        invest = dict(invest)
+    ath_now = float((pump_coin or {}).get("ath_market_cap") or ath_live or 0)
+    near_ath = ath_now <= 0 or (
+        mcap_for_sm > 0 and mcap_for_sm >= ath_now * NEAR_ATH_BUY_FRAC
+    )
+    tx_act = alpha.get("txActivity") or {}
+    invest = dict(invest or {})
+    # Strip any generic STRONG from base signals
+    if invest.get("signal") in ("STRONG_INVEST", "INVEST"):
         invest["signal"] = "WATCH"
+        invest["summary"] = "Default WATCH — multi-gate buy not verified yet."
+
+    deep = build_deep_analysis(
+        mcap=mcap_for_sm,
+        safety=safety,
+        pair=pair,
+        pump=pump_coin,
+        alpha=alpha,
+        migration=migration,
+        avoid=safety.get("avoid"),
+        smart_money=smart_money,
+        social=social,
+    )
+
+    if deep.get("verdict") == "BUY" and deep.get("buy_ready"):
+        invest["signal"] = "STRONG_INVEST"
+        invest["confidence"] = deep.get("confidence")
         invest["summary"] = (
-            (alpha.get("summary") or "")
-            + " — not full mega stack; most sub-$20k tops start here."
+            f"BUY gate passed ({deep.get('gates_passed')}/{deep.get('gates_total')}). "
+            f"{deep.get('summary')} · {deep.get('position_advice')}"
         )
+        invest["deep_buy"] = True
+    elif deep.get("verdict") == "SKIP" or deep.get("dump", {}).get("is_dumped"):
+        invest["signal"] = "AVOID"
+        invest["confidence"] = deep.get("confidence") or 85
+        invest["summary"] = deep.get("summary") or "Skip — dump/risk"
+    else:
+        invest["signal"] = "WATCH"
+        invest["confidence"] = min(50, int(deep.get("confidence") or 40))
+        invest["summary"] = (
+            f"WATCH only ({deep.get('gates_passed')}/{deep.get('gates_total')} gates). "
+            f"Do not size up. {deep.get('position_advice')}"
+        )
+    invest["migration_lane"] = migration.get("lane")
+    invest["ceiling"] = alpha.get("ceiling_label")
+    invest["reasons"] = (deep.get("why") or [])[:6] + (deep.get("risks") or [])[:4]
 
     links = _padre_links(chain_id, token_address)
 
@@ -852,6 +895,7 @@ async def _analyze_token(
         "smartMoney": smart_money,
         "alphaSetup": alpha,
         "migrationPath": migration,
+        "deepAnalysis": deep,
         "checkerHub": checker_hub,
         "padre": links,
         "analyzedAt": time.time(),
@@ -860,81 +904,40 @@ async def _analyze_token(
         "icon": (candidate or {}).get("icon", ""),
         "description": (candidate or {}).get("description", ""),
         "mcap_usd": mcap_for_sm,
+        "ath_mcap": ath_now or None,
     }
     try:
         trade_plan = _learning.observe_analysis(result)
         if trade_plan:
-            result["tradePlan"] = trade_plan
-            # Never promote early lottery as invest (most die under $7k)
-            if mcap_for_sm > 0 and mcap_for_sm < 8_000:
-                trade_plan = dict(trade_plan)
+            # Force plan to match multi-gate deep analysis (protect capital)
+            trade_plan = dict(trade_plan)
+            if deep.get("verdict") == "BUY" and deep.get("buy_ready"):
+                trade_plan["action"] = "ENTER"
+                trade_plan["summary"] = invest.get("summary")
+                trade_plan["confidence"] = deep.get("confidence")
+            else:
                 if trade_plan.get("action") == "ENTER":
-                    trade_plan["action"] = "WATCH"
-                    trade_plan["summary"] = (
-                        f"Early lottery ${mcap_for_sm:,.0f} — ENTER blocked until mid-climb. "
-                        + (trade_plan.get("summary") or "")
-                    )
-                result["tradePlan"] = trade_plan
-                invest = dict(result.get("investSignal") or invest)
-                if invest.get("signal") in ("STRONG_INVEST", "INVEST"):
-                    invest["signal"] = "WATCH"
-                    invest["summary"] = trade_plan.get("summary")
-                    result["investSignal"] = invest
-            # Align invest signal with learned plan when strong
+                    trade_plan["action"] = "WATCH" if deep.get("verdict") == "WATCH" else "SKIP"
+                trade_plan["summary"] = (
+                    f"Gate override: {deep.get('summary')}. "
+                    + (trade_plan.get("summary") or "")
+                )
+            trade_plan["deepAnalysis"] = {
+                "verdict": deep.get("verdict"),
+                "gates": f"{deep.get('gates_passed')}/{deep.get('gates_total')}",
+                "dump": deep.get("dump"),
+                "tx": deep.get("tx_interest"),
+            }
+            result["tradePlan"] = trade_plan
             if trade_plan.get("action") == "SKIP":
                 invest = dict(invest)
                 invest["signal"] = "AVOID"
-                invest["confidence"] = max(
-                    int(invest.get("confidence") or 0),
-                    int(trade_plan.get("confidence") or 0),
-                )
-                invest["summary"] = trade_plan.get("summary") or invest.get("summary")
+                invest["summary"] = trade_plan.get("summary")
                 result["investSignal"] = invest
-            elif (
-                trade_plan.get("action") == "ENTER"
-                and alpha.get("tier") in ("MEGA_MOON", "MOON_SETUP")
-                and not (safety.get("avoid") or {}).get("avoid")
-            ):
-                invest = dict(invest)
-                mig = result.get("migrationPath") or {}
-                if mig.get("lane") in ("near_migration", "migrated") and (
-                    mig.get("score") or 0
-                ) >= 50:
-                    invest["signal"] = "STRONG_INVEST"
-                    invest["summary"] = (
-                        f"{mig.get('summary') or ''} · {trade_plan.get('summary') or ''}"
-                    ).strip(" ·")
-                else:
-                    # Do not ENTER early lottery as STRONG — they rarely migrate
-                    invest["signal"] = "WATCH"
-                    invest["summary"] = (
-                        f"Learned structure OK but only "
-                        f"{mig.get('bonding_pct', 0):.0f}% bonded — "
-                        f"wait for near-migration or tiny lottery size only."
-                    )
-                invest["confidence"] = max(
-                    int(invest.get("confidence") or 0),
-                    int(trade_plan.get("confidence") or 0),
-                )
-                invest["learned"] = True
-                invest["ceiling"] = trade_plan.get("ceiling_label") or alpha.get(
-                    "ceiling_label"
-                )
-                result["investSignal"] = invest
-            elif trade_plan.get("action") == "WATCH" and invest.get("signal") in (
-                "STRONG_INVEST",
-                "INVEST",
-            ):
-                # Learned model rejects low-ceiling FOMO
-                if alpha.get("tier") not in ("MEGA_MOON", "MOON_SETUP"):
-                    invest = dict(invest)
-                    invest["signal"] = "WATCH"
-                    invest["summary"] = trade_plan.get("summary") or invest.get(
-                        "summary"
-                    )
-                    result["investSignal"] = invest
     except Exception as exc:
         logger.debug("learning observe failed: %s", exc)
+    result["deepAnalysis"] = deep
+    result["investSignal"] = invest
     return result
 
 
@@ -1522,9 +1525,9 @@ async def _run_trenches_scan(
                 }
                 dumped, dump_why = is_crashed_runner(dump_probe)
                 if dumped or (
-                    ath_early >= 3_500
+                    ath_early >= 3_000
                     and mcap_early > 0
-                    and mcap_early < ath_early * 0.60
+                    and mcap_early < ath_early * DUMP_HIDE_FRAC
                 ):
                     return {
                         "column": column,
@@ -1619,6 +1622,7 @@ async def _run_trenches_scan(
                     "txns_m5": (result.get("market") or {}).get("txns_m5") or {},
                     "txActivity": (result.get("alphaSetup") or {}).get("txActivity")
                     or {},
+                    "deepAnalysis": result.get("deepAnalysis") or {},
                     "safetyTier": report["tier"],
                     "safetyScore": report["score"],
                     "safetyReport": report,
@@ -1787,11 +1791,18 @@ async def _run_trenches_scan(
             float((t.get("pumpfun") or {}).get("ath_market_cap") or 0),
         )
         mcap = float(t.get("mcap_usd") or 0)
-        if peak >= 3_500 and mcap > 0 and mcap < peak * 0.60:
+        if peak >= 3_000 and mcap > 0 and mcap < peak * DUMP_HIDE_FRAC:
             return False
         # Price dump candles
         pc = t.get("priceChange") or {}
-        if float(pc.get("m5") or 0) <= -25 or float(pc.get("h1") or 0) <= -30:
+        if float(pc.get("m5") or 0) <= -22 or float(pc.get("h1") or 0) <= -28:
+            return False
+        # Deep analysis already said dump
+        if (t.get("deepAnalysis") or {}).get("dump", {}).get("is_dumped"):
+            return False
+        if (t.get("deepAnalysis") or {}).get("verdict") == "SKIP" and (
+            t.get("deepAnalysis") or {}
+        ).get("dump", {}).get("dump_pct_from_ath", 0) >= 25:
             return False
         return True
 
@@ -1800,24 +1811,35 @@ async def _run_trenches_scan(
         analyzed_columns[col] = [t for t in analyzed_columns[col] if _not_dumped(t)]
     all_tokens = [t for t in all_tokens if _not_dumped(t)]
 
-    # Primary: near migration — quality + not dumped
-    migration_picks = [
-        t
-        for t in all_tokens
-        if _is_near_migration_token(t)
-        and _not_dumped(t)
-        and (
-            (t.get("migrationPath") or {}).get("score", 0) >= 42
-            or float(t.get("bonding_progress") or 0) >= MIGRATION_NEAR_MIN_PCT
-            or t.get("column") in ("almost_bonded", "recently_bonded")
-        )
-        and float(t.get("mcap_usd") or 0) >= 12_000
-    ]
+    # Near migration — strict quality (user losses on weak recs)
+    def _quality_near_mig(t: dict) -> bool:
+        if not _is_near_migration_token(t) or not _not_dumped(t):
+            return False
+        mcap = float(t.get("mcap_usd") or 0)
+        if mcap < NEAR_MIG_MIN_MCAP:
+            return False
+        bond = float(t.get("bonding_progress") or 0)
+        mig_s = int((t.get("migrationPath") or {}).get("score") or 0)
+        ath = float(t.get("ath_mcap") or 0)
+        if ath >= 3_000 and mcap < ath * NEAR_ATH_BUY_FRAC:
+            return False  # faded from ATH — not a buy path
+        deep = t.get("deepAnalysis") or {}
+        if deep.get("verdict") == "SKIP":
+            return False
+        tx = t.get("txActivity") or (t.get("alphaSetup") or {}).get("txActivity") or {}
+        if tx.get("tilt") == "DOWN" or tx.get("zone") in ("dead", "wash", "one_way"):
+            return False
+        return bond >= MIGRATION_NEAR_MIN_PCT or mig_s >= 55
+
+    migration_picks = [t for t in all_tokens if _quality_near_mig(t)]
+    # Prefer true BUY-gate tokens first
     migration_picks.sort(
         key=lambda t: (
-            -(t.get("migrationPath") or {}).get("score", 0),
-            -(float(t.get("bonding_progress") or 0)),
-            -(t.get("runnerRadar") or {}).get("score", 0),
+            0 if (t.get("deepAnalysis") or {}).get("buy_ready") else 1,
+            0 if (t.get("investSignal") == "STRONG_INVEST") else 1,
+            -int((t.get("migrationPath") or {}).get("score") or 0),
+            -float(t.get("bonding_progress") or 0),
+            -int((t.get("txActivity") or {}).get("score") or 0),
             -t.get("safetyScore", 0),
         )
     )

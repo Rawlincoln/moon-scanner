@@ -93,11 +93,14 @@ function isClientCrashedRunner(t) {
   const rr = t.runnerRadar || {};
   if (rr.crashed || rr.stage === "crashed") return true;
   if (mcap <= 0) return peak >= 5000;
-  // −40% from ATH/peak (USWR-class: 31k → 2k)
-  if (peak >= 3500 && mcap < peak * 0.6) return true;
-  if (peak >= 3000 && mcap < peak * 0.45) return true;
+  // −30% from ATH/peak — hide dumps (user: still seeing dumpers)
+  if (peak >= 3000 && mcap < peak * 0.7) return true;
+  if (peak >= 2500 && mcap < peak * 0.55) return true;
   const pc = t.priceChange || t.market?.priceChange || {};
-  if (Number(pc.h1) <= -30 || Number(pc.m5) <= -25 || Number(pc.h6) <= -35) return true;
+  if (Number(pc.h1) <= -28 || Number(pc.m5) <= -22 || Number(pc.h6) <= -32) return true;
+  const deep = t.deepAnalysis || {};
+  if (deep.dump?.is_dumped) return true;
+  if (deep.verdict === "SKIP" && Number(deep.dump?.dump_pct_from_ath || 0) >= 25) return true;
   if (peak >= 10000 && mcap < 7000) return true;
   if (peak >= 20000 && mcap < peak * 0.65) return true;
   if (peak >= 5500 && peak < 15000 && mcap < 3500) return true;
@@ -830,6 +833,7 @@ function renderTrenchesCard(t) {
     ${sourceBadgesHtml([t.column ? `padre_trenches_${t.column}` : "pump.fun"])}
     ${migrationBadgeHtml(t)}
     ${txActivityBadgeHtml(t)}
+    ${deepAnalysisHtml(t, true)}
     ${(t.runnerRadar || {}).alert || (t.runnerRadar || {}).score >= 55 ? `<div class="runner-score-row"><span class="runner-score-badge">⚡ RUNNER ${t.runnerRadar.score} · ${(t.runnerRadar.stage || "").replace(/_/g, " ")}</span></div>` : ""}
     ${sixk && lane === "early_lottery" ? `<div class="sixk-row"><span class="sixk-badge ${sweet ? "sweet" : ""}">${sweet ? "🎯 LOTTERY $3.5–7.5K" : "EARLY LOTTERY"} · ${fmtUsd(mcap)}</span></div>` : ""}
     ${socialBadgesHtml(social)}
@@ -885,6 +889,7 @@ function openTrenchesModal(t) {
     ${social.x_url ? `<p style="margin-bottom:8px"><a href="${social.x_url}" target="_blank" rel="noopener" style="color:#5b9fff">X / Twitter →</a></p>` : ""}
     ${social.tiktok_url ? `<p style="margin-bottom:8px"><a href="${social.tiktok_url}" target="_blank" rel="noopener" style="color:#ff6b9d">TikTok →</a></p>` : ""}
     <p style="color:var(--muted);margin-bottom:16px">${rep.verdict || ""}</p>
+    ${deepAnalysisHtml(t, false)}
     ${alphaSetupHtml(alpha)}
     ${fingerprintHtml(alpha.megaFingerprint || {})}
     ${tradePlanHtml(t.tradePlan || {})}
@@ -1459,6 +1464,34 @@ function filterDisplayMcap(tokens) {
     }
     return m <= MAX_EARLY_MCAP;
   });
+}
+
+function deepAnalysisHtml(t, compact = false) {
+  const d = t.deepAnalysis || {};
+  if (!d.verdict) return "";
+  const v = d.verdict;
+  const cls = v === "BUY" ? "deep-buy" : v === "SKIP" ? "deep-skip" : "deep-watch";
+  if (compact) {
+    return `<div class="deep-row"><span class="deep-badge ${cls}">${v} ${d.confidence || 0}% · ${d.gates_passed || 0}/${d.gates_total || 0} gates</span>
+      ${d.tx_interest?.total_m5 != null ? `<span class="deep-meta">${d.tx_interest.total_m5} tx · ${d.migration?.bonding_pct ?? "—"}% bond</span>` : ""}
+    </div>`;
+  }
+  const checks = (d.checklist || []).map((c) =>
+    `<li class="${c.ok ? "ok" : "bad"}">${c.ok ? "✓" : "✗"} ${c.label}${c.detail ? " — " + c.detail : ""}</li>`
+  ).join("");
+  const dump = d.dump || {};
+  return `<div class="analysis-section deep-panel">
+    <h4>Deep verdict: ${v} (${d.confidence || 0}%)</h4>
+    <p style="color:var(--accent);margin-bottom:8px">${d.summary || ""}</p>
+    <p style="margin-bottom:8px;font-size:0.85rem">${d.position_advice || ""}</p>
+    <div class="analysis-grid">
+      <div class="analysis-item"><div class="k">Dump risk</div><div class="v">${dump.is_dumped ? "DUMPED" : "ok"} ${dump.dump_pct_from_ath != null ? "−" + dump.dump_pct_from_ath + "% ATH" : ""}</div></div>
+      <div class="analysis-item"><div class="k">ATH → now</div><div class="v">${dump.ath_mcap ? fmtUsd(dump.ath_mcap) : "—"} → ${fmtUsd(dump.mcap)}</div></div>
+      <div class="analysis-item"><div class="k">Tx zone</div><div class="v">${d.tx_interest?.zone || "—"} · ${d.tx_interest?.total_m5 ?? "—"} tx · tilt ${d.tx_interest?.tilt || "—"}</div></div>
+      <div class="analysis-item"><div class="k">Migration</div><div class="v">${d.migration?.bonding_pct ?? "—"}% · score ${d.migration?.score ?? "—"}</div></div>
+    </div>
+    <ul class="reason-list deep-checks">${checks}</ul>
+  </div>`;
 }
 
 function txActivityBadgeHtml(t) {

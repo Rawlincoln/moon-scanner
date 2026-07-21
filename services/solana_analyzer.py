@@ -28,31 +28,53 @@ class SolanaAnalyzer:
         mint_address: str,
         pump_coin: dict | None = None,
         padre_audit: dict | None = None,
+        *,
+        fast: bool = False,
     ) -> dict[str, Any]:
         try:
             async with httpx.AsyncClient(
                 timeout=REQUEST_TIMEOUT, headers=self._headers
             ) as client:
-                # Parallel RugCheck calls — saves ~1 round-trip per token
-                summary_resp, full_resp = await asyncio.gather(
-                    client.get(f"{RUGCHECK_BASE}/{mint_address}/report/summary"),
-                    client.get(f"{RUGCHECK_BASE}/{mint_address}/report"),
-                    return_exceptions=True,
-                )
-                if isinstance(summary_resp, Exception):
-                    raise summary_resp
-                if summary_resp.status_code == 404:
-                    if pump_coin:
-                        return self._pumpfun_fallback(
-                            mint_address, pump_coin, padre_audit=padre_audit
-                        )
-                    return self._no_data(mint_address)
-                summary_resp.raise_for_status()
-                summary = summary_resp.json()
-                if isinstance(full_resp, Exception) or full_resp.status_code != 200:
+                # Fast bulk: summary only (~1 round-trip). Full report on deep analyze.
+                if fast:
+                    summary_resp = await client.get(
+                        f"{RUGCHECK_BASE}/{mint_address}/report/summary"
+                    )
+                    if summary_resp.status_code == 404:
+                        if pump_coin:
+                            return self._pumpfun_fallback(
+                                mint_address, pump_coin, padre_audit=padre_audit
+                            )
+                        return self._no_data(mint_address)
+                    if summary_resp.status_code == 429:
+                        if pump_coin:
+                            return self._pumpfun_fallback(
+                                mint_address, pump_coin, padre_audit=padre_audit
+                            )
+                        return self._error(mint_address, "RugCheck rate limited")
+                    summary_resp.raise_for_status()
+                    summary = summary_resp.json()
                     full = {}
                 else:
-                    full = full_resp.json()
+                    summary_resp, full_resp = await asyncio.gather(
+                        client.get(f"{RUGCHECK_BASE}/{mint_address}/report/summary"),
+                        client.get(f"{RUGCHECK_BASE}/{mint_address}/report"),
+                        return_exceptions=True,
+                    )
+                    if isinstance(summary_resp, Exception):
+                        raise summary_resp
+                    if summary_resp.status_code == 404:
+                        if pump_coin:
+                            return self._pumpfun_fallback(
+                                mint_address, pump_coin, padre_audit=padre_audit
+                            )
+                        return self._no_data(mint_address)
+                    summary_resp.raise_for_status()
+                    summary = summary_resp.json()
+                    if isinstance(full_resp, Exception) or full_resp.status_code != 200:
+                        full = {}
+                    else:
+                        full = full_resp.json()
         except Exception as exc:
             if pump_coin:
                 return self._pumpfun_fallback(

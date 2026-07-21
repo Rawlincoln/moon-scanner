@@ -185,7 +185,7 @@ class PadreFeedClient:
             cand["ath_market_cap"] = cand["_ath_mcap"]
             # Drop already-dumped climbers from $6k radar
             ath = cand["_ath_mcap"]
-            if ath >= 3500 and mcap > 0 and mcap < ath * 0.60:
+            if ath >= 3000 and mcap > 0 and mcap < ath * 0.70:
                 continue
             cand["_mcap_closeness"] = max(0, 100 - abs(mcap - TARGET_MCAP_USD) / 60)
             cand["_sixk_radar"] = True
@@ -608,7 +608,7 @@ class PadreFeedClient:
             cand["bonding_progress"] = progress
             # Skip already-dumped almost-bonded before analysis (save work + UI)
             ath = cand["_ath_mcap"]
-            if ath >= 3500 and mcap > 0 and mcap < ath * 0.60:
+            if ath >= 3000 and mcap > 0 and mcap < ath * 0.70:
                 continue
             cand["_migration_lane"] = (
                 "almost"

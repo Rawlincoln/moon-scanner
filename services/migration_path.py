@@ -160,12 +160,17 @@ def analyze_migration_path(
     score = int(max(0, min(100, score)))
 
     # Lane for UI sections
-    if bond >= MIGRATION_NEAR_MIN_PCT and score >= 40:
+    if bond >= MIGRATION_NEAR_MIN_PCT and score >= 48:
         lane = "near_migration"
-        recommend = "ENTER" if score >= 55 and two_way and not one_way else "WATCH"
+        # BUY-quality only: high score + two-way + not one-way (user losses on weak near-mig)
+        recommend = (
+            "ENTER"
+            if score >= 72 and two_way and not one_way and holders >= 40
+            else "WATCH"
+        )
         summary = (
             f"Near migration ({bond:.0f}% · ${mcap:,.0f}) — score {score}. "
-            f"These are the only trench tokens that regularly graduate."
+            f"{'High-quality path' if recommend == 'ENTER' else 'Watch only — need stronger flow/holders'}."
         )
     elif bond >= MIGRATION_CLIMBING_MIN_PCT and mcap <= 25_000:
         lane = "under_25k"

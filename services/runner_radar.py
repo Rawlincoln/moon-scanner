@@ -22,11 +22,11 @@ from config import (
 )
 from services.tx_activity import score_tx_activity
 
-# Dump thresholds — once hit, drop from ALL display lanes / sticky
-CRASH_FROM_ATH_FRAC = 0.55  # −45% from ATH = dead (was 0.45 / −55%)
-CRASH_FROM_PEAK_FRAC = 0.58  # −42% from tracked peak
-SOFT_FADE_FRAC = 0.70  # −30% from peak = not a clean runner
-HARD_CRASH_FRAC = 0.40  # −60% from ATH
+# Dump thresholds — user lost capital on dumps still shown; hide earlier
+CRASH_FROM_ATH_FRAC = 0.70  # −30% from ATH = hide
+CRASH_FROM_PEAK_FRAC = 0.70
+SOFT_FADE_FRAC = 0.80  # −20% from peak = not a clean buy
+HARD_CRASH_FRAC = 0.55  # −45% hard
 
 
 def _f(val: Any, default: float = 0.0) -> float:
@@ -107,13 +107,13 @@ def is_crashed_runner(
     ):
         return True, avoid.get("summary") or "Avoid crash flags"
 
-    # −40% from ATH/peak (user: never show dumps)
-    if high >= 3_500 and mcap < high * 0.60:
+    # −30% from ATH/peak (user: never show dumps)
+    if high >= 3_000 and mcap < high * CRASH_FROM_ATH_FRAC:
         dump_pct = (1 - mcap / high) * 100
         return True, f"Dumped {dump_pct:.0f}% from peak ${high:,.0f} → ${mcap:,.0f}"
 
-    # Hard crash −55%
-    if high >= 3_000 and mcap < high * 0.45:
+    # Hard crash −45%
+    if high >= 2_500 and mcap < high * HARD_CRASH_FRAC:
         return True, f"Hard crash from ${high:,.0f} → ${mcap:,.0f}"
 
     bond = _f(token.get("bonding_progress"))
