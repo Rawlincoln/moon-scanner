@@ -71,7 +71,12 @@ from services.checker_hub import run_checker_hub
 from services.alpha_setup import analyze_alpha_setup
 from services.avoid_filters import analyze_avoid_flags
 from services.migration_path import analyze_migration_path
-from services.runner_radar import build_runner_alerts, score_runner_candidate
+from services.runner_radar import (
+    build_runner_alerts,
+    extract_ath_mcap,
+    is_crashed_runner,
+    score_runner_candidate,
+)
 from services.smart_money import (
     analyze_smart_money,
     analyze_smart_money_async,
@@ -116,25 +121,50 @@ async def _pin_near_migration_tokens(tokens: list[dict[str, Any]]) -> list[dict[
     now = time.time()
     async with _near_mig_lock:
         for t in tokens:
-            if not _is_near_migration_token(t):
-                continue
             mint = t.get("tokenAddress") or ""
             if not mint:
                 continue
+            # Always track peak for known pins even if re-scored
             prev = _near_mig_store.get(mint) or {}
+            mcap = float(t.get("mcap_usd") or 0)
+            ath = extract_ath_mcap(t)
+            peak = max(
+                float(prev.get("_peak_mcap") or 0),
+                ath,
+                mcap,
+            )
+            t = dict(t)
+            t["_peak_mcap"] = peak
+            t["ath_mcap"] = ath or prev.get("ath_mcap")
+
+            crashed, reason = is_crashed_runner(t, mcap=mcap, ath=ath, peak=peak)
+            if crashed:
+                _near_mig_store.pop(mint, None)
+                continue
+            if not _is_near_migration_token(t) and mint not in _near_mig_store:
+                continue
+            # If already pinned but no longer near-mig and not crashed, keep until TTL
+            # unless mcap collapsed below floor
+            if mint in _near_mig_store and mcap > 0 and mcap < 3_500 and peak >= 12_000:
+                _near_mig_store.pop(mint, None)
+                continue
+
             snap = dict(t)
             snap["_sticky_near_mig"] = True
             snap["_first_seen"] = prev.get("_first_seen") or now
             snap["_last_seen"] = now
-            # Prefer fresher mcap/bonding if higher confidence
+            snap["_peak_mcap"] = peak
             _near_mig_store[mint] = snap
 
-        # Expire old pins
-        dead = [
-            m
-            for m, v in _near_mig_store.items()
-            if now - float(v.get("_last_seen") or 0) > NEAR_MIGRATION_STICKY_TTL_SEC
-        ]
+        # Expire old pins + re-check crash on stored snapshots
+        dead: list[str] = []
+        for m, v in _near_mig_store.items():
+            if now - float(v.get("_last_seen") or 0) > NEAR_MIGRATION_STICKY_TTL_SEC:
+                dead.append(m)
+                continue
+            crashed, _ = is_crashed_runner(v)
+            if crashed:
+                dead.append(m)
         for m in dead:
             _near_mig_store.pop(m, None)
 
@@ -260,11 +290,21 @@ async def _refresh_runner_alerts_from_cache() -> list[dict]:
     prev = set(_runner_alert_store.keys())
     fresh = build_runner_alerts(deduped, prev_mints=prev)
     now = time.time()
+    # Live mcap map for sticky crash checks
+    live_by_mint = {t.get("tokenAddress"): t for t in deduped if t.get("tokenAddress")}
+
     async with _runner_alert_lock:
         # Update / insert
         for item in fresh:
             mint = item["tokenAddress"]
             existing = _runner_alert_store.get(mint)
+            peak = max(
+                float(item.get("_peak_mcap") or 0),
+                float((existing or {}).get("_peak_mcap") or 0),
+                float(item.get("mcap_usd") or 0),
+                float(item.get("ath_mcap") or 0),
+            )
+            item["_peak_mcap"] = peak
             if existing:
                 item["is_new_alert"] = False
                 item["first_seen"] = existing.get("first_seen") or existing.get(
@@ -275,21 +315,53 @@ async def _refresh_runner_alerts_from_cache() -> list[dict]:
                 item["first_seen"] = now
             item["alerted_at"] = now
             _runner_alert_store[mint] = item
-        # Expire only by first_seen age (not last poll) so brief misses don't wipe
-        dead = [
-            m
-            for m, v in _runner_alert_store.items()
-            if now - float(v.get("first_seen") or v.get("alerted_at") or 0)
-            > RUNNER_ALERT_TTL_SEC
-        ]
+
+        # Purge TTL + crashes (CHOCI-class: ATH $20k → $2k)
+        dead: list[str] = []
+        for m, v in list(_runner_alert_store.items()):
+            if now - float(v.get("first_seen") or v.get("alerted_at") or 0) > RUNNER_ALERT_TTL_SEC:
+                dead.append(m)
+                continue
+            live = live_by_mint.get(m)
+            if live:
+                # Refresh sticky snapshot with live mcap for crash check
+                merged = dict(v)
+                merged["mcap_usd"] = live.get("mcap_usd")
+                merged["bonding_progress"] = live.get("bonding_progress")
+                merged["ath_mcap"] = extract_ath_mcap(live) or v.get("ath_mcap")
+                merged["_peak_mcap"] = max(
+                    float(v.get("_peak_mcap") or 0),
+                    float(live.get("mcap_usd") or 0),
+                    extract_ath_mcap(live),
+                )
+                merged["safetyReport"] = live.get("safetyReport") or v.get("safetyReport")
+                merged["priceChange"] = (live.get("market") or {}).get("priceChange")
+                rr = score_runner_candidate(merged)
+                if rr.get("crashed") or not rr.get("alert"):
+                    dead.append(m)
+                    continue
+                v.update(
+                    {
+                        "mcap_usd": merged["mcap_usd"],
+                        "bonding_progress": merged.get("bonding_progress"),
+                        "_peak_mcap": merged["_peak_mcap"],
+                        "ath_mcap": merged.get("ath_mcap"),
+                        "runnerRadar": rr,
+                        "is_new_alert": False,
+                        "alerted_at": now,
+                    }
+                )
+            else:
+                # Missed poll — still drop if last known mcap is a crash vs peak
+                crashed, _ = is_crashed_runner(v)
+                if crashed or (v.get("runnerRadar") or {}).get("crashed"):
+                    dead.append(m)
+                else:
+                    v["is_new_alert"] = False
+                    v["_missed_poll"] = True
         for m in dead:
             _runner_alert_store.pop(m, None)
-        # Keep tokens that dropped from this poll still sticky (update last_miss only)
-        fresh_mints = {x["tokenAddress"] for x in fresh}
-        for mint, item in list(_runner_alert_store.items()):
-            if mint not in fresh_mints:
-                item["is_new_alert"] = False
-                item["_missed_poll"] = True
+
         ordered = sorted(
             _runner_alert_store.values(),
             key=lambda x: (
@@ -1370,6 +1442,13 @@ async def _run_trenches_scan(
                     and UNDER25K_MIN_USD <= mcap <= UNDER25K_MAX_USD
                 ):
                     out_col = "under_25k"
+                pf = (result.get("market") or {}).get("pumpfun") or {}
+                ath_mcap = float(
+                    pf.get("ath_market_cap")
+                    or cand.get("ath_market_cap")
+                    or (cand.get("pumpfun") or {}).get("ath_market_cap")
+                    or 0
+                )
                 return {
                     "column": out_col,
                     "chainId": "solana",
@@ -1378,9 +1457,13 @@ async def _run_trenches_scan(
                     "symbol": base.get("symbol") or cand.get("symbol"),
                     "icon": result.get("icon") or cand.get("icon"),
                     "mcap_usd": mcap,
+                    "ath_mcap": ath_mcap or None,
+                    "peak_mcap": max(ath_mcap, mcap) or None,
                     "age_minutes": (result.get("market") or {}).get("age_minutes")
                     or cand.get("_age_minutes"),
                     "bonding_progress": bond,
+                    "priceChange": (result.get("market") or {}).get("priceChange")
+                    or {},
                     "safetyTier": report["tier"],
                     "safetyScore": report["score"],
                     "safetyReport": report,
@@ -1396,6 +1479,11 @@ async def _run_trenches_scan(
                     "smartMoney": smart_money,
                     "alphaSetup": result.get("alphaSetup") or {},
                     "migrationPath": mig,
+                    "pumpfun": {
+                        "ath_market_cap": ath_mcap,
+                        "usd_market_cap": mcap,
+                        "bonding_progress": bond,
+                    },
                     "checkerHub": checker_hub,
                     "sixkRadar": column == "sixk_radar"
                     or SIXK_RADAR_MIN_USD <= mcap <= SIXK_RADAR_MAX_USD,

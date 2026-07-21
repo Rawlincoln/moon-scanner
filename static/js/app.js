@@ -64,9 +64,28 @@ function saveStickyNearMig() {
   }
 }
 
+function isClientCrashedRunner(t) {
+  const mcap = Number(t.mcap_usd || 0);
+  const ath = Number(t.ath_mcap || t.ath_market_cap || t.pumpfun?.ath_market_cap || 0);
+  const peak = Math.max(ath, Number(t._peak_mcap || t.peak_mcap || 0), mcap);
+  const rr = t.runnerRadar || {};
+  if (rr.crashed || rr.stage === "crashed") return true;
+  if (mcap <= 0) return true;
+  if (peak >= 5000 && mcap < peak * 0.45) return true; // −55% from peak
+  const pc = t.priceChange || t.market?.priceChange || {};
+  if (Number(pc.h1) <= -40 || Number(pc.m5) <= -40) return true;
+  if (peak >= 12000 && mcap < 4000) return true; // climbed then died
+  return false;
+}
+
 function pinNearMigrationTokens(tokens) {
   const now = Date.now();
   for (const t of tokens) {
+    if (!t.tokenAddress) continue;
+    if (isClientCrashedRunner(t)) {
+      delete stickyNearMig[t.tokenAddress];
+      continue;
+    }
     const lane = tokenLane(t);
     const bond = Number(t.bonding_progress ?? t.migrationPath?.bonding_pct ?? 0);
     const mcap = t.mcap_usd || 0;
@@ -77,18 +96,32 @@ function pinNearMigrationTokens(tokens) {
       t.column === "recently_bonded" ||
       bond >= 40 ||
       (mcap >= 28000 && mcap <= 78000);
-    if (!isNear || !t.tokenAddress) continue;
+    if (!isNear && !stickyNearMig[t.tokenAddress]) continue;
     const prev = stickyNearMig[t.tokenAddress] || {};
+    const peak = Math.max(
+      Number(prev._peak_mcap || 0),
+      Number(t.ath_mcap || 0),
+      Number(t.mcap_usd || 0),
+      Number(prev.mcap_usd || 0)
+    );
+    // Drop sticky if collapsed after climb
+    if (peak >= 12000 && mcap > 0 && mcap < peak * 0.45) {
+      delete stickyNearMig[t.tokenAddress];
+      continue;
+    }
     stickyNearMig[t.tokenAddress] = {
       ...t,
+      _peak_mcap: peak,
+      ath_mcap: t.ath_mcap || prev.ath_mcap,
       _clientPinnedAt: now,
       _clientFirstSeen: prev._clientFirstSeen || now,
       _sticky_near_mig: true,
     };
   }
-  // Expire
+  // Expire + purge crashes
   for (const mint of Object.keys(stickyNearMig)) {
-    if (now - (stickyNearMig[mint]._clientPinnedAt || 0) > NEAR_MIG_STICKY_MS) {
+    const t = stickyNearMig[mint];
+    if (now - (t._clientPinnedAt || 0) > NEAR_MIG_STICKY_MS || isClientCrashedRunner(t)) {
       delete stickyNearMig[mint];
     }
   }
@@ -98,24 +131,31 @@ function pinNearMigrationTokens(tokens) {
 function mergeStickyNearMigration(tokens) {
   pinNearMigrationTokens(tokens);
   const by = new Map();
-  // Sticky first (older snapshots)
+  // Sticky first (older snapshots) — skip crashes
   for (const t of Object.values(stickyNearMig)) {
-    if (t.tokenAddress) by.set(t.tokenAddress, t);
+    if (t.tokenAddress && !isClientCrashedRunner(t)) by.set(t.tokenAddress, t);
   }
   // Live scan overwrites
   for (const t of tokens) {
     if (!t.tokenAddress) continue;
+    if (isClientCrashedRunner(t)) {
+      by.delete(t.tokenAddress);
+      delete stickyNearMig[t.tokenAddress];
+      continue;
+    }
     const prev = by.get(t.tokenAddress);
     if (prev?._clientFirstSeen) {
       t._clientFirstSeen = prev._clientFirstSeen;
       t._sticky_near_mig = true;
+      t._peak_mcap = Math.max(Number(prev._peak_mcap || 0), Number(t.mcap_usd || 0), Number(t.ath_mcap || 0));
       t._pinned_sec = Math.round((Date.now() - prev._clientFirstSeen) / 1000);
     }
     by.set(t.tokenAddress, t);
   }
   // Refresh pin timestamps for live near-mig
   pinNearMigrationTokens([...by.values()]);
-  return [...by.values()];
+  saveStickyNearMig();
+  return [...by.values()].filter((t) => !isClientCrashedRunner(t));
 }
 
 function initChains() {
@@ -893,7 +933,10 @@ function renderGrid(tokens) {
     visible = visible.filter((t) => {
       const lane = tokenLane(t);
       if (sectionFilter === "runners") {
-        return (t.runnerRadar || {}).alert || (t.runnerRadar || {}).score >= 55;
+        if (isClientCrashedRunner(t)) return false;
+        const rr = t.runnerRadar || {};
+        if (rr.crashed || rr.stage === "crashed") return false;
+        return rr.alert || rr.score >= 55;
       }
       if (sectionFilter === "near_migration") return lane === "near_migration" || lane === "migrated";
       return lane === sectionFilter;
@@ -931,7 +974,12 @@ function renderGrid(tokens) {
 
   const groups = groupByLane(visible);
   const runners = visible
-    .filter((t) => (t.runnerRadar || {}).alert || (t.runnerRadar || {}).score >= 55)
+    .filter((t) => {
+      if (isClientCrashedRunner(t)) return false;
+      const rr = t.runnerRadar || {};
+      if (rr.crashed || rr.stage === "crashed") return false;
+      return rr.alert || rr.score >= 55;
+    })
     .sort((a, b) => ((b.runnerRadar || {}).score || 0) - ((a.runnerRadar || {}).score || 0));
 
   const sections = [
@@ -1264,7 +1312,11 @@ function renderRunnerAlertBar(alerts) {
   const list = $("#runnerAlertList");
   const countEl = $("#runnerAlertCount");
   if (!bar || !list) return;
-  lastRunnerAlerts = alerts || [];
+  // Never show crashed / dumped runners (e.g. CHOCI ATH→dust)
+  lastRunnerAlerts = (alerts || []).filter((a) => {
+    if ((a.runnerRadar || {}).crashed || (a.runnerRadar || {}).stage === "crashed") return false;
+    return !isClientCrashedRunner(a);
+  });
   if (!lastRunnerAlerts.length || $("#runnerAlerts")?.checked === false) {
     bar.hidden = true;
     return;
