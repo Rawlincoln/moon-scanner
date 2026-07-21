@@ -18,6 +18,10 @@ Learned from real rugs:
     * long AI community copy, ZERO twitter/telegram/website
     * 3355 buys vs 64 sells (extreme one-way), creator balance 0
     * many mid bags look "distributed" but flow is fake
+  Bw1g…pump (Cashoty / CASHOTY) — user-flagged junk:
+    * ATH ~$25.6k in ~4m then −90% to ~$2.2k
+    * status-link Twitter only, EMPTY description, 0 replies
+    * polished website but no community — entry packaging
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ BLOCKED_MINTS: set[str] = {
     "5ocgBRqLyQxZEvtAYcX1nXeVhAj1cuCHi2ZfSZKVpump",  # CEO of Sex — status-link P&D
     "BTU78ZNs11eDYsaUXysXnEPEJrCDYDobAkTfQQafpump",  # USWR — all green, no real sellers/holders
     "9Sj7Yi6oYCATrjC68or2Rqk3D6YkgKaqc9UepDogpump",  # CUBEMAN — AI pitch, no socials, wash buys, creator dumped
+    "Bw1gX5ih2DJFtXggXnnGbWqqpBte1uvb9jurUSecpump",  # Cashoty — status X + empty desc, flash ATH then dump
 }
 
 # Adult-bait / shock names — almost always pure attention rugs (CEO of Sex, etc.)
@@ -226,13 +231,20 @@ def analyze_avoid_flags(
             "Fake socials + no community — classic scam packaging"
         )
 
-    # EARLY ENTRY TRAP (catch BEFORE dump — 5ocg / CEO of Sex):
-    # status-link Twitter + empty description + no real site = do not enter
-    if "fake_twitter" in flags and len(desc) < 8 and not has_real_social:
+    # EARLY ENTRY TRAP (catch BEFORE dump — 5ocg / CEO of Sex / Cashoty):
+    # status-link Twitter + empty description = do not enter
+    # (website alone does NOT save it — Cashoty had cashothy.fun then −90%)
+    if "fake_twitter" in flags and len(desc) < 8:
         flags.append("entry_trap_social")
         reasons.append(
-            "Entry trap: only a tweet link + no real socials/description "
-            "— skip before the dump"
+            "Entry trap: status-link Twitter + empty description "
+            "— skip before the dump (site alone is not enough)"
+        )
+    elif "fake_twitter" in flags and replies == 0 and len(desc) < 20:
+        flags.append("entry_trap_social")
+        reasons.append(
+            "Entry trap: status tweet only + zero replies "
+            "— packaging, not community"
         )
 
     # Adult-bait / shock ticker or name

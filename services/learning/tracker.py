@@ -450,6 +450,23 @@ class LearningEngine:
                 "notes": "all-green wash / empty float",
             },
             {
+                "mint": "Bw1gX5ih2DJFtXggXnnGbWqqpBte1uvb9jurUSecpump",
+                "name": "Cashoty",
+                "symbol": "CASHOTY",
+                "first_mcap": 6000,
+                "ath_mcap": 25614,
+                "outcome": "SCAM",
+                "features": {
+                    "fake_twitter": 1,
+                    "has_desc": 0,
+                    "already_crashed": 1,
+                    "fading_from_ath": 1,
+                    "mcap_bin:lottery_dies_under_7k": 1,
+                    "buy_ratio_ge_1.3": 1,
+                },
+                "notes": "status X + empty desc, ATH 25k then dump to 2k",
+            },
+            {
                 "mint": "9Sj7Yi6oYCATrjC68or2Rqk3D6YkgKaqc9UepDogpump",
                 "name": "CUBEMAN",
                 "symbol": "CUBEMAN",
