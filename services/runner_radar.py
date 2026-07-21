@@ -68,13 +68,21 @@ def is_crashed_runner(
     )
     high = max(ath, peak, mcap)
 
+    # Unknown mcap alone is NOT a dump (preview / loading)
     if mcap <= 0:
-        return True, "No mcap — dead / unknown"
+        if max(ath, peak) >= 5_000:
+            return True, "Lost mcap after peak — dead"
+        return False, ""
 
-    # Price change dumps (DexScreener) — tighter than before
+    # Prefer true peak (ATH), not max(ath, mcap) which hides dumps when mcap is ATH
+    high = max(ath, peak)
+    if high <= 0:
+        high = mcap
+
+    # Price change dumps (DexScreener)
     mkt = token.get("market") or {}
     pc = mkt.get("priceChange") or token.get("priceChange") or {}
-    for key, thr in (("m5", -28), ("h1", -32), ("h6", -40)):
+    for key, thr in (("m5", -25), ("h1", -30), ("h6", -35)):
         ch = _f(pc.get(key))
         if ch <= thr:
             return True, f"Dumped {ch:.0f}% ({key})"
@@ -98,13 +106,13 @@ def is_crashed_runner(
     ):
         return True, avoid.get("summary") or "Avoid crash flags"
 
-    # Any meaningful peak then −45%
-    if high >= 4_000 and mcap < high * CRASH_FROM_ATH_FRAC:
+    # −40% from ATH/peak (user: never show dumps)
+    if high >= 3_500 and mcap < high * 0.60:
         dump_pct = (1 - mcap / high) * 100
         return True, f"Dumped {dump_pct:.0f}% from peak ${high:,.0f} → ${mcap:,.0f}"
 
-    # Hard crash −60%
-    if high >= 3_500 and mcap < high * HARD_CRASH_FRAC:
+    # Hard crash −55%
+    if high >= 3_000 and mcap < high * 0.45:
         return True, f"Hard crash from ${high:,.0f} → ${mcap:,.0f}"
 
     bond = _f(token.get("bonding_progress"))

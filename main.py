@@ -1481,6 +1481,35 @@ async def _run_trenches_scan(
                         "mcap_usd": result.get("mcap_usd") or 0,
                     }
                 mkt = result.get("market") or {}
+                # Hide already-dumped charts (ATH vs live mcap) — user request
+                pf_early = mkt.get("pumpfun") or {}
+                mcap_early = float(
+                    result.get("mcap_usd")
+                    or pf_early.get("usd_market_cap")
+                    or mkt.get("marketCap")
+                    or 0
+                )
+                ath_early = float(
+                    pf_early.get("ath_market_cap")
+                    or cand.get("ath_market_cap")
+                    or (cand.get("pumpfun") or {}).get("ath_market_cap")
+                    or 0
+                )
+                dump_probe = {
+                    "mcap_usd": mcap_early,
+                    "ath_mcap": ath_early,
+                    "priceChange": mkt.get("priceChange") or {},
+                    "safetyReport": {"avoid": avoid},
+                    "column": column,
+                }
+                dumped, dump_why = is_crashed_runner(dump_probe)
+                if dumped:
+                    return {
+                        "column": column,
+                        "skipped": True,
+                        "skipReason": dump_why or "already_dumped",
+                        "mcap_usd": mcap_early,
+                    }
                 pair = {
                     "pumpfun": mkt.get("pumpfun"),
                     "volume": mkt.get("volume"),
@@ -1718,8 +1747,7 @@ async def _run_trenches_scan(
         t["runnerRadar"] = score_runner_candidate(t)
 
     def _not_dumped(t: dict) -> bool:
-        if (t.get("safetyReport") or {}).get("tier") in ("UNSAFE", "AVOID"):
-            return False
+        """User rule: never show tokens that already dumped."""
         crashed, _ = is_crashed_runner(t)
         if crashed:
             return False
@@ -1729,12 +1757,21 @@ async def _run_trenches_scan(
         peak = max(
             float(t.get("_peak_mcap") or 0),
             float(t.get("ath_mcap") or 0),
-            float(t.get("mcap_usd") or 0),
+            float((t.get("pumpfun") or {}).get("ath_market_cap") or 0),
         )
         mcap = float(t.get("mcap_usd") or 0)
-        if peak >= 5_000 and mcap > 0 and mcap < peak * 0.55:
+        if peak >= 3_500 and mcap > 0 and mcap < peak * 0.60:
+            return False
+        # Price dump candles
+        pc = t.get("priceChange") or {}
+        if float(pc.get("m5") or 0) <= -25 or float(pc.get("h1") or 0) <= -30:
             return False
         return True
+
+    # Strip dumps from every column before any picks
+    for col in list(analyzed_columns.keys()):
+        analyzed_columns[col] = [t for t in analyzed_columns[col] if _not_dumped(t)]
+    all_tokens = [t for t in all_tokens if _not_dumped(t)]
 
     # Primary: near migration — quality + not dumped
     migration_picks = [
