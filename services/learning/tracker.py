@@ -41,7 +41,10 @@ def classify_outcome(
     avoid_flags: list[str] | None = None,
     rugged: bool = False,
     creator_dumped: bool = False,
+    graduated: bool = False,
+    mins_to_ath: float | None = None,
 ) -> str:
+    """Label lifecycle for learning — prefer absolute ATH + dump depth."""
     flags = set(avoid_flags or [])
     if rugged or "rugged" in flags or "honeypot" in flags:
         return "RUGGED"
@@ -61,23 +64,35 @@ def classify_outcome(
         first_mcap = max(last_mcap, 1)
     mult = ath_mcap / first_mcap if first_mcap > 0 else 0
     crash = last_mcap / ath_mcap if ath_mcap > 0 else 1
-    # Absolute ATH tiers for mega learning
-    # Absolute ATH tiers — true multi‑$M first, then local mega
-    if ath_mcap >= 10_000_000 and mult >= 2.0:
+
+    # Flash pump-dump: ATH in under 5m then −55%+
+    if (
+        mins_to_ath is not None
+        and mins_to_ath <= 5
+        and ath_mcap >= 5_000
+        and crash <= 0.55
+    ):
+        return "SCAM"
+
+    # Absolute ATH tiers — multi‑$M first
+    if ath_mcap >= 10_000_000 and mult >= 1.5:
         return "MEGA"
-    if ath_mcap >= 1_000_000 and mult >= 2.0:
+    if ath_mcap >= 1_000_000 and mult >= 1.5:
         return "SUPER"
     if ath_mcap >= 100_000 and mult >= 2.0:
         return "SUPER"
-    if ath_mcap >= 50_000 and mult >= 2.5:
+    if ath_mcap >= 50_000 and mult >= 2.0:
         return "WINNER"
-    if mult >= 3.0 and crash > 0.25:
+    # Graduated with real multiple still counts as WINNER/RUNNER
+    if graduated and ath_mcap >= 40_000 and mult >= 2.0:
         return "WINNER"
-    if mult >= 1.5 and crash > 0.2:
+    if mult >= 3.0 and crash > 0.22:
+        return "WINNER"
+    if mult >= 1.8 and crash > 0.18:
         return "RUNNER"
     if crash <= 0.45 or (creator_dumped and crash <= 0.6):
         return "DUMP"
-    if any(f in flags for f in ("drained_curve", "creator_dumped", "sell_pressure")):
+    if any(f in flags for f in ("drained_curve", "creator_dumped", "sell_pressure", "post_ath_crash")):
         return "DUMP"
     return "NEUTRAL"
 
@@ -119,6 +134,28 @@ class LearningEngine:
         name = base.get("name") or safety.get("token_name") or ""
         symbol = base.get("symbol") or safety.get("token_symbol") or ""
 
+        mig = result.get("migrationPath") or {}
+        runner = result.get("runnerRadar") or {}
+        if not runner:
+            try:
+                from services.runner_radar import score_runner_candidate
+
+                runner = score_runner_candidate(
+                    {
+                        "mcap_usd": mcap,
+                        "bonding_progress": mig.get("bonding_pct"),
+                        "ath_mcap": _f(pump.get("ath_market_cap")),
+                        "alphaSetup": result.get("alphaSetup"),
+                        "migrationPath": mig,
+                        "safety": safety,
+                        "safetyReport": {"avoid": safety.get("avoid")},
+                        "priceChange": market.get("priceChange"),
+                        "age_minutes": market.get("age_minutes"),
+                    }
+                )
+                result["runnerRadar"] = runner
+            except Exception:
+                runner = {}
         feats = extract_features(
             safety=safety,
             pair=pair_like,
@@ -128,7 +165,15 @@ class LearningEngine:
             alpha=result.get("alphaSetup"),
             avoid=safety.get("avoid"),
             mcap=mcap,
+            migration=mig,
+            runner=runner,
         )
+        # Track pump ATH on the token row for better outcomes later
+        ath_now = _f(pump.get("ath_market_cap"))
+        if ath_now > mcap:
+            self.memory.upsert_token(
+                mint, name=name, symbol=symbol, mcap=ath_now, price=price
+            )
         self.memory.upsert_token(
             mint,
             name=name,
@@ -172,19 +217,42 @@ class LearningEngine:
             smart_money=result.get("smartMoney"),
             alpha=result.get("alphaSetup"),
             avoid=safety.get("avoid"),
+            migration=mig,
+            runner=runner,
             mcap=mcap,
             price=price,
         )
 
         # Early finalize scams/avoid so model learns immediately
         avoid = safety.get("avoid") or {}
-        if avoid.get("hard_avoid") or avoid.get("avoid"):
+        if avoid.get("hard_avoid"):
             self.memory.finalize_outcome(
                 mint,
-                "SCAM" if avoid.get("hard_avoid") else "DUMP",
-                notes=avoid.get("summary") or "avoid_filter",
+                "SCAM",
+                notes=avoid.get("summary") or "hard_avoid",
                 features=feats,
             )
+        elif avoid.get("avoid") and feats.get("already_crashed"):
+            self.memory.finalize_outcome(
+                mint,
+                "DUMP",
+                notes=avoid.get("summary") or "avoid_crashed",
+                features=feats,
+            )
+        elif runner.get("crashed") or feats.get("already_crashed"):
+            # Learn dumps as soon as ATH crash is visible
+            tok = self.memory.get_token(mint)
+            first = _f((tok or {}).get("first_mcap")) or mcap
+            ath = max(_f((tok or {}).get("ath_mcap")), ath_now, mcap)
+            if ath >= 5_000 and mcap <= ath * 0.45:
+                self.memory.finalize_outcome(
+                    mint,
+                    "DUMP",
+                    max_multiple=(ath / first) if first > 0 else 0,
+                    notes=runner.get("crash_reason")
+                    or f"ath_crash ath={ath:.0f} last={mcap:.0f}",
+                    features=feats,
+                )
 
         return pred
 
@@ -239,27 +307,26 @@ class LearningEngine:
                     old = age > 3 * 3600
                     graduated = bool(coin.get("complete"))
 
-                    if crashed or drained or old or graduated:
+                    # Also finalize if still active but clearly dumped from peak
+                    soft_crash = ath >= 8_000 and mcap > 0 and mcap <= ath * 0.40
+                    if crashed or drained or old or graduated or soft_crash:
+                        ath_ts = _f(coin.get("ath_market_cap_timestamp"))
+                        created = _f(coin.get("created_timestamp"))
+                        mins_to_ath = None
+                        if ath_ts and created and ath_ts >= created:
+                            mins_to_ath = (ath_ts - created) / 60_000
                         outcome = classify_outcome(
                             first_mcap=first or mcap,
                             ath_mcap=ath,
                             last_mcap=mcap,
                             creator_dumped=bool(tok.get("creator_dump_ts")),
+                            graduated=graduated,
+                            mins_to_ath=mins_to_ath,
                         )
-                        # Prefer SCAM if flash dump pattern on pump ath
-                        ath_ts = _f(coin.get("ath_market_cap_timestamp"))
-                        created = _f(coin.get("created_timestamp"))
-                        if (
-                            ath_hist >= 5000
-                            and created
-                            and ath_ts
-                            and (ath_ts - created) / 60000 <= 5
-                            and mcap < ath_hist * 0.55
-                        ):
-                            outcome = "SCAM"
                         notes = (
                             f"ath={ath:.0f} last={mcap:.0f} "
-                            f"dump_mcap={tok.get('creator_dump_mcap')}"
+                            f"dump_mcap={tok.get('creator_dump_mcap')} "
+                            f"grad={graduated}"
                         )
                         feats = None
                         if tok.get("entry_features"):

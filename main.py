@@ -395,6 +395,15 @@ async def lifespan(app: FastAPI):
             logger.info("Learning seeded %s historical examples", seeded)
     except Exception as exc:
         logger.warning("Learning seed failed: %s", exc)
+    # Rebuild feature_stats periodically so new features + caps improve accuracy
+    try:
+        ver = "learn_lr_v2_2026_07"
+        if _learning_memory.get_meta("learn_model_version") != ver:
+            rebuilt = _learning_memory.rebuild_feature_stats()
+            _learning_memory.set_meta("learn_model_version", ver)
+            logger.info("Learning feature_stats rebuilt: %s", rebuilt)
+    except Exception as exc:
+        logger.warning("Learning rebuild failed: %s", exc)
     tasks: list[asyncio.Task] = []
     if BACKGROUND_SCAN_INTERVAL_SEC > 0 and BACKGROUND_SCAN_PER_COLUMN > 0:
         tasks.append(asyncio.create_task(_background_trenches_warm()))
@@ -1835,6 +1844,9 @@ async def learning_stats():
         "ok": True,
         "summary": summary,
         "recent": recent,
+        "base_rates": _learning_memory.outcome_base_rates(),
+        "model": "likelihood_ratio_v2",
+        "model_version": _learning_memory.get_meta("learn_model_version"),
         "mega_seeds": {
             "version": MEGA_SEEDS_VERSION,
             "applied": _learning_memory.get_meta("mega_seeds_version"),
@@ -1854,6 +1866,20 @@ async def learning_reseed(force: bool = Query(False)):
         "seeded": n,
         "summary": _learning_memory.get_outcomes_summary(),
         "version": _learning_memory.get_meta("mega_seeds_version"),
+    }
+
+
+@app.post("/api/learning/rebuild")
+async def learning_rebuild():
+    """Recompute feature→outcome table from all finalized tokens (accuracy refresh)."""
+    rebuilt = _learning_memory.rebuild_feature_stats()
+    _learning_memory.set_meta("learn_model_version", "learn_lr_v2_2026_07")
+    return {
+        "ok": True,
+        "rebuilt": rebuilt,
+        "summary": _learning_memory.get_outcomes_summary(),
+        "base_rates": _learning_memory.outcome_base_rates(),
+        "model": "likelihood_ratio_v2",
     }
 
 

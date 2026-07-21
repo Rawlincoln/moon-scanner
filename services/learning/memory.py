@@ -307,6 +307,8 @@ class LearningMemory:
                 first = float(row["first_mcap"] or 0)
                 ath = float(row["ath_mcap"] or 0)
                 mult = max_multiple or (ath / first if first > 0 else 0)
+                # Cap multiples for learning so seeded 1000x+ megas don't warp averages
+                learn_mult = min(float(mult or 0), 100.0) if mult else 0.0
                 conn.execute(
                     """
                     UPDATE tokens SET outcome=?, outcome_ts=?, max_multiple=?,
@@ -335,9 +337,87 @@ class LearningMemory:
                                 count = count + 1,
                                 sum_multiple = sum_multiple + excluded.sum_multiple
                             """,
-                            (fk, outcome, mult),
+                            (fk, outcome, learn_mult),
                         )
                 conn.commit()
+            finally:
+                conn.close()
+
+    def outcome_counts(self) -> dict[str, int]:
+        """Token counts per outcome (for proper P(feature|outcome))."""
+        with self._lock:
+            conn = self._conn()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT outcome, COUNT(*) AS n FROM tokens
+                    WHERE outcome IS NOT NULL AND outcome != ''
+                    GROUP BY outcome
+                    """
+                ).fetchall()
+                return {r["outcome"]: int(r["n"]) for r in rows}
+            finally:
+                conn.close()
+
+    def outcome_base_rates(self) -> dict[str, float]:
+        """P(outcome) from finalized tokens (not raw feature_stats)."""
+        counts = self.outcome_counts()
+        total = sum(counts.values()) or 1
+        return {k: v / total for k, v in counts.items()}
+
+    def rebuild_feature_stats(self) -> dict[str, int]:
+        """Recompute feature_stats from finalized entry_features (cleaner model)."""
+        from services.learning.features import feature_keys_for_learning
+
+        with self._lock:
+            conn = self._conn()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT entry_features, outcome, first_mcap, ath_mcap, max_multiple
+                    FROM tokens
+                    WHERE outcome IS NOT NULL AND outcome != ''
+                      AND entry_features IS NOT NULL AND entry_features != ''
+                    """
+                ).fetchall()
+                conn.execute("DELETE FROM feature_stats")
+                n_tok = 0
+                n_keys = 0
+                for row in rows:
+                    try:
+                        feats = json.loads(row["entry_features"])
+                    except Exception:
+                        continue
+                    if not isinstance(feats, dict):
+                        continue
+                    first = float(row["first_mcap"] or 0)
+                    ath = float(row["ath_mcap"] or 0)
+                    mult = float(row["max_multiple"] or 0) or (
+                        ath / first if first > 0 else 0
+                    )
+                    learn_mult = min(mult, 100.0)
+                    for fk in feature_keys_for_learning(feats):
+                        conn.execute(
+                            """
+                            INSERT INTO feature_stats(feature, outcome, count, sum_multiple)
+                            VALUES(?,?,1,?)
+                            ON CONFLICT(feature, outcome) DO UPDATE SET
+                                count = count + 1,
+                                sum_multiple = sum_multiple + excluded.sum_multiple
+                            """,
+                            (fk, row["outcome"], learn_mult),
+                        )
+                        n_keys += 1
+                    n_tok += 1
+                conn.execute(
+                    """
+                    INSERT INTO meta(key, value) VALUES(?,?)
+                    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                    """,
+                    ("feature_stats_rebuilt_ts", str(time.time())),
+                )
+                conn.commit()
+                return {"tokens": n_tok, "feature_rows_touched": n_keys}
             finally:
                 conn.close()
 
@@ -367,7 +447,7 @@ class LearningMemory:
             finally:
                 conn.close()
 
-    def get_active_mints(self, max_age_sec: float = 4 * 3600) -> list[str]:
+    def get_active_mints(self, max_age_sec: float = 6 * 3600) -> list[str]:
         cutoff = time.time() - max_age_sec
         with self._lock:
             conn = self._conn()
@@ -376,7 +456,7 @@ class LearningMemory:
                     """
                     SELECT mint FROM tokens
                     WHERE active=1 AND first_seen >= ?
-                    ORDER BY last_seen DESC LIMIT 80
+                    ORDER BY last_seen DESC LIMIT 140
                     """,
                     (cutoff,),
                 ).fetchall()

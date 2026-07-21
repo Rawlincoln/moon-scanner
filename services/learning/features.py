@@ -25,6 +25,8 @@ def extract_features(
     alpha: dict | None = None,
     avoid: dict | None = None,
     mcap: float = 0.0,
+    migration: dict | None = None,
+    runner: dict | None = None,
 ) -> dict[str, int | float | str]:
     """Compact feature vector stored at first sight + each snapshot."""
     safety = safety or {}
@@ -34,6 +36,8 @@ def extract_features(
     smart_money = smart_money or {}
     alpha = alpha or {}
     avoid = avoid or safety.get("avoid") or {}
+    migration = migration or {}
+    runner = runner or {}
 
     mcap = mcap or _f(pump.get("usd_market_cap") or pair.get("marketCap"))
     holders = int(safety.get("total_holders") or 0)
@@ -43,6 +47,7 @@ def extract_features(
     on_curve = _b(
         safety.get("on_bonding_curve") or (pump and not pump.get("complete", True))
     )
+    ath = _f(pump.get("ath_market_cap") or pump.get("ath_mcap"))
 
     top = safety.get("top_holders") or []
     mid = 0
@@ -79,8 +84,25 @@ def extract_features(
         mcap_bin = "mid_7.5_12k"
     elif mcap <= 25000:
         mcap_bin = "late_12_25k"
+    elif mcap <= 45000:
+        mcap_bin = "near_mig_25_45k"
     else:
-        mcap_bin = "over_25k"
+        mcap_bin = "over_45k"
+
+    # Bonding toward graduation (~$69k)
+    bond = _f(migration.get("bonding_pct") or pump.get("bonding_progress"))
+    if bond <= 0 and mcap > 0:
+        bond = min(100.0, (mcap / 69_000) * 100)
+    if bond >= 55:
+        bond_bin = "bond_ge_55"
+    elif bond >= 40:
+        bond_bin = "bond_40_55"
+    elif bond >= 18:
+        bond_bin = "bond_18_40"
+    elif bond >= 8:
+        bond_bin = "bond_8_18"
+    else:
+        bond_bin = "bond_lt_8"
 
     alpha_score = int(alpha.get("score") or 0)
     if alpha_score >= 72:
@@ -168,6 +190,35 @@ def extract_features(
     for tag in (fp.get("narrative_tags") or [])[:3]:
         feats[f"narrative_{tag}"] = 1
 
+    # Flow quality — wash vs organic (learned: scams often one-way)
+    two_way = sells >= 3 and buys >= 6 and 1.05 <= buy_ratio <= 3.5
+    one_way_wash = buys >= 15 and sells == 0
+    extreme_wash = buy_ratio >= 6.0 and buys >= 25
+    feats["two_way_flow"] = _b(two_way)
+    feats["one_way_wash"] = _b(one_way_wash)
+    feats["extreme_wash"] = _b(extreme_wash)
+    feats["bond_bin"] = bond_bin
+    feats["bonding_pct"] = round(bond, 1)
+    feats["migration_lane"] = str(migration.get("lane") or "unknown")
+    feats["migration_score_bin"] = (
+        "mig_high"
+        if _f(migration.get("score")) >= 55
+        else "mig_mid"
+        if _f(migration.get("score")) >= 40
+        else "mig_low"
+    )
+    feats["runner_stage"] = str(runner.get("stage") or "none")
+    feats["runner_alert"] = _b(runner.get("alert"))
+    # Off-ATH risk at observation time
+    if ath >= 5000 and mcap > 0 and mcap < ath * 0.55:
+        feats["already_crashed"] = 1
+    else:
+        feats["already_crashed"] = 0
+    if ath >= 8000 and mcap > 0 and mcap < ath * 0.75:
+        feats["fading_from_ath"] = 1
+    else:
+        feats["fading_from_ath"] = 0
+
     # Sniper from trench-style heuristic
     feats["sniper_risk"] = (
         "high" if max_non_pool > 22 else "med" if max_non_pool > 12 else "low"
@@ -196,12 +247,13 @@ def feature_keys_for_learning(feats: dict) -> list[str]:
             "rug_score",
             "alpha_score",
             "name_len",
+            "bonding_pct",
         ):
             continue
         if isinstance(v, (int, float)) and v in (0, 1):
             if v == 1:
                 keys.append(k)
-        elif isinstance(v, str) and v:
+        elif isinstance(v, str) and v and v not in ("none", "unknown", "NONE"):
             keys.append(f"{k}:{v}")
     # Binned continuous
     holders = int(feats.get("holders") or 0)
@@ -223,7 +275,9 @@ def feature_keys_for_learning(feats: dict) -> list[str]:
         keys.append("mid_bags_lt_3")
 
     qs = float(feats.get("quote_sol") or 0)
-    if qs >= 5:
+    if qs >= 15:
+        keys.append("curve_sol_ge_15")
+    elif qs >= 5:
         keys.append("curve_sol_ge_5")
     elif qs >= 2:
         keys.append("curve_sol_ge_2")
@@ -231,10 +285,23 @@ def feature_keys_for_learning(feats: dict) -> list[str]:
         keys.append("curve_sol_drained")
 
     br = float(feats.get("buy_ratio") or 0)
-    if br >= 1.3:
+    if br >= 6.0 and int(feats.get("buys_m5") or 0) >= 20:
+        keys.append("buy_ratio_extreme")
+    elif br >= 1.3:
         keys.append("buy_ratio_ge_1.3")
     elif br < 0.95 and int(feats.get("sells_m5") or 0) >= 20:
         keys.append("sell_pressure")
+
+    if feats.get("two_way_flow"):
+        keys.append("two_way_flow")
+    if feats.get("one_way_wash"):
+        keys.append("one_way_wash")
+    if feats.get("extreme_wash"):
+        keys.append("extreme_wash")
+    if feats.get("already_crashed"):
+        keys.append("already_crashed")
+    if feats.get("fading_from_ath"):
+        keys.append("fading_from_ath")
 
     # Mega fingerprint categorical
     fp_tier = str(feats.get("mega_fingerprint") or "NONE")
