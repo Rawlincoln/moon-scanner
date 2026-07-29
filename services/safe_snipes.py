@@ -13,6 +13,7 @@ from services.avoid_filters import BLOCKED_MINTS, analyze_avoid_flags, is_hard_a
 from services.bundle_sniper import analyze_bundle_and_snipers
 from services.moon_picks import extract_ath_mcap, extract_mcap_usd
 from services.runner_radar import is_crashed_runner
+from services.social_signals import analyze_social_narrative
 
 # Entry zone: 2× still under ~graduation band
 SNIPE_MCAP_MIN = 3_500.0
