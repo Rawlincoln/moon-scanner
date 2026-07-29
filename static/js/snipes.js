@@ -34,6 +34,17 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function safeHttpUrl(u, fallback = "#") {
+  if (u == null || u === "") return fallback;
+  try {
+    const x = new URL(String(u), location.origin);
+    if (x.protocol === "http:" || x.protocol === "https:") return x.href;
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
 function setStatus(msg, kind = "") {
   const el = $("#status");
   if (!el) return;
@@ -64,7 +75,7 @@ function cardHtml(t) {
   const target = t.target_2x_usd ?? snipe.target_2x_usd;
   const inv = snipe.invalidation_usd ?? plan.invalidation_usd;
   const icon = t.icon
-    ? `<img class="icon" src="${escapeHtml(t.icon)}" alt="" onerror="this.outerHTML='<div class=\\'icon ph\\'>◎</div>'" />`
+    ? `<img class="icon" src="${escapeHtml(safeHttpUrl(t.icon, ""))}" alt="" onerror="this.outerHTML='<div class=\\'icon ph\\'>◎</div>'" />`
     : `<div class="icon ph">◎</div>`;
   const whyHtml = why.length
     ? `<ul class="why">${why.map((w) => `<li>${escapeHtml(String(w))}</li>`).join("")}</ul>`
@@ -79,9 +90,15 @@ function cardHtml(t) {
         ? Number(bs.bundled_pct)
         : null;
   const snLv = sn.risk_level || snipe.sniper_level || "—";
-  const pump = t.pump_url || (mint ? `https://pump.fun/coin/${mint}` : "#");
-  const padre = t.padre_url || (mint ? `https://trade.padre.gg/trade/solana/${mint}` : "#");
-  const dex = t.dex_url || "";
+  const pump = safeHttpUrl(
+    t.pump_url || (mint ? `https://pump.fun/coin/${mint}` : ""),
+    "#"
+  );
+  const padre = safeHttpUrl(
+    t.padre_url || (mint ? `https://trade.padre.gg/trade/solana/${mint}` : ""),
+    "#"
+  );
+  const dex = t.dex_url ? safeHttpUrl(t.dex_url) : "";
   const pc = t.priceChange || t.market?.priceChange || {};
   const m5 = Number(pc.m5);
   const m5Html = Number.isFinite(m5)

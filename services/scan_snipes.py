@@ -191,18 +191,34 @@ async def scan_safe_snipes(
         accurate: list[dict] = []
         post_reject: Counter[str] = Counter()
         near_misses: list[dict] = []
-        enriched_mints = {
-            (c.get("tokenAddress") or c.get("mint") or "") for c in enriched if c
-        }
 
-        for c in list(enriched) + rest:
+        # Only fully enriched cards can become SNIPE/SETUP
+        for c in enriched:
             mint = (c.get("tokenAddress") or c.get("mint") or "").strip()
+            if not c.get("enrich_ok"):
+                rejected += 1
+                post_reject["enrich"] += 1
+                if len(near_misses) < 8:
+                    errs = c.get("enrich_errors") or ["incomplete"]
+                    near_misses.append(
+                        {
+                            "symbol": c.get("symbol") or "?",
+                            "name": c.get("name") or "",
+                            "tokenAddress": mint,
+                            "mcap_usd": c.get("mcap_usd"),
+                            "age_minutes": c.get("age_minutes"),
+                            "reject": "safety unknown — "
+                            + ", ".join(str(e) for e in errs[:2]),
+                            "reject_key": "enrich",
+                        }
+                    )
+                continue
             reason = snipe_reject_reason(c)
             if reason:
                 rejected += 1
                 key = _short_reject(reason)
                 post_reject[key] += 1
-                if len(near_misses) < 8 and mint in enriched_mints:
+                if len(near_misses) < 8:
                     near_misses.append(
                         {
                             "symbol": c.get("symbol") or "?",
@@ -216,6 +232,8 @@ async def scan_safe_snipes(
                     )
                 continue
             accurate.append(c)
+        if rest:
+            post_reject["not_enriched_overflow"] += len(rest)
 
         display = filter_and_rank_snipes(accurate, min_score=55, limit=limit)
         for t in display:

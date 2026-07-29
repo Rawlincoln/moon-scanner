@@ -3,7 +3,7 @@
 from services.social_signals import analyze_social_narrative, ticker_quality
 
 
-def test_elon_status_url_is_influencer_tweet():
+def test_elon_status_url_with_community_is_influencer_tweet():
     r = analyze_social_narrative(
         pump_coin={
             "twitter": "https://x.com/elonmusk/status/1234567890123456789",
@@ -13,10 +13,26 @@ def test_elon_status_url_is_influencer_tweet():
             "description": "",
         }
     )
+    assert r["influencer_tweet_claim"] is True
     assert r["influencer_tweet"] is True
     assert r["tweet_by"] == "Elon Musk"
     assert r["has_edge"] is True
     assert r["edge_score"] >= 50
+
+
+def test_elon_status_url_without_community_is_claim_only():
+    r = analyze_social_narrative(
+        pump_coin={
+            "twitter": "https://x.com/elonmusk/status/1234567890123456789",
+            "reply_count": 0,
+            "name": "Something",
+            "symbol": "SIG",
+            "description": "",
+        }
+    )
+    assert r["influencer_tweet_claim"] is True
+    assert r["influencer_tweet"] is False
+    assert r["has_edge"] is False
 
 
 def test_cz_status_url():
@@ -25,14 +41,14 @@ def test_cz_status_url():
             "twitter": "https://twitter.com/cz_binance/status/99",
             "symbol": "CZM",
             "name": "CZ Meta",
-            "reply_count": 10,
+            "reply_count": 15,
         }
     )
     assert r["influencer_tweet"] is True
     assert "CZ" in (r["tweet_by"] or "")
 
 
-def test_ansem_and_alon_handles():
+def test_ansem_and_alon_handles_need_community():
     for handle, name_part in (
         ("blknoiz06", "Ansem"),
         ("a1lon9", "Alon"),
@@ -45,7 +61,8 @@ def test_ansem_and_alon_handles():
                 "name": "X",
             }
         )
-        assert r["influencer_tweet"], handle
+        assert r["influencer_tweet_claim"] is True, handle
+        assert r["influencer_tweet"] is False, handle  # no community yet
         assert name_part in (r["tweet_by"] or ""), (handle, r["tweet_by"])
 
 

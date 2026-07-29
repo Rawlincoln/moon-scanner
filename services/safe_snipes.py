@@ -9,11 +9,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.avoid_filters import BLOCKED_MINTS, analyze_avoid_flags
+from services.avoid_filters import BLOCKED_MINTS, is_hard_avoid
 from services.bundle_sniper import analyze_bundle_and_snipers
 from services.moon_picks import extract_ath_mcap, extract_mcap_usd
 from services.runner_radar import is_crashed_runner
-from services.social_signals import analyze_social_narrative
 
 # Entry zone: 2× still under ~graduation band
 SNIPE_MCAP_MIN = 3_500.0
@@ -93,27 +92,16 @@ def snipe_reject_reason(token: dict[str, Any]) -> str | None:
     if ath >= 3_000 and mcap > 0 and mcap < ath * MIN_ATH_RETENTION:
         return f"faded from ATH ({100 * mcap / ath:.0f}% retained)"
 
-    avoid = (
-        token.get("avoid")
-        or (token.get("safetyReport") or {}).get("avoid")
-        or (token.get("safety") or {}).get("avoid")
-        or {}
-    )
-    if avoid.get("avoid"):
-        fatal = {
-            "blocklist",
-            "banned",
-            "honeypot",
-            "rugged",
-            "flash_pump_dump",
-            "drained_curve",
-            "lp_unlocked",
-            "lp_not_locked",
-            "adult_bait",
-        }
-        flags = set(avoid.get("flags") or [])
-        if flags & fatal or avoid.get("hard"):
-            return avoid.get("summary") or "avoid filter"
+    hard, hard_why = is_hard_avoid(token)
+    if hard:
+        return hard_why or "hard avoid"
+
+    # Incomplete enrich → never present as a "safe" snipe
+    if token.get("enrich_ok") is False:
+        errs = token.get("enrich_errors") or []
+        return "safety unknown — " + (
+            ", ".join(str(e) for e in errs[:2]) if errs else "enrich incomplete"
+        )
 
     safety = token.get("safety") or {}
     if safety.get("is_honeypot") or safety.get("rugged") or safety.get("honeypot"):
@@ -278,13 +266,25 @@ def evaluate_snipe(token: dict[str, Any]) -> dict[str, Any]:
 
     score = max(0, min(99, score))
     conf = score
+    holders_known = bool(
+        (token.get("bundleSniper") or {}).get("holders_known")
+        or (token.get("safety") or {}).get("top_holders")
+    )
+    if not holders_known:
+        score -= 10
+        why.append("Holder book unknown — SETUP only")
     clean_book = sn_lv in ("clean", "low", "unknown") and (
         bun is None or bun <= 4
     )
     setup_book_ok = sn_lv != "critical" and (
         bun is None or bun <= MAX_BUNDLED_PCT_SETUP
     )
-    if score >= 72 and clean_book and (bun is None or bun <= MAX_BUNDLED_PCT):
+    if (
+        score >= 72
+        and clean_book
+        and holders_known
+        and (bun is None or bun <= MAX_BUNDLED_PCT)
+    ):
         label = LABEL_SNIPE
         conf = max(conf, 70)
     elif score >= 52 and setup_book_ok:
@@ -292,6 +292,8 @@ def evaluate_snipe(token: dict[str, Any]) -> dict[str, Any]:
         conf = min(conf, 68)
         if bun is not None and bun > MAX_BUNDLED_PCT:
             conf = min(conf, 58)
+        if not holders_known:
+            conf = min(conf, 55)
     else:
         label = LABEL_SKIP
         conf = min(conf, 45)

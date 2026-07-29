@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from app.deps import init_shared
 from app.lifespan import lifespan
 from app.paths import BASE_DIR
+from config import IS_PRODUCTION
 from app.security import RateLimitMiddleware, cors_allow_origins
 from routes.analyze import router as analyze_router
 from routes.health import router as health_router
@@ -31,8 +32,11 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Moon Scanner",
         description="Identify safe early tokens on EVM & Solana with entry/exit signals",
-        version="1.2.0",
+        version="1.3.0",
         lifespan=lifespan,
+        docs_url=None if IS_PRODUCTION else "/docs",
+        redoc_url=None if IS_PRODUCTION else "/redoc",
+        openapi_url=None if IS_PRODUCTION else "/openapi.json",
     )
 
     origins = cors_allow_origins()

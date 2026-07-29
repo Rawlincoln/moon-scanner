@@ -137,7 +137,9 @@ class SolanaLogsFeed:
                     self._set_connected(wss, mode)
                     backoff = 2.0
                     logger.info(
-                        "Solana WS connected mode=%s %s", mode, wss[:48]
+                        "Solana WS connected mode=%s %s",
+                        mode,
+                        redact_rpc_url(wss),
                     )
 
                     while not self._stop.is_set():

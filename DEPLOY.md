@@ -60,10 +60,13 @@ SQLite under `data/` is **ephemeral** on free tier (lost on redeploy). Use a per
 
 ## 7. Admin routes
 
+Header only (never put the key in the query string):
+
 ```http
 POST /api/learning/reseed?force=true
 POST /api/learning/rebuild
 X-Admin-Key: <ADMIN_API_KEY>
 ```
 
-If `ADMIN_API_KEY` is unset on production, those routes return **403**.
+If `ADMIN_API_KEY` is unset on production, those routes return **403**.  
+`/docs` is disabled when `MOON_SCANNER_DEPLOY=render|production`.

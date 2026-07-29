@@ -123,11 +123,19 @@ async def enrich_moon_card(
     """Dex first (cheap reject) → RugCheck only if still viable.
 
     skip_narrative_gate: for safe-snipes feed (no influencer/narrative hard reject).
+
+    Sets ``enrich_ok`` True only when RugCheck (or pump safety fallback) succeeds.
+    Incomplete enrich must not be ranked as MOON/SNIPE.
     """
     mint = card.get("tokenAddress") or ""
     if not mint:
+        card["enrich_ok"] = False
+        card["enrich_errors"] = ["missing_mint"]
         return card
     market = card.get("market") or {}
+    errors: list[str] = []
+    dex_ok = False
+    safety_ok = False
 
     try:
         pairs = await asyncio.wait_for(
@@ -135,6 +143,7 @@ async def enrich_moon_card(
         )
         pair = _dex.pick_best_pair(pairs) if pairs else None
         if pair:
+            dex_ok = True
             pc = pair.get("priceChange") or {}
             txns = pair.get("txns") or {}
             m5 = txns.get("m5") or {}
@@ -159,8 +168,10 @@ async def enrich_moon_card(
             card["txActivity"] = score_tx_activity(
                 pair=market, pump=card.get("pumpfun")
             )
-    except Exception:
-        pass
+        else:
+            errors.append("dex_no_pair")
+    except Exception as exc:
+        errors.append(f"dex:{type(exc).__name__}")
 
     try:
         lite = analyze_bundle_and_snipers(
@@ -170,14 +181,22 @@ async def enrich_moon_card(
             age_minutes=float(card.get("age_minutes") or 0) or None,
             mcap_usd=float(card.get("mcap_usd") or 0) or None,
         )
+        lite["holders_known"] = False
+        if lite.get("overall") in ("clean", "low", None, ""):
+            lite["overall"] = "unknown"
         card["bundleSniper"] = lite
         card["bundle"] = lite.get("bundle")
         card["snipers"] = lite.get("snipers")
-    except Exception:
-        pass
+    except Exception as exc:
+        errors.append(f"bundle_lite:{type(exc).__name__}")
 
+    # Early narrative reject still skips expensive RugCheck for moon cost,
+    # but must never rank as a recommendation.
     if not skip_narrative_gate and reject_reason(card):
         card["enrich_skipped_rugcheck"] = True
+        card["enrich_ok"] = False
+        card["enrich_partial"] = True
+        card["enrich_errors"] = errors + ["skipped_rugcheck_narrative"]
         return card
 
     try:
@@ -186,6 +205,7 @@ async def enrich_moon_card(
             timeout=4.0,
         )
         if safety and not safety.get("error"):
+            safety_ok = True
             card["safety"] = safety
             bs = analyze_bundle_and_snipers(
                 safety,
@@ -194,12 +214,38 @@ async def enrich_moon_card(
                 age_minutes=float(card.get("age_minutes") or 0) or None,
                 mcap_usd=float(card.get("mcap_usd") or 0) or None,
             )
+            holders = bool(safety.get("top_holders"))
+            bs["holders_known"] = holders
+            if not holders and bs.get("overall") in ("clean", "low"):
+                bs["overall"] = "unknown"
             card["bundleSniper"] = bs
             card["bundle"] = bs.get("bundle")
             card["snipers"] = bs.get("snipers")
             card["enrich_skipped_rugcheck"] = False
-    except Exception:
-        pass
+            # Refresh avoid with holder-aware flags
+            try:
+                from services.avoid_filters import analyze_avoid_flags
+
+                avoid = analyze_avoid_flags(
+                    safety=safety,
+                    pump=card.get("pumpfun") or {},
+                    pair=market,
+                    mint=mint,
+                )
+                card["avoid"] = avoid
+                card["safetyReport"] = {**(card.get("safetyReport") or {}), "avoid": avoid}
+            except Exception:
+                pass
+        else:
+            errors.append("rugcheck_error_or_empty")
+    except Exception as exc:
+        errors.append(f"rugcheck:{type(exc).__name__}")
+
+    # Pump bonding tokens may lack Dex pair — pump mcap is acceptable if safety ok.
+    card["enrich_dex_ok"] = dex_ok
+    card["enrich_partial"] = bool(errors) or not safety_ok
+    card["enrich_errors"] = errors
+    card["enrich_ok"] = bool(safety_ok)
     return card
 
 
@@ -294,7 +340,10 @@ async def scan_moon_tokens(
             cached["cached"] = True
             return cached
 
-        age_cap = max(float(max_age_minutes), 90.0)
+        # Honor UI age filter (cap at MAX_AGE); default routes still pass 120.
+        from config import MAX_AGE_MINUTES_CAP
+
+        age_cap = min(max(float(max_age_minutes), 5.0), float(MAX_AGE_MINUTES_CAP))
         coins = await _discover_moon_coins()
         if not isinstance(coins, list):
             coins = []
@@ -358,17 +407,32 @@ async def scan_moon_tokens(
         accurate: list[dict] = []
         near_misses: list[dict] = []
         post_reject: dict[str, int] = {}
-        enriched_mints = {
-            (c.get("tokenAddress") or c.get("mint") or "") for c in enriched if c
-        }
-        for c in list(enriched) + rest:
+        # Never rank non-enriched "rest" cards — incomplete safety = not a moon rec
+        for c in enriched:
+            mint = (c.get("tokenAddress") or c.get("mint") or "").strip()
+            if not c.get("enrich_ok"):
+                rejected += 1
+                post_reject["enrich"] = post_reject.get("enrich", 0) + 1
+                if len(near_misses) < 8:
+                    errs = c.get("enrich_errors") or ["incomplete"]
+                    near_misses.append(
+                        {
+                            "symbol": c.get("symbol") or "?",
+                            "name": c.get("name") or "",
+                            "tokenAddress": mint,
+                            "mcap_usd": c.get("mcap_usd"),
+                            "age_minutes": c.get("age_minutes"),
+                            "reject": "safety unknown — " + ", ".join(str(e) for e in errs[:2]),
+                            "reject_key": "enrich",
+                        }
+                    )
+                continue
             reason = reject_reason(c)
             if reason:
                 rejected += 1
                 key = _short_moon_reject(reason)
                 post_reject[key] = post_reject.get(key, 0) + 1
-                mint = (c.get("tokenAddress") or c.get("mint") or "").strip()
-                if len(near_misses) < 8 and mint in enriched_mints:
+                if len(near_misses) < 8:
                     near_misses.append(
                         {
                             "symbol": c.get("symbol") or "?",
@@ -382,6 +446,9 @@ async def scan_moon_tokens(
                     )
                 continue
             accurate.append(c)
+        # Count rest as not considered for rank (discovery overflow)
+        if rest:
+            post_reject["not_enriched_overflow"] = len(rest)
 
         # Phase 3: adaptive gates from historical dump/win rates
         gates = {

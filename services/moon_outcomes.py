@@ -53,6 +53,11 @@ class MoonOutcomes:
         with self._lock:
             conn = self._conn()
             try:
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("PRAGMA busy_timeout=30000")
+                except Exception:
+                    pass
                 conn.executescript(
                     """
                     CREATE TABLE IF NOT EXISTS moon_recs (

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query
 
 from app.deps import learning, learning_memory
 from app.paths import BASE_DIR
@@ -46,11 +46,13 @@ async def learning_stats():
 
 @router.post("/api/learning/reseed")
 async def learning_reseed(
-    request: Request,
     force: bool = Query(False),
     _admin: None = Depends(require_admin),
 ):
-    """Re-apply historical mega + scam seeds into the learning DB (admin)."""
+    """Re-apply historical mega + scam seeds into the learning DB (admin).
+
+    Requires header: ``X-Admin-Key: <ADMIN_API_KEY>``
+    """
     n = learning.seed_known_examples(force=force)
     return {
         "ok": True,
@@ -62,10 +64,12 @@ async def learning_reseed(
 
 @router.post("/api/learning/rebuild")
 async def learning_rebuild(
-    request: Request,
     _admin: None = Depends(require_admin),
 ):
-    """Recompute feature→outcome table from all finalized tokens (admin)."""
+    """Recompute feature→outcome table from all finalized tokens (admin).
+
+    Requires header: ``X-Admin-Key: <ADMIN_API_KEY>``
+    """
     rebuilt = learning_memory.rebuild_feature_stats()
     learning_memory.set_meta("learn_model_version", "learn_lr_v2_2026_07")
     return {

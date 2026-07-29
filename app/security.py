@@ -75,30 +75,40 @@ def validate_token_address(chain_id: str, token_address: str) -> str:
     return addr
 
 
-def _admin_provided(request: Request, header_key: str | None, query_key: str | None) -> str:
+def safe_secret_eq(provided: str, expected: str) -> bool:
+    """Constant-time compare that never raises on length mismatch."""
+    if not provided or not expected:
+        return False
+    if len(provided) != len(expected):
+        return False
+    try:
+        return secrets.compare_digest(provided, expected)
+    except (TypeError, ValueError):
+        return False
+
+
+def _admin_provided(request: Request, header_key: str | None) -> str:
+    # Header only — never query string (logs / Referer leak).
     return (
         (header_key or "").strip()
-        or (query_key or "").strip()
         or (request.headers.get("X-Admin-Key") or "").strip()
-        or (request.query_params.get("admin_key") or "").strip()
     )
 
 
 def require_admin(
     request: Request,
     x_admin_key: str | None = Header(None, alias="X-Admin-Key"),
-    admin_key: str | None = Query(None),
 ) -> None:
     """Gate destructive / admin routes.
 
-    - ADMIN_API_KEY set → must match header or ?admin_key=
+    - ADMIN_API_KEY set → must match X-Admin-Key header
     - Production + no key configured → disabled (403)
     - Local + no key → allowed (dev convenience)
     """
     expected = (ADMIN_API_KEY or "").strip()
-    provided = _admin_provided(request, x_admin_key, admin_key)
+    provided = _admin_provided(request, x_admin_key)
     if expected:
-        if not provided or not secrets.compare_digest(provided, expected):
+        if not safe_secret_eq(provided, expected):
             raise HTTPException(401, detail="Invalid or missing admin key")
         return
     if IS_PRODUCTION:
@@ -106,20 +116,6 @@ def require_admin(
             403,
             detail="Admin routes disabled until ADMIN_API_KEY is set",
         )
-
-
-def require_admin_for_force(
-    force: bool,
-    request: Request,
-    x_admin_key: str | None = None,
-    admin_key: str | None = None,
-) -> None:
-    """Cache-bypass force=true is expensive — require admin in production or when key set."""
-    if not force:
-        return
-    expected = (ADMIN_API_KEY or "").strip()
-    if expected or IS_PRODUCTION:
-        require_admin(request, x_admin_key=x_admin_key, admin_key=admin_key)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -151,7 +147,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Admin key bypasses rate limit (ops / force scans)
         expected = (ADMIN_API_KEY or "").strip()
         provided = (request.headers.get("X-Admin-Key") or "").strip()
-        if expected and provided and secrets.compare_digest(provided, expected):
+        if expected and safe_secret_eq(provided, expected):
             return await call_next(request)
 
         ip = self._client_ip(request)

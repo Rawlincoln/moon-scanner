@@ -42,6 +42,60 @@ BLOCKED_MINTS: set[str] = {
     "P5PhPnXd6AS9JgTiZJzi4Y2CuDYF5nvPNrWpuUFUKgX",  # USWR relaunch — ATH ~$31k then −93% dump
 }
 
+# Shared hard-avoid flag set — moon + snipes must agree
+HARD_AVOID_FLAGS: frozenset[str] = frozenset(
+    {
+        "blocklist",
+        "banned",
+        "rugged",
+        "honeypot",
+        "ghost_launch",
+        "serial_creator",
+        "drained_curve",
+        "lp_unlocked",
+        "lp_not_locked",
+        "freeze_authority",
+        "mint_authority",
+        "spam_deploy_tool",
+        "flash_pump_dump",
+        "post_ath_crash",
+        "adult_bait",
+        "extreme_wash",
+        "ai_pitch_no_socials",
+        "dev_out_green_chart",
+        "bundled",
+        "snipers",
+        "insiders",
+    }
+)
+
+
+def is_hard_avoid(token_or_avoid: dict[str, Any] | None) -> tuple[bool, str | None]:
+    """True if token (or raw avoid dict) is invest-blocking hard-avoid.
+
+    Returns (is_hard, reason). Used by moon_picks and safe_snipes.
+    """
+    if not isinstance(token_or_avoid, dict):
+        return False, None
+    avoid = token_or_avoid
+    if "hard_avoid" not in avoid and "flags" not in avoid:
+        avoid = (
+            token_or_avoid.get("avoid")
+            or (token_or_avoid.get("safetyReport") or {}).get("avoid")
+            or (token_or_avoid.get("safety") or {}).get("avoid")
+            or {}
+        )
+    if not isinstance(avoid, dict):
+        return False, None
+    if avoid.get("hard_avoid") or avoid.get("hard"):
+        return True, avoid.get("summary") or "hard avoid"
+    flags = set(avoid.get("flags") or [])
+    hit = flags & HARD_AVOID_FLAGS
+    if hit:
+        return True, avoid.get("summary") or f"risk: {', '.join(sorted(hit)[:3])}"
+    return False, None
+
+
 # Adult-bait / shock names — almost always pure attention rugs (CEO of Sex, etc.)
 ADULT_BAIT_KEYWORDS: tuple[str, ...] = (
     "sex", "sexy", "porn", "nude", "nudes", "onlyfans", "only fans",
@@ -548,29 +602,7 @@ def analyze_avoid_flags(
                 reasons.append(f"RugCheck {level}: {risk.get('name')}")
 
     # Hard = invest-blocking (still shown in UI unless fatal for trenches hide)
-    hard_set = {
-        "blocklist",
-        "banned",
-        "rugged",
-        "honeypot",
-        "ghost_launch",
-        "serial_creator",
-        "drained_curve",
-        "lp_unlocked",
-        "lp_not_locked",
-        "freeze_authority",
-        "mint_authority",
-        "spam_deploy_tool",
-        "flash_pump_dump",
-        "post_ath_crash",
-        "adult_bait",
-        "extreme_wash",
-        "ai_pitch_no_socials",
-        "dev_out_green_chart",
-        "bundled",
-        "snipers",
-        "insiders",
-    }
+    hard_set = set(HARD_AVOID_FLAGS)
     # Soft packaging — warn but don't treat as automatic hard hide
     soft_hardish = {
         "social_spoof_scam",

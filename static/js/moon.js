@@ -35,6 +35,18 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+/** Only allow http(s) for href/src — blocks javascript: and other schemes. */
+function safeHttpUrl(u, fallback = "#") {
+  if (u == null || u === "") return fallback;
+  try {
+    const x = new URL(String(u), location.origin);
+    if (x.protocol === "http:" || x.protocol === "https:") return x.href;
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
 function setStatus(msg, kind = "") {
   const el = $("#status");
   if (!el) return;
@@ -83,7 +95,7 @@ function cardHtml(t) {
   const tweetBy = moon.tweet_by || social.tweet_by;
   const tweetUrl = moon.tweet_url || social.tweet_url || "";
   const icon = t.icon
-    ? `<img class="icon" src="${escapeHtml(t.icon)}" alt="" onerror="this.outerHTML='<div class=\\'icon ph\\'>◎</div>'" />`
+    ? `<img class="icon" src="${escapeHtml(safeHttpUrl(t.icon, ""))}" alt="" onerror="this.outerHTML='<div class=\\'icon ph\\'>◎</div>'" />`
     : `<div class="icon ph">◎</div>`;
   const whyHtml = why.length
     ? `<ul class="why">${why.map((w) => `<li>${escapeHtml(String(w))}</li>`).join("")}</ul>`
@@ -97,11 +109,12 @@ function cardHtml(t) {
         )
         .join("")}</div>`
     : "";
+  const safeTweet = tweetUrl ? safeHttpUrl(tweetUrl) : "";
   const infBanner =
     infTweet && tweetBy
       ? `<div class="inf-banner">🔥 ${escapeHtml(tweetBy)} tweet linked${
-          tweetUrl
-            ? ` · <a href="${escapeHtml(tweetUrl)}" target="_blank" rel="noopener">view</a>`
+          safeTweet && safeTweet !== "#"
+            ? ` · <a href="${escapeHtml(safeTweet)}" target="_blank" rel="noopener">view</a>`
             : ""
         }</div>`
       : "";
@@ -146,9 +159,15 @@ function cardHtml(t) {
             .join("")}</div>`
         : ""
     }`;
-  const pump = t.pump_url || (mint ? `https://pump.fun/coin/${mint}` : "#");
-  const padre = t.padre_url || (mint ? `https://trade.padre.gg/trade/solana/${mint}` : "#");
-  const dex = t.dex_url || "";
+  const pump = safeHttpUrl(
+    t.pump_url || (mint ? `https://pump.fun/coin/${mint}` : ""),
+    "#"
+  );
+  const padre = safeHttpUrl(
+    t.padre_url || (mint ? `https://trade.padre.gg/trade/solana/${mint}` : ""),
+    "#"
+  );
+  const dex = t.dex_url ? safeHttpUrl(t.dex_url) : "";
   const pc = t.priceChange || t.market?.priceChange || {};
   const m5 = Number(pc.m5);
   const m5Html = Number.isFinite(m5)

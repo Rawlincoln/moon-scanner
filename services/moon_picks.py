@@ -19,7 +19,7 @@ from config import (
     MIGRATION_MCAP_MAX_USD,
     MIGRATION_NEAR_MIN_PCT,
 )
-from services.avoid_filters import BLOCKED_MINTS
+from services.avoid_filters import BLOCKED_MINTS, is_hard_avoid
 from services.bundle_sniper import analyze_bundle_and_snipers
 from services.runner_radar import extract_ath_mcap, extract_mcap_usd, is_crashed_runner
 from services.social_signals import analyze_social_narrative
@@ -143,35 +143,16 @@ def reject_reason(token: dict[str, Any]) -> str | None:
         if ch <= thr:
             return f"price {key} {ch:.0f}%"
 
-    avoid = (
-        (token.get("safetyReport") or {}).get("avoid")
-        or (token.get("safety") or {}).get("avoid")
-        or token.get("avoid")
-        or {}
-    )
-    if avoid.get("hard_avoid"):
-        return avoid.get("summary") or "hard avoid"
-    flags = set(avoid.get("flags") or [])
-    fatal = {
-        "blocklist",
-        "honeypot",
-        "rugged",
-        "banned",
-        "flash_pump_dump",
-        "post_ath_crash",
-        "drained_curve",
-        "creator_dumped",
-        "adult_bait",
-        "lp_unlocked",
-        "lp_not_locked",
-        "spam_deploy_tool",
-        "social_spoof_scam",
-        "entry_trap_social",
-        "ai_pitch_no_socials",
-    }
-    hit = flags & fatal
-    if hit:
-        return avoid.get("summary") or f"risk: {', '.join(sorted(hit))}"
+    hard, hard_why = is_hard_avoid(token)
+    if hard:
+        return hard_why or "hard avoid"
+
+    # Incomplete enrich → never recommend as moon
+    if token.get("enrich_ok") is False:
+        errs = token.get("enrich_errors") or []
+        return "safety unknown — " + (
+            ", ".join(str(e) for e in errs[:2]) if errs else "enrich incomplete"
+        )
 
     social = _ensure_social(token)
     tq = social.get("ticker") or {}
@@ -184,7 +165,13 @@ def reject_reason(token: dict[str, Any]) -> str | None:
             return "name-jack narrative without real influencer tweet / community"
 
     # Require a real edge — random green charts dump
-    if not social.get("has_edge") and not social.get("influencer_tweet"):
+    # Unverified influencer URL claims alone are NOT enough (spoofable).
+    has_real_edge = bool(social.get("has_edge"))
+    has_verified_inf = bool(social.get("influencer_tweet"))
+    claim_only = bool(social.get("influencer_tweet_claim")) and not has_verified_inf
+    if claim_only and not has_real_edge:
+        return "unverified influencer link claim — spoof risk"
+    if not has_real_edge and not has_verified_inf:
         # Allow pure organic near-mig only if strong community
         bond = _bond(token, mcap)
         replies = _i(social.get("replies"))
@@ -200,9 +187,13 @@ def reject_reason(token: dict[str, Any]) -> str | None:
             return "no narrative / influencer edge — random chart"
 
     # Ghost / spoof
-    if social.get("status_only") and not social.get("influencer_tweet"):
+    if social.get("status_only") and not has_verified_inf:
         return "status-link social spoof (not influencer)"
-    if _i(social.get("replies")) == 0 and not social.get("real_x") and not social.get("influencer_tweet"):
+    if (
+        _i(social.get("replies")) == 0
+        and not social.get("real_x")
+        and not has_verified_inf
+    ):
         if age >= 4:
             return "ghost — no replies, no real X"
 
@@ -265,8 +256,12 @@ def reject_reason(token: dict[str, Any]) -> str | None:
         if sn.get("risk_level") == "high" and _i(sn.get("score")) >= 55:
             return (sn.get("flags") or ["high sniper risk"])[0]
 
-    # Lightweight path without RugCheck holders — flash + wash still catch snipers
-    if not isinstance(bs, dict) or not (token.get("safety") or {}).get("top_holders"):
+    # Lightweight flash path — never overwrite full RugCheck bundle analysis
+    holders_known = bool(
+        (isinstance(bs, dict) and bs.get("holders_known"))
+        or (token.get("safety") or {}).get("top_holders")
+    )
+    if not holders_known:
         lite = analyze_bundle_and_snipers(
             {},
             _pf(token),
@@ -274,7 +269,13 @@ def reject_reason(token: dict[str, Any]) -> str | None:
             age_minutes=age or None,
             mcap_usd=mcap or None,
         )
-        token["bundleSniper"] = lite
+        # Only fill empty slot; never replace holders_known analysis
+        if not isinstance(bs, dict):
+            lite["holders_known"] = False
+            if lite.get("overall") in ("clean", "low"):
+                lite["overall"] = "unknown"
+            token["bundleSniper"] = lite
+            bs = lite
         if lite.get("hard_reject") or (lite.get("snipers") or {}).get("risk_level") in (
             "critical",
             "high",
@@ -460,13 +461,15 @@ def moon_label(
     momentum: int = 100,
     narrative: int = 100,
     social: dict | None = None,
+    holders_known: bool = True,
 ) -> str:
     social = social or {}
-    # MOON only with real edge + near ATH
+    # MOON only with real edge + near ATH + known holder book
     if (
         score >= 75
         and momentum >= 80
         and narrative >= 55
+        and holders_known
         and (social.get("influencer_tweet") or social.get("has_edge"))
     ):
         return LABEL_MOON
@@ -506,13 +509,25 @@ def evaluate(token: dict[str, Any]) -> dict[str, Any]:
     i_sc, i_why = _pillar_interest(token)
     safe_sc, safe_why = _pillar_safety(token)
 
+    holders_known = bool(
+        (token.get("bundleSniper") or {}).get("holders_known")
+        or (token.get("safety") or {}).get("top_holders")
+    )
     score = moon_score(token)
-    label = moon_label(score, momentum=m_sc, narrative=n_sc, social=social)
+    label = moon_label(
+        score,
+        momentum=m_sc,
+        narrative=n_sc,
+        social=social,
+        holders_known=holders_known,
+    )
     conf = int(
         round(0.30 * m_sc + 0.15 * s_sc + 0.30 * n_sc + 0.15 * i_sc + 0.10 * safe_sc)
     )
     if social.get("influencer_tweet"):
         conf = min(99, conf + 10)
+    if not holders_known:
+        conf = min(conf, 60)
     if label == LABEL_MOON:
         conf = max(conf, 75)
     if label == LABEL_WEAK:

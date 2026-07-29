@@ -296,20 +296,20 @@ def analyze_social_narrative(
     if not tiktok_url and "tiktok.com" in website.lower():
         tiktok_url = website
 
-    # --- Influencer accounts + real tweet detection ---
+    # --- Influencer accounts + claimed tweet links (URLs are spoofable) ---
     influencer_accounts: list[str] = []
-    influencer_tweet = False
+    influencer_tweet_claim = False  # handle appears in a status URL (unverified)
     tweet_by: str | None = None
     tweet_url: str | None = None
     status_handle: str | None = None
 
-    # Direct status URL on twitter field (most important signal)
+    # Direct status URL on twitter field
     sh, sid = _parse_status_url(twitter)
     if sh and sid:
         status_handle = sh
         label = INFLUENTIAL_X_HANDLES.get(sh)
         if label:
-            influencer_tweet = True
+            influencer_tweet_claim = True
             tweet_by = label
             tweet_url = twitter
             if label not in influencer_accounts:
@@ -322,7 +322,7 @@ def analyze_social_narrative(
         if label:
             if label not in influencer_accounts:
                 influencer_accounts.append(label)
-            influencer_tweet = True
+            influencer_tweet_claim = True
             tweet_by = tweet_by or label
             tweet_url = tweet_url or m.group(0)
 
@@ -341,8 +341,8 @@ def analyze_social_narrative(
         if label and label not in influencer_accounts:
             influencer_accounts.append(label)
 
-    # Profile link to influencer (not a tweet) — weaker than tweet, still useful
-    profile_only_influencer = bool(influencer_accounts) and not influencer_tweet
+    # Profile link to influencer (not a tweet) — weaker than tweet
+    profile_only_influencer = bool(influencer_accounts) and not influencer_tweet_claim
 
     # --- Narratives from name/symbol/desc ---
     text = _normalize_text(name, symbol, description)
@@ -357,33 +357,42 @@ def analyze_social_narrative(
     if tq.get("hot_ticker") and tq["hot_ticker"] not in narratives:
         narratives.insert(0, tq["hot_ticker"])
 
-    # Name-jacking: narrative words without real influencer link
-    namejack = bool(narratives) and not influencer_tweet and not influencer_accounts
-    # Stronger: "ELON" ticker with zero community
-    namejack_risk = namejack and _i_replies(coin) < 5
-
     replies = _i_replies(coin)
-    status_only = _is_tweet_url(twitter) and not influencer_tweet
     real_x = bool(
         twitter
         and not _is_tweet_url(twitter)
         and ("x.com/" in twitter.lower() or "twitter.com/" in twitter.lower())
     )
 
-    # --- Edge score (0–100): what actually drives moons ---
+    # Corroborated "influencer tweet" only when claim + community (anti-spoof)
+    influencer_tweet = bool(
+        influencer_tweet_claim
+        and tweet_by
+        and (replies >= 12 or (real_x and replies >= 8) or replies >= 20)
+    )
+
+    # Name-jacking: narrative words without corroborated influencer link
+    namejack = bool(narratives) and not influencer_tweet and not influencer_accounts
+    namejack_risk = namejack and replies < 5
+    status_only = _is_tweet_url(twitter) and not influencer_tweet
+
+    # --- Edge score (0–100) ---
     edge = 0
     edge_reasons: list[str] = []
     if influencer_tweet and tweet_by:
-        edge += 55
-        edge_reasons.append(f"🔥 {tweet_by} tweet linked")
+        edge += 50
+        edge_reasons.append(f"🔥 {tweet_by} tweet + community")
+    elif influencer_tweet_claim and tweet_by:
+        edge += 12  # claimed only — spoofable
+        edge_reasons.append(f"Claimed {tweet_by} tweet link (unverified)")
     elif profile_only_influencer:
-        edge += 22
-        edge_reasons.append(f"Linked to {influencer_accounts[0]}")
+        edge += 14
+        edge_reasons.append(f"Linked to {influencer_accounts[0]} (profile only)")
     if narratives and not namejack_risk:
         edge += 18
         edge_reasons.append(narratives[0])
     elif narratives and namejack_risk:
-        edge += 4  # name-jack alone is weak / often a rug
+        edge += 4
         edge_reasons.append(f"Name-jack risk: {narratives[0]}")
     if has_tiktok:
         edge += 12
@@ -408,13 +417,22 @@ def analyze_social_narrative(
 
     edge = max(0, min(100, edge))
 
-    # Must have a real "story" to recommend (not random green chart)
+    # Must have a real story — claim-only influencer URLs are NOT enough
     has_edge = (
         influencer_tweet
-        or (edge >= 40 and (narratives or has_tiktok or replies >= 12))
-        or (profile_only_influencer and replies >= 8)
+        or (
+            edge >= 40
+            and (narratives or has_tiktok or replies >= 12)
+            and not (influencer_tweet_claim and not influencer_tweet and edge < 45)
+        )
+        or (profile_only_influencer and replies >= 12)
         or (bool(narratives) and real_x and replies >= 10 and not namejack_risk)
     )
+    # Pure claim without community cannot be sole edge
+    if influencer_tweet_claim and not influencer_tweet and not (
+        replies >= 12 or (real_x and replies >= 8) or (narratives and replies >= 10)
+    ):
+        has_edge = False
 
     badges: list[dict[str, str]] = []
     if influencer_tweet and tweet_by:
@@ -422,6 +440,12 @@ def analyze_social_narrative(
             "id": "influencer_tweet",
             "label": f"{tweet_by} TWEET",
             "type": "influencer_tweet",
+        })
+    elif influencer_tweet_claim and tweet_by:
+        badges.append({
+            "id": "influencer_claim",
+            "label": f"{tweet_by}? (unverified)",
+            "type": "warn",
         })
     for acct in influencer_accounts[:3]:
         badges.append({
@@ -446,7 +470,9 @@ def analyze_social_narrative(
 
     summary_parts: list[str] = []
     if influencer_tweet and tweet_by:
-        summary_parts.append(f"Linked to {tweet_by} tweet")
+        summary_parts.append(f"Linked to {tweet_by} tweet (+ community)")
+    elif influencer_tweet_claim and tweet_by:
+        summary_parts.append(f"Unverified {tweet_by} tweet claim")
     elif influencer_accounts:
         summary_parts.append(f"X → {', '.join(influencer_accounts[:2])}")
     if narratives:
@@ -462,6 +488,7 @@ def analyze_social_narrative(
         "x_url": x_url,
         "tiktok_url": tiktok_url,
         "influencer_tweet": influencer_tweet,
+        "influencer_tweet_claim": influencer_tweet_claim,
         "tweet_by": tweet_by,
         "tweet_url": tweet_url,
         "status_handle": status_handle,
