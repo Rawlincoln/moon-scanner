@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import httpx
-
 from config import (
     MAX_SOLANA_RUG_SCORE,
     MIN_LIQUIDITY_USD,
@@ -15,6 +13,8 @@ from config import (
     USER_AGENT,
 )
 from services.avoid_filters import analyze_avoid_flags
+from services.http_client import get as http_get
+from services.http_client import get_client
 
 RUGCHECK_BASE = "https://api.rugcheck.xyz/v1/tokens"
 
@@ -32,49 +32,57 @@ class SolanaAnalyzer:
         fast: bool = False,
     ) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(
-                timeout=REQUEST_TIMEOUT, headers=self._headers
-            ) as client:
-                # Fast bulk: summary only (~1 round-trip). Full report on deep analyze.
-                if fast:
-                    summary_resp = await client.get(
-                        f"{RUGCHECK_BASE}/{mint_address}/report/summary"
-                    )
-                    if summary_resp.status_code == 404:
-                        if pump_coin:
-                            return self._pumpfun_fallback(
-                                mint_address, pump_coin, padre_audit=padre_audit
-                            )
-                        return self._no_data(mint_address)
-                    if summary_resp.status_code == 429:
-                        if pump_coin:
-                            return self._pumpfun_fallback(
-                                mint_address, pump_coin, padre_audit=padre_audit
-                            )
-                        return self._error(mint_address, "RugCheck rate limited")
-                    summary_resp.raise_for_status()
-                    summary = summary_resp.json()
+            # Fast bulk: summary only (~1 round-trip). Full report on deep analyze.
+            if fast:
+                summary_resp = await http_get(
+                    f"{RUGCHECK_BASE}/{mint_address}/report/summary",
+                    headers=self._headers,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                if summary_resp.status_code == 404:
+                    if pump_coin:
+                        return self._pumpfun_fallback(
+                            mint_address, pump_coin, padre_audit=padre_audit
+                        )
+                    return self._no_data(mint_address)
+                if summary_resp.status_code == 429:
+                    if pump_coin:
+                        return self._pumpfun_fallback(
+                            mint_address, pump_coin, padre_audit=padre_audit
+                        )
+                    return self._error(mint_address, "RugCheck rate limited")
+                summary_resp.raise_for_status()
+                summary = summary_resp.json()
+                full = {}
+            else:
+                client = get_client()
+                summary_resp, full_resp = await asyncio.gather(
+                    client.get(
+                        f"{RUGCHECK_BASE}/{mint_address}/report/summary",
+                        headers=self._headers,
+                        timeout=REQUEST_TIMEOUT,
+                    ),
+                    client.get(
+                        f"{RUGCHECK_BASE}/{mint_address}/report",
+                        headers=self._headers,
+                        timeout=REQUEST_TIMEOUT,
+                    ),
+                    return_exceptions=True,
+                )
+                if isinstance(summary_resp, Exception):
+                    raise summary_resp
+                if summary_resp.status_code == 404:
+                    if pump_coin:
+                        return self._pumpfun_fallback(
+                            mint_address, pump_coin, padre_audit=padre_audit
+                        )
+                    return self._no_data(mint_address)
+                summary_resp.raise_for_status()
+                summary = summary_resp.json()
+                if isinstance(full_resp, Exception) or full_resp.status_code != 200:
                     full = {}
                 else:
-                    summary_resp, full_resp = await asyncio.gather(
-                        client.get(f"{RUGCHECK_BASE}/{mint_address}/report/summary"),
-                        client.get(f"{RUGCHECK_BASE}/{mint_address}/report"),
-                        return_exceptions=True,
-                    )
-                    if isinstance(summary_resp, Exception):
-                        raise summary_resp
-                    if summary_resp.status_code == 404:
-                        if pump_coin:
-                            return self._pumpfun_fallback(
-                                mint_address, pump_coin, padre_audit=padre_audit
-                            )
-                        return self._no_data(mint_address)
-                    summary_resp.raise_for_status()
-                    summary = summary_resp.json()
-                    if isinstance(full_resp, Exception) or full_resp.status_code != 200:
-                        full = {}
-                    else:
-                        full = full_resp.json()
+                    full = full_resp.json()
         except Exception as exc:
             if pump_coin:
                 return self._pumpfun_fallback(
@@ -158,8 +166,8 @@ class SolanaAnalyzer:
         if mutable_metadata:
             issues.append("Token metadata is mutable")
 
-        # Rug indicators from full report
-        top_holders = full.get("topHolders") or []
+        # Rug indicators from full report (summary may carry a shorter list)
+        top_holders = full.get("topHolders") or summary.get("topHolders") or []
         if top_holders:
             top_pct = sum(h.get("pct", 0) for h in top_holders[:5])
             if top_pct > 50:
@@ -233,14 +241,16 @@ class SolanaAnalyzer:
             if creator_pct == 0 and creator_balance == 0:
                 creator_sold = True
 
-        insider_detected = bool(full.get("graphInsidersDetected"))
-        insider_networks = len(full.get("insiderNetworks") or [])
+        insider_detected = bool(
+            full.get("graphInsidersDetected") or summary.get("graphInsidersDetected")
+        )
+        insider_networks = len(
+            full.get("insiderNetworks") or summary.get("insiderNetworks") or []
+        )
         creator_tokens = len(full.get("creatorTokens") or [])
-        total_holders = int(full.get("totalHolders") or 0)
-        rugged = bool(full.get("rugged"))
-        insider_holders = [
-            h for h in top_holders if h.get("insider")
-        ]
+        total_holders = int(full.get("totalHolders") or summary.get("totalHolders") or 0)
+        rugged = bool(full.get("rugged") or summary.get("rugged"))
+        insider_holders = [h for h in top_holders if h.get("insider")]
 
         # Re-evaluate LP with market data.
         # NOTE: pump.fun always reports lpLockedPct=100 — do NOT trust that alone.
@@ -314,7 +324,25 @@ class SolanaAnalyzer:
             "total_holders": total_holders,
             "rugged": rugged,
             "insider_holders": insider_holders[:5],
+            # Raw graph flag for bundle detector / Bubblemaps-style clustering
+            "graphInsidersDetected": insider_detected,
         }
+        # Attach bundle/sniper analysis while we have full holder data
+        try:
+            from services.bundle_sniper import analyze_bundle_and_snipers
+
+            result["bundleSniper"] = analyze_bundle_and_snipers(
+                result,
+                pump_coin,
+                {},
+            )
+            if result["bundleSniper"].get("hard_reject"):
+                result["passed"] = False
+                tag = f"BUNDLE/SNIPER: {result['bundleSniper'].get('summary')}"
+                if tag not in result.get("issues", []):
+                    result.setdefault("issues", []).append(tag)
+        except Exception:
+            pass
         result = self._merge_padre_audit(result, padre_audit)
         return self._apply_avoid_filters(result, pump_coin, mint)
 

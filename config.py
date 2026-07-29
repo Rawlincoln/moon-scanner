@@ -1,6 +1,31 @@
 """Configuration and chain mappings for Moon Scanner."""
 
+from __future__ import annotations
+
 import os
+from pathlib import Path
+
+
+def _load_dotenv() -> None:
+    """Load moon-scanner/.env into os.environ (does not override existing vars)."""
+    env_path = Path(__file__).resolve().parent / ".env"
+    if not env_path.is_file():
+        return
+    try:
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+    except OSError:
+        pass
+
+
+_load_dotenv()
 
 USER_AGENT = "MoonScanner/1.0 (Token Safety & Signal Analyzer)"
 IS_RENDER = os.getenv("MOON_SCANNER_DEPLOY", "").lower() == "render"
@@ -72,8 +97,8 @@ MIGRATION_CLIMBING_MIN_PCT = 15.0  # ~$10k+ — mid-curve climb (under $25k lane
 MIGRATION_NEAR_MIN_PCT = 42.0  # ~$29k+ — primary "can migrate" zone
 MIGRATION_ALMOST_MIN_PCT = 55.0  # ~$38k+ — almost bonded
 # Must stay within this fraction of ATH to appear / recommend (user: no dumps)
-DUMP_HIDE_FRAC = 0.70  # hide if mcap < 70% of ATH (−30%+)
-DUMP_HARD_FRAC = 0.55  # hard dump −45%+
+DUMP_HIDE_FRAC = 0.80  # hide if mcap < 80% of ATH (−20%+)
+DUMP_HARD_FRAC = 0.60  # hard dump −40%+
 # Near-migration BUY needs this quality
 NEAR_MIG_BUY_MIN_SCORE = 72
 NEAR_MIG_BUY_MIN_BOND = 45.0
@@ -88,11 +113,11 @@ SIXK_RADAR_MIN_USD = 2_000
 SIXK_RADAR_MAX_USD = 9_000
 SIXK_ENTRY_SWEET_MIN = 3_500
 SIXK_ENTRY_SWEET_MAX = 7_500
-# Continuous warm so UI isn't minutes behind climbers
-BACKGROUND_SCAN_INTERVAL_SEC = 12
-BACKGROUND_SCAN_PER_COLUMN = 12
-# Dedicated runner-radar poll (multi-stage $10M–$100M watch)
-RUNNER_RADAR_INTERVAL_SEC = 10
+# Heavy trenches warm OFF — saturates event loop; /api/moon is the primary path
+BACKGROUND_SCAN_INTERVAL_SEC = 0
+BACKGROUND_SCAN_PER_COLUMN = 0
+# Runner radar off by default (moon UI does its own fast scan)
+RUNNER_RADAR_INTERVAL_SEC = 0
 RUNNER_ALERT_TTL_SEC = 45 * 60  # keep sticky alerts 45 min
 # Near-migration tokens vanish too fast if only shown when present in the latest
 # pump.fun poll — pin them so the UI keeps them visible while they climb/dump.
@@ -116,3 +141,71 @@ MAX_SNIPER_WALLET_PCT = 22.0
 MAX_DEV_HOLD_PCT = 8.0
 MIN_PUMPFUN_REPLIES = 1
 REQUIRE_TRENCH_GATE_FOR_INVEST = True
+
+# --- Realtime (Geyser / Yellowstone / ShredStream + paid WSS) ---
+# Without paid WSS/gRPC, app uses public logsSubscribe (rate-limited) + pump poll.
+# Recommended: HELIUS_API_KEY or SOLANA_RPC_WSS from Helius / QuickNode / Triton.
+YELLOWSTONE_GRPC_ENDPOINT = os.getenv("YELLOWSTONE_GRPC_ENDPOINT", "").strip()
+YELLOWSTONE_GRPC_TOKEN = os.getenv("YELLOWSTONE_GRPC_TOKEN", "").strip()
+YELLOWSTONE_COMMITMENT = os.getenv("YELLOWSTONE_COMMITMENT", "processed").strip() or "processed"
+# Optional earliest layer (UDP shreds). Jito official deprecating ~2026-09-05.
+SHREDSTREAM_ENDPOINT = os.getenv("SHREDSTREAM_ENDPOINT", "").strip()
+REALTIME_PUMP_POLL_SEC = float(os.getenv("REALTIME_PUMP_POLL_SEC", "2.0") or "2.0")
+# logs | transaction | auto (transaction on paid WSS, else logs)
+SOLANA_WS_MODE = (os.getenv("SOLANA_WS_MODE", "auto") or "auto").strip().lower()
+DISABLE_SOLANA_WS = os.getenv("DISABLE_SOLANA_WS", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+YELLOWSTONE_ONLY = os.getenv("YELLOWSTONE_ONLY", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "").strip()
+
+
+def _solana_rpc_http() -> str:
+    explicit = (
+        os.getenv("SOLANA_RPC_HTTP") or os.getenv("SOLANA_RPC_URL") or ""
+    ).strip()
+    if explicit:
+        return explicit
+    if HELIUS_API_KEY:
+        return f"https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
+    return "https://api.mainnet-beta.solana.com"
+
+
+def _solana_rpc_wss() -> str:
+    explicit = (
+        os.getenv("SOLANA_RPC_WSS") or os.getenv("YELLOWSTONE_WSS") or ""
+    ).strip()
+    if explicit:
+        return explicit
+    if HELIUS_API_KEY:
+        return f"wss://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
+    return "wss://api.mainnet-beta.solana.com"
+
+
+SOLANA_RPC_HTTP = _solana_rpc_http()
+SOLANA_RPC_WSS = _solana_rpc_wss()
+
+
+def rpc_is_paid() -> bool:
+    """True when HELIUS key or non-public RPC endpoint is configured."""
+    if HELIUS_API_KEY:
+        return True
+    u = (SOLANA_RPC_HTTP + " " + SOLANA_RPC_WSS).lower()
+    if "api-key=" in u or "apikey=" in u:
+        return True
+    public = ("api.mainnet-beta.solana.com",)
+    return not any(p in u for p in public)
+
+
+def rpc_provider_label() -> str:
+    if HELIUS_API_KEY or "helius" in SOLANA_RPC_HTTP.lower():
+        return "helius"
+    if rpc_is_paid():
+        return "paid"
+    return "public"

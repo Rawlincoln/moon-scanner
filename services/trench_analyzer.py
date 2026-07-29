@@ -30,6 +30,7 @@ from config import (
     SIXK_RADAR_MIN_USD,
     TARGET_MCAP_USD,
 )
+from services.bundle_sniper import analyze_bundle_and_snipers, to_legacy_snipers
 from services.pumpfun import PumpFunClient
 
 
@@ -52,54 +53,19 @@ def _mcap_distance_score(mcap: float) -> float:
     return max(0.0, 100.0 - dist * 100.0)
 
 
-def analyze_snipers(safety: dict, pump: dict | None = None) -> dict[str, Any]:
-    top_holders = safety.get("top_holders") or []
-    creator = safety.get("creator") or (pump or {}).get("creator")
-
-    insider_wallets: list[dict] = []
-    large_early_wallets: list[dict] = []
-    max_wallet_pct = 0.0
-
-    for h in top_holders:
-        pct = _safe_float(h.get("pct"))
-        owner = str(h.get("owner") or h.get("address") or "")
-        is_insider = bool(h.get("insider"))
-
-        # Bonding curve reserve shows as 50-95% holder — skip those
-        if pct >= 50:
-            continue
-
-        if is_insider:
-            insider_wallets.append({"pct": pct, "owner": owner[:12]})
-            continue
-
-        if pct > max_wallet_pct:
-            max_wallet_pct = pct
-
-        if pct >= 12:
-            large_early_wallets.append({"pct": pct, "owner": owner[:12]})
-
-        if creator and creator in owner and pct > MAX_DEV_HOLD_PCT:
-            large_early_wallets.append(
-                {"pct": pct, "owner": "creator", "flag": "dev_bag"}
-            )
-
-    sniper_risk = "low"
-    if insider_wallets or safety.get("insider_detected"):
-        sniper_risk = "critical"
-    elif max_wallet_pct > MAX_SNIPER_WALLET_PCT:
-        sniper_risk = "high"
-    elif max_wallet_pct > MAX_SNIPER_WALLET_PCT * 0.75:
-        sniper_risk = "medium"
-
-    return {
-        "insider_wallets": insider_wallets,
-        "insider_count": len(insider_wallets),
-        "max_wallet_pct": round(max_wallet_pct, 2),
-        "large_early_wallets": large_early_wallets[:5],
-        "risk_level": sniper_risk,
-        "insider_networks": int(safety.get("insider_networks") or 0),
-    }
+def analyze_snipers(
+    safety: dict,
+    pump: dict | None = None,
+    pair: dict | None = None,
+) -> dict[str, Any]:
+    """Multi-signal sniper/bundle analysis (holders + insiders + flow + flash)."""
+    report = analyze_bundle_and_snipers(safety, pump, pair or {})
+    out = to_legacy_snipers(report)
+    out["bundle"] = report.get("bundle")
+    out["overall"] = report.get("overall")
+    out["hard_reject"] = report.get("hard_reject")
+    out["summary"] = report.get("summary")
+    return out
 
 
 def analyze_community(pump: dict | None, pair: dict) -> dict[str, Any]:
@@ -227,14 +193,32 @@ def run_trench_gate(
 
     add(
         "no_insider_snipers",
-        snipers["risk_level"] != "critical" and snipers["insider_count"] == 0,
-        "Insider/sniper wallets detected" if snipers["insider_count"] else "Clean",
+        snipers["risk_level"] not in ("critical", "high")
+        and snipers["insider_count"] == 0
+        and not snipers.get("hard_reject"),
+        snipers.get("summary")
+        or (
+            "Insider/sniper wallets detected"
+            if snipers["insider_count"] or snipers["risk_level"] != "low"
+            else "Clean sniper book"
+        ),
     )
 
     add(
         "no_whale_sniper",
         snipers["max_wallet_pct"] <= MAX_SNIPER_WALLET_PCT,
         f"Largest wallet {snipers['max_wallet_pct']:.1f}% — max {MAX_SNIPER_WALLET_PCT:.0f}%",
+    )
+
+    bundle = snipers.get("bundle") or {}
+    add(
+        "not_bundled",
+        not bundle.get("bundled") and bundle.get("risk_level") not in ("critical", "high"),
+        (
+            (bundle.get("flags") or ["Bundled multi-wallet launch"])[0]
+            if bundle.get("bundled")
+            else "No bundle cluster"
+        ),
     )
 
     dev_pct = _safe_float(safety.get("creator_pct"))

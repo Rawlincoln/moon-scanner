@@ -5,9 +5,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-import httpx
-
 from config import PUMPFUN_API_URL, REQUEST_TIMEOUT
+from services.http_client import get as http_get
 
 PUMP_HEADERS = {
     "User-Agent": "Mozilla/5.0",
@@ -35,23 +34,26 @@ class PumpFunClient:
             "order": "DESC",
             "includeNsfw": "false",
         }
-        async with httpx.AsyncClient(
-            timeout=REQUEST_TIMEOUT, headers=PUMP_HEADERS
-        ) as client:
-            resp = await client.get(f"{self._base}/coins", params=params)
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await http_get(
+            f"{self._base}/coins",
+            params=params,
+            headers=PUMP_HEADERS,
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
         return data if isinstance(data, list) else []
 
     async def get_coin(self, mint: str) -> dict | None:
-        async with httpx.AsyncClient(
-            timeout=REQUEST_TIMEOUT, headers=PUMP_HEADERS
-        ) as client:
-            resp = await client.get(f"{self._base}/coins/{mint}")
-            if resp.status_code == 404:
-                return None
-            resp.raise_for_status()
-            return resp.json()
+        resp = await http_get(
+            f"{self._base}/coins/{mint}",
+            headers=PUMP_HEADERS,
+            timeout=REQUEST_TIMEOUT,
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
 
     @staticmethod
     def coin_age_minutes(coin: dict) -> float:

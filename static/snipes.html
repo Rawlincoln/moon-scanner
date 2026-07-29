@@ -3,48 +3,48 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Moon Scanner — High-accuracy climbers only</title>
+  <title>Safe Snipes — 2× targets · Moon Scanner</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/moon.css?v=7" />
   <link rel="stylesheet" href="/static/css/snipes.css?v=1" />
 </head>
-<body>
+<body class="page-snipes">
   <div class="bg"></div>
 
   <nav class="nav">
-    <a href="/" class="active">◈ Moons</a>
-    <a href="/snipes">⚡ Safe Snipes 2×</a>
+    <a href="/">◈ Moons</a>
+    <a href="/snipes" class="active">⚡ Safe Snipes 2×</a>
   </nav>
 
   <header class="top">
     <div class="brand">
-      <span class="mark">◈</span>
+      <span class="mark snipe-mark">⚡</span>
       <div>
-        <h1>Moon Scanner</h1>
-        <p>Narrative + influencer edge only — random dumps stay hidden</p>
+        <h1>Safe Snipes</h1>
+        <p>Capital-protected early entries — book ~2×, not moon holds</p>
       </div>
     </div>
     <div class="pills">
       <span class="pill" id="statShown">—</span>
-      <span class="pill" id="statMoon">0 moon</span>
+      <span class="pill" id="statSnipe">0 snipe</span>
       <span class="pill muted" id="statBackend">local</span>
     </div>
   </header>
 
   <section class="bar">
-    <button type="button" class="btn primary" id="scanBtn">Scan moons</button>
+    <button type="button" class="btn primary" id="scanBtn">Scan snipes</button>
     <label class="chk">
-      <input type="checkbox" id="autoRefresh" checked /> Auto 10s
+      <input type="checkbox" id="autoRefresh" checked /> Auto 12s
     </label>
     <label class="field">
       Max age
       <select id="maxAge">
-        <option value="60">60m</option>
-        <option value="90">90m</option>
-        <option value="120" selected>2h</option>
-        <option value="180">3h</option>
+        <option value="30">30m</option>
+        <option value="45">45m</option>
+        <option value="60" selected>60m</option>
+        <option value="75">75m</option>
       </select>
     </label>
     <label class="field">
@@ -53,7 +53,6 @@
         <option value="8">8</option>
         <option value="12" selected>12</option>
         <option value="16">16</option>
-        <option value="24">24</option>
       </select>
     </label>
     <label class="field">
@@ -65,17 +64,20 @@
     </label>
   </section>
 
-  <p class="status" id="status">Ready — scanning for Elon/CZ/Trump tweets, hot tickers, real narratives</p>
+  <p class="status" id="status">Ready — $3.5k–$16k mcap · clean book · ~2× take-profit</p>
   <p class="rule" id="rule"></p>
-  <p class="rule" id="outcomeStats">Outcomes: —</p>
+  <div class="plan-banner" id="planBanner">
+    <strong>Playbook:</strong> Enter only SNIPE / SETUP · exit near <em>2× mcap</em> · cut if −28% from entry or sharp dump · never size for “moon”.
+  </div>
 
   <main id="list" class="list"></main>
 
   <footer class="foot">
-    Not financial advice. DYOR. Empty list is normal — most coins dump. We only surface near-ATH + narrative edge.
-    Track results: <a href="/api/moon/outcomes" style="color:inherit">/api/moon/outcomes</a>
+    Not financial advice. DYOR. Safe snipes hide dumps, bundles &gt;5%, and sniper bags.
+    Moons (narrative): <a href="/" style="color:inherit">home</a>
+    · API: <a href="/api/snipes" style="color:inherit">/api/snipes</a>
   </footer>
 
-  <script src="/static/js/moon.js?v=10"></script>
+  <script src="/static/js/snipes.js?v=3"></script>
 </body>
 </html>

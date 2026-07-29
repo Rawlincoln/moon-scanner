@@ -510,7 +510,25 @@ def analyze_avoid_flags(
         reasons.append("Honeypot detected")
     if safety.get("insider_detected") or int(safety.get("insider_networks") or 0) > 0:
         flags.append("insiders")
-        reasons.append("Insider wallet graph detected")
+        reasons.append("Insider graph / linked sniper networks")
+
+    # Bundle + multi-wallet sniper clusters (when holder data present)
+    try:
+        from services.bundle_sniper import analyze_bundle_and_snipers
+
+        bs = analyze_bundle_and_snipers(safety, pump, pair)
+        if bs.get("hard_reject") or (bs.get("bundle") or {}).get("bundled"):
+            flags.append("bundled")
+            reasons.append(bs.get("summary") or "Bundled / multi-wallet sniper launch")
+        sn_lv = (bs.get("snipers") or {}).get("risk_level")
+        if sn_lv in ("critical", "high"):
+            flags.append("snipers")
+            reasons.append(
+                (bs.get("snipers") or {}).get("flags", [None])[0]
+                or f"Sniper risk {sn_lv}"
+            )
+    except Exception:
+        pass
     if safety.get("mint_authority"):
         flags.append("mint_authority")
         reasons.append("Mint authority still active — supply can be inflated")
@@ -549,6 +567,9 @@ def analyze_avoid_flags(
         "extreme_wash",
         "ai_pitch_no_socials",
         "dev_out_green_chart",
+        "bundled",
+        "snipers",
+        "insiders",
     }
     # Soft packaging — warn but don't treat as automatic hard hide
     soft_hardish = {

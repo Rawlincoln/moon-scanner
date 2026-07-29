@@ -310,6 +310,21 @@ class PadreFeedClient:
                 desc = (pf.get("description") or "").strip()
                 if replies == 0 and not has_social and len(desc) < 4:
                     c["_ghost_risk"] = True
+                # Drop dumps in feed preview (before RugCheck)
+                mcap = float(
+                    c.get("_mcap")
+                    or pf.get("usd_market_cap")
+                    or c.get("marketCap")
+                    or 0
+                )
+                ath = float(
+                    c.get("_ath_mcap")
+                    or c.get("ath_market_cap")
+                    or pf.get("ath_market_cap")
+                    or 0
+                )
+                if ath >= 2_000 and mcap > 0 and mcap < ath * 0.80:
+                    continue
                 seen.add(mint)
                 out.append(c)
             if rank_bonding:
@@ -366,25 +381,25 @@ class PadreFeedClient:
         self, sort: str, limit: int
     ) -> list[dict]:
         try:
-            async with __import__("httpx").AsyncClient(
-                timeout=REQUEST_TIMEOUT,
+            from services.http_client import get as http_get
+
+            resp = await http_get(
+                "https://frontend-api-v3.pump.fun/coins",
+                params={
+                    "limit": limit,
+                    "sort": sort,
+                    "order": "DESC",
+                    "includeNsfw": "false",
+                },
                 headers={
                     "User-Agent": "Mozilla/5.0",
                     "Origin": "https://pump.fun",
                 },
-            ) as client:
-                resp = await client.get(
-                    "https://frontend-api-v3.pump.fun/coins",
-                    params={
-                        "limit": limit,
-                        "sort": sort,
-                        "order": "DESC",
-                        "includeNsfw": "false",
-                    },
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return data if isinstance(data, list) else []
+                timeout=REQUEST_TIMEOUT,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data if isinstance(data, list) else []
         except Exception:
             pass
         return []

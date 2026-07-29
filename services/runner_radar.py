@@ -22,11 +22,11 @@ from config import (
 )
 from services.tx_activity import score_tx_activity
 
-# Dump thresholds — user lost capital on dumps still shown; hide earlier
-CRASH_FROM_ATH_FRAC = 0.70  # −30% from ATH = hide
-CRASH_FROM_PEAK_FRAC = 0.70
-SOFT_FADE_FRAC = 0.80  # −20% from peak = not a clean buy
-HARD_CRASH_FRAC = 0.55  # −45% hard
+# Dump thresholds — hide early; user still saw dumped charts
+CRASH_FROM_ATH_FRAC = 0.80  # −20% from ATH = hide (mcap < 80% of peak)
+CRASH_FROM_PEAK_FRAC = 0.80
+SOFT_FADE_FRAC = 0.88  # −12% from peak = not a clean buy
+HARD_CRASH_FRAC = 0.60  # −40% hard
 
 
 def _f(val: Any, default: float = 0.0) -> float:
@@ -36,19 +36,37 @@ def _f(val: Any, default: float = 0.0) -> float:
         return default
 
 
+def extract_mcap_usd(token: dict[str, Any]) -> float:
+    """Best-effort live mcap from token / pump / market payloads."""
+    m = _f(token.get("mcap_usd") or token.get("market_cap_usd") or token.get("marketCap"))
+    if m > 0:
+        return m
+    pf = token.get("pumpfun") or {}
+    mkt = token.get("market") or {}
+    if not pf:
+        pf = mkt.get("pumpfun") or {}
+    m = _f(pf.get("usd_market_cap") or pf.get("market_cap"))
+    if m > 0:
+        return m
+    return _f(mkt.get("marketCap") or mkt.get("fdv") or token.get("_mcap"))
+
+
 def extract_ath_mcap(token: dict[str, Any]) -> float:
     """Best-effort ATH mcap from token / pump / market payloads."""
     ath = _f(token.get("ath_mcap") or token.get("ath_market_cap"))
     if ath > 0:
         return ath
     pf = token.get("pumpfun") or {}
+    mkt = token.get("market") or {}
     if not pf:
-        mkt = token.get("market") or {}
         pf = mkt.get("pumpfun") or {}
     ath = _f(pf.get("ath_market_cap") or pf.get("ath_mcap"))
     if ath > 0:
         return ath
-    # Tracked peak from sticky stores
+    ath = _f(mkt.get("ath_market_cap") or mkt.get("ath_mcap"))
+    if ath > 0:
+        return ath
+    # Tracked peak from sticky / session stores
     return _f(token.get("_peak_mcap") or token.get("peak_mcap"))
 
 
@@ -60,18 +78,17 @@ def is_crashed_runner(
     peak: float | None = None,
 ) -> tuple[bool, str]:
     """Return (crashed, reason) — purge from runners / near-mig / lottery."""
-    mcap = _f(mcap if mcap is not None else token.get("mcap_usd"))
+    mcap = _f(mcap if mcap is not None else extract_mcap_usd(token))
     ath = _f(ath if ath is not None else extract_ath_mcap(token))
     peak = _f(
         peak
         if peak is not None
         else token.get("_peak_mcap") or token.get("peak_mcap")
     )
-    high = max(ath, peak, mcap)
 
     # Unknown mcap alone is NOT a dump (preview / loading)
     if mcap <= 0:
-        if max(ath, peak) >= 5_000:
+        if max(ath, peak) >= 4_000:
             return True, "Lost mcap after peak — dead"
         return False, ""
 
@@ -80,10 +97,10 @@ def is_crashed_runner(
     if high <= 0:
         high = mcap
 
-    # Price change dumps (DexScreener)
+    # Price change dumps (DexScreener / nested market)
     mkt = token.get("market") or {}
     pc = mkt.get("priceChange") or token.get("priceChange") or {}
-    for key, thr in (("m5", -25), ("h1", -30), ("h6", -35)):
+    for key, thr in (("m5", -18), ("h1", -22), ("h6", -28), ("h24", -40)):
         ch = _f(pc.get(key))
         if ch <= thr:
             return True, f"Dumped {ch:.0f}% ({key})"
@@ -107,13 +124,16 @@ def is_crashed_runner(
     ):
         return True, avoid.get("summary") or "Avoid crash flags"
 
-    # −30% from ATH/peak (user: never show dumps)
-    if high >= 3_000 and mcap < high * CRASH_FROM_ATH_FRAC:
+    if token.get("skipped") and str(token.get("skipReason") or token.get("skip_reason") or "").lower().find("dump") >= 0:
+        return True, str(token.get("skipReason") or "dumped")
+
+    # −22% from ATH/peak (user: never show dumps)
+    if high >= 2_000 and mcap < high * CRASH_FROM_ATH_FRAC:
         dump_pct = (1 - mcap / high) * 100
         return True, f"Dumped {dump_pct:.0f}% from peak ${high:,.0f} → ${mcap:,.0f}"
 
-    # Hard crash −45%
-    if high >= 2_500 and mcap < high * HARD_CRASH_FRAC:
+    # Hard crash −40%
+    if high >= 1_800 and mcap < high * HARD_CRASH_FRAC:
         return True, f"Hard crash from ${high:,.0f} → ${mcap:,.0f}"
 
     bond = _f(token.get("bonding_progress"))
@@ -123,16 +143,20 @@ def is_crashed_runner(
         token.get("column") in ("almost_bonded", "recently_bonded")
         or _f(token.get("_peak_mcap")) >= 12_000
         or ath >= 12_000
-        or high >= 20_000
+        or high >= 18_000
     )
-    if was_near and mcap < 6_000:
+    if was_near and mcap < 7_000:
         return True, f"Collapsed to ${mcap:,.0f} after climb — remove"
-    if was_near and bond < 15 and mcap < high * 0.5:
+    if was_near and bond < 18 and high > 0 and mcap < high * 0.55:
         return True, f"Bonding collapsed {bond:.0f}% after peak"
 
-    # Early lottery that already failed (user: none go past 7k)
-    if high >= 5_500 and mcap < 3_500 and high < 15_000:
+    # Early lottery that already failed
+    if high >= 5_000 and mcap < 3_200 and high < 18_000:
         return True, f"Early fail ${high:,.0f}→${mcap:,.0f} — not a runner"
+
+    # Big ATH → small now even if peak field missing
+    if ath >= 12_000 and mcap < ath * 0.45:
+        return True, f"ATH collapse ${ath:,.0f}→${mcap:,.0f}"
 
     quote = _f(
         token.get("quote_sol")

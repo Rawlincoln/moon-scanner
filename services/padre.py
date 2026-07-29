@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
-
 from config import PADRE_API_URL, PADRE_TRADE_URL, REQUEST_TIMEOUT
+from services.http_client import get as http_get
 
 PADRE_HEADERS = {
     "User-Agent": "Mozilla/5.0",
@@ -64,14 +63,11 @@ class PadreClient:
             f"{token_address}/get-token-audit"
         )
         try:
-            async with httpx.AsyncClient(
-                timeout=REQUEST_TIMEOUT, headers=PADRE_HEADERS
-            ) as client:
-                resp = await client.get(url)
-                if resp.status_code == 404:
-                    return None
-                resp.raise_for_status()
-                return resp.json()
+            resp = await http_get(url, headers=PADRE_HEADERS, timeout=REQUEST_TIMEOUT)
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
         except Exception:
             return None
 

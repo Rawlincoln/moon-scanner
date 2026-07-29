@@ -53,17 +53,84 @@ let lastScanMeta = {};
 let lastRunnerAlerts = [];
 let notifiedMints = new Set(JSON.parse(localStorage.getItem("moon_notified_mints") || "[]"));
 let runnerPollTimer = null;
-/** Client sticky near-migration — survive brief empty polls (ms) */
-const NEAR_MIG_STICKY_MS = 25 * 60 * 1000;
-let stickyNearMig = loadStickyNearMig();
+/**
+ * Server hard-blocklist mirror — UI must never show these.
+ * Keep in sync with services/avoid_filters.py BLOCKED_MINTS.
+ */
+const HARD_BLOCKED_MINTS = new Set([
+  "BD42EGwRsQArB2SKwgdqPzjsBbme963ZrR9sioTopump",
+  "4GTkEsYhegrJmbAiiUe9TrsQrTrqx7n1jDMSH5GGpump",
+  "FAAnKpATxZuWWsCbxWZ5yaNn9CyCj4d9Wnqzhhdqpump",
+  "62pzwoXyHi5Z1iEdD67RDPTT12spZ4ph8WsLU5y8pump",
+  "5ocgBRqLyQxZEvtAYcX1nXeVhAj1cuCHi2ZfSZKVpump",
+  "BTU78ZNs11eDYsaUXysXnEPEJrCDYDobAkTfQQafpump", // USWR first
+  "9Sj7Yi6oYCATrjC68or2Rqk3D6YkgKaqc9UepDogpump", // CUBEMAN
+  "Bw1gX5ih2DJFtXggXnnGbWqqpBte1uvb9jurUSecpump", // Cashoty
+  "P5PhPnXd6AS9JgTiZJzi4Y2CuDYF5nvPNrWpuUFUKgX", // USWR relaunch −93% dump
+]);
 
-function loadStickyNearMig() {
+/** mint → peak mcap seen this browser (survives refresh; used to catch dumps without ATH) */
+const PEAK_MCAP_KEY = "moon_peak_mcap_v2";
+const PEAK_MCAP_TTL_MS = 6 * 60 * 60 * 1000; // 6h
+// Clear legacy sticky that used to re-show dumps with frozen high mcap
+try {
+  localStorage.removeItem("moon_sticky_near_mig");
+} catch {
+  /* ignore */
+}
+
+function mintOf(t) {
+  return String(t?.tokenAddress || t?.mint || t?.address || "").trim();
+}
+
+function isHardBlocked(tOrMint) {
+  const m = typeof tOrMint === "string" ? tOrMint.trim() : mintOf(tOrMint);
+  return Boolean(m && HARD_BLOCKED_MINTS.has(m));
+}
+
+function tokenMcap(t) {
+  if (!t || typeof t !== "object") return 0;
+  return (
+    Number(
+      t.mcap_usd ||
+        t.market_cap_usd ||
+        t.market_cap ||
+        t.marketCap ||
+        t._mcap ||
+        t.pumpfun?.usd_market_cap ||
+        t.market?.pumpfun?.usd_market_cap ||
+        t.market?.marketCap ||
+        0
+    ) || 0
+  );
+}
+
+function tokenAth(t) {
+  if (!t || typeof t !== "object") return 0;
+  return (
+    Number(
+      t.ath_mcap ||
+        t.ath_market_cap ||
+        t._ath_mcap ||
+        t.pumpfun?.ath_market_cap ||
+        t.market?.pumpfun?.ath_market_cap ||
+        t.market?.ath_market_cap ||
+        0
+    ) || 0
+  );
+}
+
+function loadPeakMap() {
   try {
-    const raw = JSON.parse(localStorage.getItem("moon_sticky_near_mig") || "{}");
+    const raw = JSON.parse(localStorage.getItem(PEAK_MCAP_KEY) || "{}");
     const now = Date.now();
     const out = {};
-    for (const [mint, t] of Object.entries(raw)) {
-      if (now - (t._clientPinnedAt || 0) < NEAR_MIG_STICKY_MS) out[mint] = t;
+    for (const [mint, rec] of Object.entries(raw || {})) {
+      if (!mint || isHardBlocked(mint)) continue;
+      const peak = Number(rec?.peak || rec) || 0;
+      const ts = Number(rec?.ts) || now;
+      if (peak <= 0 || now - ts > PEAK_MCAP_TTL_MS) continue;
+      out[mint] = { peak, ts };
     }
     return out;
   } catch {
@@ -71,129 +138,111 @@ function loadStickyNearMig() {
   }
 }
 
-function saveStickyNearMig() {
+let peakMcapMap = loadPeakMap();
+
+function savePeakMap() {
   try {
-    localStorage.setItem("moon_sticky_near_mig", JSON.stringify(stickyNearMig));
+    localStorage.setItem(PEAK_MCAP_KEY, JSON.stringify(peakMcapMap));
   } catch {
     /* quota */
   }
 }
 
+/** Raise session peak for mint; attach peak onto token for dump checks. */
+function trackTokenPeak(t) {
+  if (!t || typeof t !== "object") return t;
+  const mint = mintOf(t);
+  if (!mint || isHardBlocked(mint)) return t;
+  const mcap = tokenMcap(t);
+  const ath = tokenAth(t);
+  const prev = peakMcapMap[mint]?.peak || 0;
+  const peak = Math.max(prev, ath, Number(t._peak_mcap || t.peak_mcap || 0), mcap);
+  if (peak > 0) {
+    peakMcapMap[mint] = { peak, ts: Date.now() };
+    t._peak_mcap = peak;
+    if (ath > 0 || peak > mcap) t.ath_mcap = Math.max(ath, peak);
+  }
+  return t;
+}
+
 function isClientCrashedRunner(t) {
-  const mcap = Number(t.mcap_usd || t.pumpfun?.usd_market_cap || t.market?.marketCap || 0);
-  const ath = Number(
-    t.ath_mcap
-    || t.ath_market_cap
-    || t.pumpfun?.ath_market_cap
-    || t.market?.pumpfun?.ath_market_cap
-    || 0
-  );
-  // Peak = historical high only (never max with current mcap — that hides dumps)
-  const peak = Math.max(ath, Number(t._peak_mcap || t.peak_mcap || 0));
+  if (!t || typeof t !== "object") return false;
+  if (isHardBlocked(t)) return true;
+  if (t.skipped || t.skipReason || t.skip_reason) {
+    const why = String(t.skipReason || t.skip_reason || "").toLowerCase();
+    if (/dump|crash|block|rug|ath/.test(why)) return true;
+  }
+  const mint = mintOf(t);
+  const mcap = tokenMcap(t);
+  const ath = tokenAth(t);
+  const storedPeak = mint ? Number(peakMcapMap[mint]?.peak || 0) : 0;
+  // Peak = ATH + session-tracked high (never rely on current alone)
+  const peak = Math.max(ath, storedPeak, Number(t._peak_mcap || t.peak_mcap || 0));
   const rr = t.runnerRadar || {};
   if (rr.crashed || rr.stage === "crashed") return true;
-  if (mcap <= 0) return peak >= 5000;
-  // −30% from ATH/peak — hide dumps (user: still seeing dumpers)
-  if (peak >= 3000 && mcap < peak * 0.7) return true;
-  if (peak >= 2500 && mcap < peak * 0.55) return true;
+  if (t.crashed_runner || t.skip_reason === "dumped" || t.avoid_reason === "crashed_runner") return true;
+  const avoid = t.safetyReport?.avoid || t.avoid || {};
+  const flags = new Set(avoid.flags || []);
+  if (
+    flags.has("blocklist") ||
+    flags.has("flash_pump_dump") ||
+    flags.has("post_ath_crash") ||
+    flags.has("drained_curve") ||
+    flags.has("creator_dumped") ||
+    flags.has("sell_pressure")
+  ) {
+    return true;
+  }
+  if (avoid.avoid && /blocklist|dump|crash|scam|rug|relaunch|ath/i.test(String(avoid.summary || avoid.reason || ""))) {
+    return true;
+  }
+  if (mcap <= 0) return peak >= 4000;
+  // −20% from ATH/session peak — hide dumps (matches server)
+  if (peak >= 2000 && mcap < peak * 0.80) return true;
+  if (peak >= 1800 && mcap < peak * 0.6) return true;
   const pc = t.priceChange || t.market?.priceChange || {};
-  if (Number(pc.h1) <= -28 || Number(pc.m5) <= -22 || Number(pc.h6) <= -32) return true;
+  if (Number(pc.m5) <= -18 || Number(pc.h1) <= -22 || Number(pc.h6) <= -28 || Number(pc.h24) <= -40) {
+    return true;
+  }
   const deep = t.deepAnalysis || {};
   if (deep.dump?.is_dumped) return true;
-  if (deep.verdict === "SKIP" && Number(deep.dump?.dump_pct_from_ath || 0) >= 25) return true;
+  if (deep.verdict === "SKIP" && Number(deep.dump?.dump_pct_from_ath || 0) >= 20) return true;
   if (peak >= 10000 && mcap < 7000) return true;
-  if (peak >= 20000 && mcap < peak * 0.65) return true;
-  if (peak >= 5500 && peak < 15000 && mcap < 3500) return true;
+  if (peak >= 18000 && mcap < peak * 0.5) return true;
+  if (peak >= 5000 && peak < 18000 && mcap < 3200) return true;
+  if (ath >= 12000 && mcap > 0 && mcap < ath * 0.45) return true;
   return false;
 }
 
-/** Strip dumped tokens from every list before render */
+/** Strip dumped / hard-blocked tokens from every list before render */
 function purgeDumpedTokens(tokens) {
-  return (tokens || []).filter((t) => !isClientCrashedRunner(t));
-}
-
-function pinNearMigrationTokens(tokens) {
-  const now = Date.now();
+  if (!Array.isArray(tokens)) return [];
+  const out = [];
   for (const t of tokens) {
-    if (!t.tokenAddress) continue;
-    if (isClientCrashedRunner(t)) {
-      delete stickyNearMig[t.tokenAddress];
-      continue;
-    }
-    const lane = tokenLane(t);
-    const bond = Number(t.bonding_progress ?? t.migrationPath?.bonding_pct ?? 0);
-    const mcap = t.mcap_usd || 0;
-    const isNear =
-      lane === "near_migration" ||
-      lane === "migrated" ||
-      t.column === "almost_bonded" ||
-      t.column === "recently_bonded" ||
-      bond >= 40 ||
-      (mcap >= 28000 && mcap <= 78000);
-    if (!isNear && !stickyNearMig[t.tokenAddress]) continue;
-    const prev = stickyNearMig[t.tokenAddress] || {};
-    const peak = Math.max(
-      Number(prev._peak_mcap || 0),
-      Number(t.ath_mcap || 0),
-      Number(t.mcap_usd || 0),
-      Number(prev.mcap_usd || 0)
-    );
-    // Drop sticky if collapsed after climb (−45% from peak)
-    if (peak >= 5000 && mcap > 0 && mcap < peak * 0.55) {
-      delete stickyNearMig[t.tokenAddress];
-      continue;
-    }
-    if (peak >= 12000 && mcap < 6000) {
-      delete stickyNearMig[t.tokenAddress];
-      continue;
-    }
-    stickyNearMig[t.tokenAddress] = {
-      ...t,
-      _peak_mcap: peak,
-      ath_mcap: t.ath_mcap || prev.ath_mcap,
-      _clientPinnedAt: now,
-      _clientFirstSeen: prev._clientFirstSeen || now,
-      _sticky_near_mig: true,
-    };
+    trackTokenPeak(t);
+    if (isHardBlocked(t) || isClientCrashedRunner(t)) continue;
+    out.push(t);
   }
-  // Expire + purge crashes
-  for (const mint of Object.keys(stickyNearMig)) {
-    const t = stickyNearMig[mint];
-    if (now - (t._clientPinnedAt || 0) > NEAR_MIG_STICKY_MS || isClientCrashedRunner(t)) {
-      delete stickyNearMig[mint];
-    }
-  }
-  saveStickyNearMig();
+  savePeakMap();
+  return out;
 }
 
+/**
+ * Enrich live tokens with peak tracking only.
+ * Never re-inject tokens missing from the live scan (that resurrected dumps).
+ */
 function mergeStickyNearMigration(tokens) {
-  pinNearMigrationTokens(tokens);
-  const by = new Map();
-  // Sticky first (older snapshots) — skip crashes
-  for (const t of Object.values(stickyNearMig)) {
-    if (t.tokenAddress && !isClientCrashedRunner(t)) by.set(t.tokenAddress, t);
+  const live = Array.isArray(tokens) ? tokens : [];
+  const out = [];
+  for (const t of live) {
+    const mint = mintOf(t);
+    if (!mint || isHardBlocked(mint)) continue;
+    trackTokenPeak(t);
+    if (isClientCrashedRunner(t)) continue;
+    out.push(t);
   }
-  // Live scan overwrites
-  for (const t of tokens) {
-    if (!t.tokenAddress) continue;
-    if (isClientCrashedRunner(t)) {
-      by.delete(t.tokenAddress);
-      delete stickyNearMig[t.tokenAddress];
-      continue;
-    }
-    const prev = by.get(t.tokenAddress);
-    if (prev?._clientFirstSeen) {
-      t._clientFirstSeen = prev._clientFirstSeen;
-      t._sticky_near_mig = true;
-      t._peak_mcap = Math.max(Number(prev._peak_mcap || 0), Number(t.mcap_usd || 0), Number(t.ath_mcap || 0));
-      t._pinned_sec = Math.round((Date.now() - prev._clientFirstSeen) / 1000);
-    }
-    by.set(t.tokenAddress, t);
-  }
-  // Refresh pin timestamps for live near-mig
-  pinNearMigrationTokens([...by.values()]);
-  saveStickyNearMig();
-  return [...by.values()].filter((t) => !isClientCrashedRunner(t));
+  savePeakMap();
+  return out;
 }
 
 function initChains() {
@@ -1370,6 +1419,7 @@ function renderRunnerAlertBar(alerts) {
   if (!bar || !list) return;
   // Never show crashed / dumped runners (e.g. CHOCI ATH→dust)
   lastRunnerAlerts = (alerts || []).filter((a) => {
+    if (isHardBlocked(a)) return false;
     if ((a.runnerRadar || {}).crashed || (a.runnerRadar || {}).stage === "crashed") return false;
     return !isClientCrashedRunner(a);
   });
@@ -1565,9 +1615,9 @@ async function loadFeedPreview(limit, maxAge) {
       preview = [...preview, ...flattenTrenchesData(data)];
     }
     const seen = new Set();
-    preview = filterDisplayMcap(preview).filter((t) => {
-      const k = t.tokenAddress;
-      if (!k || seen.has(k)) return false;
+    preview = purgeDumpedTokens(filterDisplayMcap(preview)).filter((t) => {
+      const k = mintOf(t);
+      if (!k || seen.has(k) || isHardBlocked(k)) return false;
       seen.add(k);
       return true;
     });
@@ -1581,7 +1631,7 @@ async function loadFeedPreview(limit, maxAge) {
       return (lr[la] ?? 4) - (lr[lb] ?? 4) || bb - ba || (b.mcap_usd || 0) - (a.mcap_usd || 0);
     });
     if (preview.length) {
-      lastTokens = preview;
+      lastTokens = purgeDumpedTokens(preview);
       renderGrid(lastTokens);
       const nearN = preview.filter((t) => tokenLane(t) === "near_migration").length;
       setStatus(

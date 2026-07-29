@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import httpx
-
 from config import REQUEST_TIMEOUT, USER_AGENT
+from services.http_client import get as http_get
 
 BASE_URL = "https://api.dexscreener.com"
 
@@ -17,12 +16,13 @@ class DexScreenerClient:
         self._headers = {"User-Agent": USER_AGENT}
 
     async def _get(self, path: str) -> Any:
-        async with httpx.AsyncClient(
-            timeout=REQUEST_TIMEOUT, headers=self._headers
-        ) as client:
-            resp = await client.get(f"{BASE_URL}{path}")
-            resp.raise_for_status()
-            return resp.json()
+        resp = await http_get(
+            f"{BASE_URL}{path}",
+            headers=self._headers,
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     async def get_latest_profiles(self) -> list[dict]:
         data = await self._get("/token-profiles/latest/v1")

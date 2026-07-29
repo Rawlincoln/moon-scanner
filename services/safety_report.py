@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from services.avoid_filters import analyze_avoid_flags
-from services.trench_analyzer import analyze_community, analyze_snipers
+from services.bundle_sniper import (
+    analyze_bundle_and_snipers,
+    to_legacy_bundle,
+    to_legacy_snipers,
+)
+from services.trench_analyzer import analyze_community
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
@@ -13,52 +18,6 @@ def _safe_float(val: Any, default: float = 0.0) -> float:
         return float(val) if val is not None else default
     except (TypeError, ValueError):
         return default
-
-
-def _check_bundle_risks(safety: dict) -> dict[str, Any]:
-    """Detect bundled launches via RugCheck insider graph + risk names."""
-    risks = safety.get("risks") or []
-    bundle_flags: list[str] = []
-    bundled = False
-
-    for risk in risks:
-        name = (risk.get("name") or "").lower()
-        desc = (risk.get("description") or "").lower()
-        level = risk.get("level", "")
-        text = f"{name} {desc}"
-        if any(
-            kw in text
-            for kw in (
-                "bundle", "bundled", "insider", "sniper",
-                "single holder", "high ownership", "concentrated",
-            )
-        ):
-            if level in ("danger", "critical", "warn"):
-                bundle_flags.append(risk.get("name") or desc[:60])
-                if level in ("danger", "critical"):
-                    bundled = True
-
-    if safety.get("insider_detected"):
-        bundled = True
-        bundle_flags.append("RugCheck insider graph detected")
-    if int(safety.get("insider_networks") or 0) > 0:
-        bundled = True
-        bundle_flags.append(
-            f"{safety['insider_networks']} linked insider network(s)"
-        )
-    for h in safety.get("insider_holders") or []:
-        bundled = True
-        bundle_flags.append(
-            f"Insider wallet holds {h.get('pct', 0):.1f}%"
-        )
-
-    return {
-        "bundled": bundled,
-        "flags": bundle_flags[:6],
-        "risk_level": (
-            "critical" if bundled else "low" if not bundle_flags else "medium"
-        ),
-    }
 
 
 def build_safety_report(
@@ -70,9 +29,13 @@ def build_safety_report(
 ) -> dict[str, Any]:
     """Human-readable safety breakdown for trench traders."""
     pump = pair.get("pumpfun") or {}
-    snipers = analyze_snipers(safety, pump)
+    bs = analyze_bundle_and_snipers(safety, pump, pair)
+    snipers = to_legacy_snipers(bs)
+    snipers["summary"] = bs.get("summary")
+    snipers["overall"] = bs.get("overall")
+    snipers["hard_reject"] = bs.get("hard_reject")
+    bundle = to_legacy_bundle(bs)
     community = analyze_community(pump, pair)
-    bundle = _check_bundle_risks(safety)
     trench = trench or {}
     sm = smart_money or {}
 
@@ -165,15 +128,29 @@ def build_safety_report(
         })
     elif consensus.get("verdict") == "FAIL":
         tier = "UNSAFE"
-    elif bundle["bundled"] or safety.get("is_honeypot") or safety.get("rugged"):
+    elif (
+        bundle["bundled"]
+        or safety.get("is_honeypot")
+        or safety.get("rugged")
+        or bs.get("hard_reject")
+    ):
         tier = "UNSAFE"
+        if bs.get("hard_reject"):
+            blockers.append({
+                "name": "bundle_sniper",
+                "detail": bs.get("summary") or "Bundle/sniper hard reject",
+            })
     elif not safety.get("passed") or snipers["risk_level"] == "critical":
         tier = "HIGH_RISK"
-    elif snipers["risk_level"] == "high":
+    elif snipers["risk_level"] == "high" or bundle.get("risk_level") == "high":
         tier = "CAUTION"
         blockers.append({
             "name": "whale_sniper",
-            "detail": f"Largest wallet {snipers['max_wallet_pct']:.1f}% — likely sniper",
+            "detail": (
+                f"Largest wallet {snipers['max_wallet_pct']:.1f}% — sniper risk"
+                if snipers["risk_level"] == "high"
+                else (bundle.get("flags") or ["Bundle risk"])[0]
+            ),
         })
     elif blockers:
         tier = "CAUTION"
@@ -190,6 +167,7 @@ def build_safety_report(
         "checks": checks,
         "bundle": bundle,
         "snipers": snipers,
+        "bundleSniper": bs,
         "community": community,
         "dev": {
             "creator": safety.get("creator"),
