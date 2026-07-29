@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.avoid_filters import BLOCKED_MINTS, is_hard_avoid
+from services.avoid_filters import BLOCKED_MINTS, analyze_avoid_flags, is_hard_avoid
 from services.bundle_sniper import analyze_bundle_and_snipers
 from services.moon_picks import extract_ath_mcap, extract_mcap_usd
 from services.runner_radar import is_crashed_runner
