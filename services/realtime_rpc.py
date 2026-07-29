@@ -37,6 +37,22 @@ def http_url() -> str:
     return SOLANA_RPC_HTTP
 
 
+def redact_rpc_url(url: str | None) -> str:
+    """Safe public display of RPC URL — never include api-key query params."""
+    if not url:
+        return ""
+    try:
+        p = urlparse(url)
+        host = p.hostname or ""
+        scheme = p.scheme or "https"
+        if not host:
+            return "(configured)"
+        # Drop path/query that may contain secrets
+        return f"{scheme}://{host}"
+    except Exception:
+        return "(configured)"
+
+
 def is_paid_wss(url: str | None = None) -> bool:
     """Heuristic: non-public Solana WSS (Helius / QuickNode / Triton / key in URL)."""
     u = (url or wss_url()).lower()

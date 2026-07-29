@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from app.security import validate_token_address
 from config import SUPPORTED_CHAINS
 from services.analyze_token import analyze_token
 from services.safety_report import build_safety_report
@@ -13,8 +14,8 @@ router = APIRouter(tags=["analyze"])
 
 
 class AnalyzeRequest(BaseModel):
-    chain_id: str
-    token_address: str
+    chain_id: str = Field(..., min_length=3, max_length=32)
+    token_address: str = Field(..., min_length=8, max_length=64)
 
 
 @router.get("/api/checkers/{chain_id}/{token_address}")
@@ -23,10 +24,11 @@ async def get_checker_report(chain_id: str, token_address: str):
     chain = chain_id.lower().strip()
     if chain not in SUPPORTED_CHAINS:
         raise HTTPException(400, f"Unsupported chain: {chain}")
-    result = await analyze_token(chain, token_address)
+    addr = validate_token_address(chain, token_address)
+    result = await analyze_token(chain, addr)
     return {
         "chainId": chain,
-        "tokenAddress": token_address,
+        "tokenAddress": addr,
         "checkerHub": result.get("checkerHub"),
         "safety": result.get("safety"),
         "safetyReport": build_safety_report(
@@ -53,14 +55,16 @@ async def get_checker_report(chain_id: str, token_address: str):
 @router.post("/api/analyze")
 async def analyze_token_post(req: AnalyzeRequest):
     chain = req.chain_id.lower().strip()
-    addr = req.token_address.strip()
     if chain not in SUPPORTED_CHAINS:
         raise HTTPException(400, f"Unsupported chain: {chain}")
+    addr = validate_token_address(chain, req.token_address)
     return await analyze_token(chain, addr)
 
 
 @router.get("/api/analyze/{chain_id}/{token_address}")
 async def analyze_token_get(chain_id: str, token_address: str):
-    if chain_id not in SUPPORTED_CHAINS:
-        raise HTTPException(400, f"Unsupported chain: {chain_id}")
-    return await analyze_token(chain_id, token_address)
+    chain = chain_id.lower().strip()
+    if chain not in SUPPORTED_CHAINS:
+        raise HTTPException(400, f"Unsupported chain: {chain}")
+    addr = validate_token_address(chain, token_address)
+    return await analyze_token(chain, addr)

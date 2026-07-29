@@ -8,6 +8,7 @@ from services.realtime_rpc import (
     is_paid_wss,
     mint_from_account_keys,
     mint_from_log_lines,
+    redact_rpc_url,
     resolve_ws_mode,
 )
 
@@ -67,6 +68,15 @@ def test_extract_mint_from_tx_notification_json_parsed():
 def test_is_paid_wss_helius_host():
     assert is_paid_wss("wss://mainnet.helius-rpc.com/?api-key=abc")
     assert not is_paid_wss("wss://api.mainnet-beta.solana.com")
+
+
+def test_redact_rpc_url_strips_api_key():
+    raw = "wss://mainnet.helius-rpc.com/?api-key=secretKEY1234567890abcdef"
+    out = redact_rpc_url(raw)
+    assert "secretKEY" not in out
+    assert "api-key" not in out
+    assert "helius-rpc.com" in out
+
 
 
 def test_resolve_ws_mode_auto_public(monkeypatch):

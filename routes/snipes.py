@@ -23,7 +23,10 @@ async def snipes_scan(
     max_age_minutes: float = Query(60, ge=5, le=MAX_AGE_MINUTES_CAP),
     force: bool = Query(False),
 ):
-    """Safe early entries sized for ~2× take-profit (capital filters)."""
+    """Safe early entries sized for ~2× take-profit (capital filters).
+
+    ``force`` bypasses short cache; abuse is limited by RateLimitMiddleware.
+    """
     return await scan_safe_snipes(
         limit=limit, max_age_minutes=max_age_minutes, force=force
     )

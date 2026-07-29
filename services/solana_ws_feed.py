@@ -32,6 +32,7 @@ from services.realtime_rpc import (
     is_paid_wss,
     mint_from_account_keys,
     mint_from_log_lines,
+    redact_rpc_url,
     resolve_ws_mode,
     wss_url,
 )
@@ -70,8 +71,8 @@ class SolanaLogsFeed:
         self._task = asyncio.create_task(self._loop(), name="solana_ws")
         realtime_bus.feed_status["solana_ws"] = {
             "running": True,
-            "wss": wss_url()[:72],
-            "http": http_url()[:72],
+            "wss": redact_rpc_url(wss_url()),
+            "http": redact_rpc_url(http_url()),
             "program": PUMPFUN_PROGRAM_ID,
             "mode": self._mode,
             "paid": is_paid_wss(),
@@ -158,7 +159,7 @@ class SolanaLogsFeed:
                     "connected": False,
                     "mode": self._mode,
                     "detail": f"reconnect in {backoff:.0f}s: {exc}",
-                    "wss": wss[:72],
+                    "wss": redact_rpc_url(wss),
                 }
                 logger.warning("Solana WS feed error: %s", exc)
                 try:
@@ -171,8 +172,8 @@ class SolanaLogsFeed:
         realtime_bus.feed_status["solana_ws"] = {
             "running": True,
             "connected": True,
-            "wss": wss[:72],
-            "http": http_url()[:72],
+            "wss": redact_rpc_url(wss),
+            "http": redact_rpc_url(http_url()),
             "program": PUMPFUN_PROGRAM_ID,
             "mode": mode,
             "paid": is_paid_wss(wss),

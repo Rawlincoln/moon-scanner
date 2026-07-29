@@ -106,7 +106,11 @@ def moon_card_from_coin(coin: dict, *, source: str = "pump.fun") -> dict[str, An
         "padre_url": f"{PADRE_TRADE_URL}/trade/solana/{mint}",
         "source": source,
     }
-    if reject_reason(card):
+    # Structural only here — full reject_reason (narrative/edge) after enrich
+    # so near-misses and multi-source discovery can surface filtered charts.
+    if avoid.get("hard") or avoid.get("hard_avoid"):
+        return None
+    if mint in BLOCKED_MINTS:
         return None
     return card
 
@@ -209,13 +213,66 @@ def rough_priority(card: dict[str, Any]) -> float:
     return ret * 50 + min(bond, 80) * 0.4 + min(replies, 40) * 0.3 + min(mcap / 1000, 40)
 
 
+async def _discover_moon_coins() -> list[dict]:
+    """Merge pump.fun sorts so mid-band climbers are not missed."""
+    sorts = ("created_timestamp", "last_trade_timestamp", "market_cap")
+    batches = await asyncio.gather(
+        *[_padre_feed._fetch_pump_sorted(s, 80) for s in sorts],
+        return_exceptions=True,
+    )
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for batch in batches:
+        if isinstance(batch, Exception) or not isinstance(batch, list):
+            continue
+        for coin in batch:
+            mint = (coin.get("mint") or "").strip()
+            if not mint or mint in seen:
+                continue
+            seen.add(mint)
+            merged.append(coin)
+    if len(merged) < 40:
+        try:
+            latest = await _pump.get_latest_coins(limit=80)
+        except Exception:
+            latest = []
+        for coin in latest or []:
+            mint = (coin.get("mint") or "").strip()
+            if not mint or mint in seen:
+                continue
+            seen.add(mint)
+            merged.append(coin)
+    return merged
+
+
+def _short_moon_reject(reason: str | None) -> str:
+    if not reason:
+        return "other"
+    r = reason.lower()
+    if "narrative" in r or "edge" in r or "influencer" in r or "name-jack" in r:
+        return "no_edge"
+    if "dump" in r or "faded" in r or "crash" in r:
+        return "dumped"
+    if "too small" in r or "too large" in r:
+        return "mcap"
+    if "bundl" in r or "sniper" in r:
+        return "book"
+    if "ticker" in r or "junk" in r:
+        return "ticker"
+    if "age" in r or "fresh" in r or "young" in r:
+        return "age"
+    if "honeypot" in r or "rugged" in r or "avoid" in r or "blocklist" in r:
+        return "safety"
+    return "other"
+
+
 async def scan_moon_tokens(
     *,
     limit: int = 16,
     max_age_minutes: float = 60.0,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Moon-only feed: pump.fun discovery + DexScreener accuracy pass."""
+    """Moon-only feed: multi-source discovery + DexScreener accuracy pass."""
     now = time.time()
     if (
         not force
@@ -238,15 +295,7 @@ async def scan_moon_tokens(
             return cached
 
         age_cap = max(float(max_age_minutes), 90.0)
-        try:
-            coins = await _padre_feed._fetch_pump_sorted("last_trade_timestamp", 100)
-        except Exception:
-            coins = []
-        if not coins:
-            try:
-                coins = await _pump.get_latest_coins(limit=80)
-            except Exception:
-                coins = []
+        coins = await _discover_moon_coins()
         if not isinstance(coins, list):
             coins = []
 
@@ -263,6 +312,7 @@ async def scan_moon_tokens(
         cards: list[dict] = []
         scanned = 0
         rejected = 0
+        pre_reject: dict[str, int] = {}
         for coin in coins:
             mint = (coin.get("mint") or "").strip()
             if not mint or mint in seen:
@@ -272,14 +322,18 @@ async def scan_moon_tokens(
             age = PumpFunClient.coin_age_minutes(coin)
             if age > age_cap or age < 0.35:
                 rejected += 1
+                pre_reject["age"] = pre_reject.get("age", 0) + 1
                 continue
             mcap = float(coin.get("usd_market_cap") or 0)
             if mcap < 3_000 or mcap > MIGRATION_MCAP_MAX_USD:
                 rejected += 1
+                pre_reject["mcap"] = pre_reject.get("mcap", 0) + 1
                 continue
             card = moon_card_from_coin(coin)
             if not card:
                 rejected += 1
+                pre_reject["card"] = pre_reject.get("card", 0) + 1
+                # Soft near-miss from raw coin for empty-state UI
                 continue
             if mint in rt_mints:
                 card["realtime"] = True
@@ -290,7 +344,7 @@ async def scan_moon_tokens(
             cards.append(card)
 
         cards.sort(key=rough_priority, reverse=True)
-        enrich_n = min(len(cards), max(limit * 2, 12))
+        enrich_n = min(len(cards), max(limit * 2, 16))
         to_enrich = cards[:enrich_n]
         rest = cards[enrich_n:]
 
@@ -302,9 +356,30 @@ async def scan_moon_tokens(
 
         enriched = await asyncio.gather(*[_one(c) for c in to_enrich])
         accurate: list[dict] = []
+        near_misses: list[dict] = []
+        post_reject: dict[str, int] = {}
+        enriched_mints = {
+            (c.get("tokenAddress") or c.get("mint") or "") for c in enriched if c
+        }
         for c in list(enriched) + rest:
-            if reject_reason(c):
+            reason = reject_reason(c)
+            if reason:
                 rejected += 1
+                key = _short_moon_reject(reason)
+                post_reject[key] = post_reject.get(key, 0) + 1
+                mint = (c.get("tokenAddress") or c.get("mint") or "").strip()
+                if len(near_misses) < 8 and mint in enriched_mints:
+                    near_misses.append(
+                        {
+                            "symbol": c.get("symbol") or "?",
+                            "name": c.get("name") or "",
+                            "tokenAddress": mint,
+                            "mcap_usd": c.get("mcap_usd"),
+                            "age_minutes": c.get("age_minutes"),
+                            "reject": reason,
+                            "reject_key": key,
+                        }
+                    )
                 continue
             accurate.append(c)
 
@@ -372,6 +447,7 @@ async def scan_moon_tokens(
             "scanned_at": time.time(),
             "cached": False,
             "tokens": display,
+            "near_misses": near_misses,
             "counts": {
                 "shown": len(display),
                 "moon": sum(1 for t in display if t.get("moon_label") == "MOON"),
@@ -383,9 +459,14 @@ async def scan_moon_tokens(
                     or (t.get("socialSignals") or {}).get("influencer_tweet")
                 ),
                 "candidates_raw": scanned,
+                "band_hits": len(cards),
                 "enriched": enrich_n,
                 "analyzed": scanned,
                 "rejected": rejected,
+            },
+            "reject_breakdown": {
+                **{f"pre_{k}": v for k, v in pre_reject.items()},
+                **{f"post_{k}": v for k, v in post_reject.items()},
             },
             "outcomes": outcome_sum,
             "gates": gates,

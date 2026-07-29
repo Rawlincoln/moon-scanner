@@ -1,4 +1,5 @@
 # Same structure as soccer-under-strategy / pro-trader (proven working on Rawlincoln account)
+# Plan free by default; set plan: starter for always-on. Add HELIUS_API_KEY + ADMIN_API_KEY in dashboard.
 services:
   - type: web
     name: moon-scanner
@@ -12,3 +13,5 @@ services:
         value: render
       - key: PYTHON_VERSION
         value: "3.12.0"
+      # Set real values in Render dashboard (do not commit secrets):
+      # HELIUS_API_KEY, ADMIN_API_KEY, CORS_ORIGINS

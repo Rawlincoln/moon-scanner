@@ -285,7 +285,7 @@ class YellowstoneFeed:
 
 
 def status_payload() -> dict[str, Any]:
-    from services.realtime_rpc import is_paid_wss, resolve_ws_mode, wss_url
+    from services.realtime_rpc import is_paid_wss, redact_rpc_url, resolve_ws_mode, wss_url
     from config import HELIUS_API_KEY, SOLANA_WS_MODE
 
     return {
@@ -298,7 +298,7 @@ def status_payload() -> dict[str, Any]:
             "mode": resolve_ws_mode(),
             "mode_env": SOLANA_WS_MODE,
             "paid": is_paid_wss(),
-            "wss_preview": wss_url()[:48] + ("…" if len(wss_url()) > 48 else ""),
+            "wss_preview": redact_rpc_url(wss_url()),
             "helius_key_set": bool(HELIUS_API_KEY),
         },
         "bus": realtime_bus.stats(),

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.deps import learning, learning_memory
 from app.paths import BASE_DIR
+from app.security import require_admin, validate_token_address
 from services.analyze_token import analyze_token
 
 router = APIRouter(tags=["learning"])
@@ -37,13 +38,19 @@ async def learning_stats():
             "catalog_size": len(MEGA_SEEDS),
             "in_db": mega_recent,
         },
-        "db": str(BASE_DIR / "data" / "learning.db"),
+        # Path only — no secrets
+        "db": "data/learning.db",
+        "base_dir": str(BASE_DIR.name),
     }
 
 
 @router.post("/api/learning/reseed")
-async def learning_reseed(force: bool = Query(False)):
-    """Re-apply historical mega + scam seeds into the learning DB."""
+async def learning_reseed(
+    request: Request,
+    force: bool = Query(False),
+    _admin: None = Depends(require_admin),
+):
+    """Re-apply historical mega + scam seeds into the learning DB (admin)."""
     n = learning.seed_known_examples(force=force)
     return {
         "ok": True,
@@ -54,8 +61,11 @@ async def learning_reseed(force: bool = Query(False)):
 
 
 @router.post("/api/learning/rebuild")
-async def learning_rebuild():
-    """Recompute feature→outcome table from all finalized tokens (accuracy refresh)."""
+async def learning_rebuild(
+    request: Request,
+    _admin: None = Depends(require_admin),
+):
+    """Recompute feature→outcome table from all finalized tokens (admin)."""
     rebuilt = learning_memory.rebuild_feature_stats()
     learning_memory.set_meta("learn_model_version", "learn_lr_v2_2026_07")
     return {
@@ -70,9 +80,10 @@ async def learning_rebuild():
 @router.get("/api/learning/predict/{mint}")
 async def learning_predict(mint: str):
     """Full analysis + learned trade plan for one mint."""
-    result = await analyze_token("solana", mint.strip())
+    addr = validate_token_address("solana", mint)
+    result = await analyze_token("solana", addr)
     return {
-        "mint": mint,
+        "mint": addr,
         "tradePlan": result.get("tradePlan"),
         "alphaSetup": result.get("alphaSetup"),
         "investSignal": result.get("investSignal"),
@@ -81,5 +92,5 @@ async def learning_predict(mint: str):
             "passed": (result.get("safety") or {}).get("passed"),
             "avoid": (result.get("safety") or {}).get("avoid"),
         },
-        "history": learning_memory.get_token(mint.strip()),
+        "history": learning_memory.get_token(addr),
     }

@@ -447,8 +447,11 @@ class LearningMemory:
             finally:
                 conn.close()
 
-    def get_active_mints(self, max_age_sec: float = 6 * 3600) -> list[str]:
+    def get_active_mints(
+        self, max_age_sec: float = 6 * 3600, limit: int = 140
+    ) -> list[str]:
         cutoff = time.time() - max_age_sec
+        lim = max(5, min(int(limit), 200))
         with self._lock:
             conn = self._conn()
             try:
@@ -456,9 +459,9 @@ class LearningMemory:
                     """
                     SELECT mint FROM tokens
                     WHERE active=1 AND first_seen >= ?
-                    ORDER BY last_seen DESC LIMIT 140
+                    ORDER BY last_seen DESC LIMIT ?
                     """,
-                    (cutoff,),
+                    (cutoff, lim),
                 ).fetchall()
                 return [r["mint"] for r in rows]
             finally:

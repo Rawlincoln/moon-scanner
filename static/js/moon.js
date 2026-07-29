@@ -211,13 +211,35 @@ function cardHtml(t) {
   `;
 }
 
-function render(tokens, counts = {}) {
+function nearMissHtml(misses = []) {
+  if (!misses.length) return "";
+  const rows = misses
+    .slice(0, 6)
+    .map((m) => {
+      const mcap = m.mcap_usd != null ? fmtUsd(m.mcap_usd) : "—";
+      const age =
+        m.age_minutes != null ? `${Number(m.age_minutes).toFixed(0)}m` : "—";
+      return `<li><strong>${escapeHtml(m.symbol || "?")}</strong>
+        <span class="muted">${mcap} · ${age}</span>
+        — ${escapeHtml(m.reject || m.reject_key || "filtered")}</li>`;
+    })
+    .join("");
+  return `<div class="near-miss">
+    <strong>Checked but filtered (not shown)</strong>
+    <ul>${rows}</ul>
+  </div>`;
+}
+
+function render(tokens, counts = {}, nearMisses = []) {
   const list = $("#list");
   if (!list) return;
   if (!tokens.length) {
+    const band = counts.band_hits != null ? counts.band_hits : "—";
     list.innerHTML = `<div class="empty">
       <strong>No narrative-backed climbers right now</strong>
       <p>We only show near-ATH tokens with real edge: influencer tweets (Elon/CZ/Trump…), trending tickers, or strong community. Random green charts are hidden — they almost always dump.</p>
+      <p class="muted">Scanned ${counts.candidates_raw ?? "—"} · band hits ${band} · rejected ${counts.rejected ?? "—"}</p>
+      ${nearMissHtml(nearMisses)}
     </div>`;
   } else {
     list.innerHTML = tokens.map(cardHtml).join("");
@@ -267,7 +289,7 @@ async function scan(force = false) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     lastTokens = data.tokens || [];
-    render(lastTokens, data.counts || {});
+    render(lastTokens, data.counts || {}, data.near_misses || []);
     const c = data.counts || {};
     const t = data.scanned_at
       ? new Date(data.scanned_at * 1000).toLocaleTimeString()
@@ -300,8 +322,9 @@ async function scan(force = false) {
       if (gates.adapted) ocNote += " adaptive";
     }
     setStatus(
-      `${c.shown ?? lastTokens.length} candidates · ${c.rejected ?? 0} rejected · ` +
-        `${c.enriched ?? "—"} dex-checked${data.cached ? " · cached" : ""} · ${data.mode || "moon"}${rtNote}${ocNote} · ${t}`
+      `${c.shown ?? lastTokens.length} candidates · band ${c.band_hits ?? "—"} · ` +
+        `${c.rejected ?? 0} rejected · ${c.enriched ?? "—"} dex-checked` +
+        `${data.cached ? " · cached" : ""} · ${data.mode || "moon"}${rtNote}${ocNote} · ${t}`
     );
     if ($("#rule") && data.rule) $("#rule").textContent = data.rule;
     if ($("#outcomeStats")) {

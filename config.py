@@ -165,6 +165,20 @@ YELLOWSTONE_ONLY = os.getenv("YELLOWSTONE_ONLY", "").strip().lower() in (
 )
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "").strip()
 
+# Admin / security
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()
+# Comma-separated origins; empty = safe defaults (local hosts or known Render URLs)
+_cors_raw = os.getenv("CORS_ORIGINS", "").strip()
+CORS_ORIGINS_LIST: list[str] = (
+    [o.strip() for o in _cors_raw.split(",") if o.strip()] if _cors_raw else []
+)
+# Expensive API routes (moon/snipes/analyze) — per IP per minute
+RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "45") or "45")
+RATE_LIMIT_BURST = int(os.getenv("RATE_LIMIT_BURST", "12") or "12")
+# Learning poll cap (unpaid RPC / free host should stay low)
+LEARNING_ACTIVE_CAP_PAID = int(os.getenv("LEARNING_ACTIVE_CAP_PAID", "80") or "80")
+LEARNING_ACTIVE_CAP_PUBLIC = int(os.getenv("LEARNING_ACTIVE_CAP_PUBLIC", "40") or "40")
+
 
 def _solana_rpc_http() -> str:
     explicit = (

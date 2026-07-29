@@ -258,7 +258,14 @@ class LearningEngine:
 
     async def poll_active(self) -> int:
         """Refresh active tokens from pump.fun; detect dump/crash; finalize."""
-        mints = self.memory.get_active_mints()
+        from config import (
+            LEARNING_ACTIVE_CAP_PAID,
+            LEARNING_ACTIVE_CAP_PUBLIC,
+            rpc_is_paid,
+        )
+
+        cap = LEARNING_ACTIVE_CAP_PAID if rpc_is_paid() else LEARNING_ACTIVE_CAP_PUBLIC
+        mints = self.memory.get_active_mints(limit=cap)
         if not mints:
             return 0
         updated = 0

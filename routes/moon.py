@@ -16,7 +16,10 @@ async def moon_scan(
     max_age_minutes: float = Query(120, ge=5, le=MAX_AGE_MINUTES_CAP),
     force: bool = Query(False),
 ):
-    """Primary feed: high-accuracy moon candidates only."""
+    """Primary feed: high-accuracy moon candidates only.
+
+    ``force`` bypasses short cache; abuse is limited by RateLimitMiddleware.
+    """
     return await scan_moon_tokens(
         limit=limit, max_age_minutes=max_age_minutes, force=force
     )

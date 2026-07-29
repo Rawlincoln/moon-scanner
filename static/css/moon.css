@@ -421,6 +421,24 @@ select {
   opacity: 0.7;
 }
 
+.empty .muted { opacity: 0.75; font-size: 0.9rem; }
+.near-miss {
+  margin-top: 14px;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(124, 92, 255, 0.06);
+}
+.near-miss ul {
+  margin: 8px 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+.near-miss li { margin: 4px 0; }
+.near-miss .muted { margin-left: 4px; }
+
 @media (max-width: 700px) {
   .card { grid-template-columns: auto 1fr; }
   .side {
