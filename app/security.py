@@ -8,8 +8,9 @@ import time
 from collections import defaultdict, deque
 from threading import Lock
 from typing import Callable
+from urllib.parse import parse_qs, urlparse
 
-from fastapi import Header, HTTPException, Query, Request
+from fastapi import Header, HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
@@ -17,8 +18,11 @@ from config import (
     ADMIN_API_KEY,
     CORS_ORIGINS_LIST,
     IS_PRODUCTION,
+    RATE_LIMIT_ANALYZE_PER_MIN,
     RATE_LIMIT_BURST,
+    RATE_LIMIT_FORCE_COST,
     RATE_LIMIT_PER_MIN,
+    TRUST_X_FORWARDED_FOR,
 )
 
 # Solana base58 mint (no 0,O,I,l) — 32–44 chars
@@ -37,6 +41,12 @@ _EXPENSIVE_PREFIXES = (
     "/api/runner-radar",
     "/api/learning/predict",
     "/api/pumpfun",
+)
+
+_ANALYZE_PREFIXES = (
+    "/api/analyze",
+    "/api/checkers",
+    "/api/learning/predict",
 )
 
 
@@ -118,56 +128,120 @@ def require_admin(
         )
 
 
+def client_ip(request: Request) -> str:
+    """Resolve client IP without trusting spoofable leftmost XFF.
+
+    - Local / TRUST_X_FORWARDED_FOR=false: use TCP peer only.
+    - Production with trusted reverse proxy: use **rightmost** XFF hop
+      (the IP the proxy saw / appended), not the client-supplied first hop.
+    """
+    peer = ""
+    if request.client:
+        peer = (request.client.host or "").strip()
+    if not TRUST_X_FORWARDED_FOR:
+        return peer or "unknown"
+    xff = (request.headers.get("x-forwarded-for") or "").strip()
+    if not xff:
+        return peer or "unknown"
+    parts = [p.strip() for p in xff.split(",") if p.strip()]
+    if not parts:
+        return peer or "unknown"
+    # Rightmost = last proxy-appended client (not attacker-controlled first hop)
+    return parts[-1]
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Simple per-IP sliding window for expensive API routes."""
+    """Per-IP sliding windows for expensive API routes.
+
+    - 60s window capped at RATE_LIMIT_PER_MIN (scan) or ANALYZE limit
+    - 10s burst window capped at RATE_LIMIT_BURST
+    - force=true costs RATE_LIMIT_FORCE_COST tokens
+    """
 
     def __init__(self, app, *, per_min: int | None = None, burst: int | None = None):
         super().__init__(app)
         self.per_min = int(per_min if per_min is not None else RATE_LIMIT_PER_MIN)
         self.burst = int(burst if burst is not None else RATE_LIMIT_BURST)
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
+        self.analyze_per_min = int(RATE_LIMIT_ANALYZE_PER_MIN)
+        self.force_cost = max(1, int(RATE_LIMIT_FORCE_COST))
+        self._hits_min: dict[str, deque[float]] = defaultdict(deque)
+        self._hits_burst: dict[str, deque[float]] = defaultdict(deque)
         self._lock = Lock()
-
-    def _client_ip(self, request: Request) -> str:
-        xff = request.headers.get("x-forwarded-for") or ""
-        if xff:
-            return xff.split(",")[0].strip() or "unknown"
-        if request.client:
-            return request.client.host or "unknown"
-        return "unknown"
 
     def _is_expensive(self, path: str) -> bool:
         return any(path == p or path.startswith(p + "/") for p in _EXPENSIVE_PREFIXES)
+
+    def _is_analyze(self, path: str) -> bool:
+        return any(path == p or path.startswith(p + "/") for p in _ANALYZE_PREFIXES)
+
+    def _request_cost(self, request: Request) -> int:
+        q = parse_qs(urlparse(str(request.url)).query)
+        force_vals = [v.lower() for v in q.get("force", [])]
+        if any(v in ("1", "true", "yes") for v in force_vals):
+            return self.force_cost
+        return 1
+
+    def _limit_for_path(self, path: str) -> int:
+        if self._is_analyze(path):
+            return self.analyze_per_min
+        return self.per_min
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         path = request.url.path or ""
         if not self._is_expensive(path):
             return await call_next(request)
 
-        # Admin key bypasses rate limit (ops / force scans)
         expected = (ADMIN_API_KEY or "").strip()
         provided = (request.headers.get("X-Admin-Key") or "").strip()
         if expected and safe_secret_eq(provided, expected):
             return await call_next(request)
 
-        ip = self._client_ip(request)
+        ip = client_ip(request)
         now = time.time()
-        window = 60.0
+        cost = self._request_cost(request)
+        min_limit = self._limit_for_path(path)
+        burst_limit = self.burst
+
         with self._lock:
-            q = self._hits[ip]
-            while q and now - q[0] > window:
-                q.popleft()
-            # Allow short burst above per_min for snappy UI double-clicks
-            limit = max(self.per_min, self.burst)
-            if len(q) >= limit:
+            qmin = self._hits_min[ip]
+            qburst = self._hits_burst[ip]
+            while qmin and now - qmin[0] > 60.0:
+                qmin.popleft()
+            while qburst and now - qburst[0] > 10.0:
+                qburst.popleft()
+            if len(qburst) + cost > burst_limit:
                 return JSONResponse(
                     status_code=429,
                     content={
                         "ok": False,
                         "error": "rate_limited",
-                        "detail": f"Too many scan/analyze requests — max ~{self.per_min}/min",
+                        "detail": f"Burst limit — max ~{burst_limit} expensive calls / 10s",
                     },
-                    headers={"Retry-After": "15"},
+                    headers={"Retry-After": "10"},
                 )
-            q.append(now)
+            if len(qmin) + cost > min_limit:
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "ok": False,
+                        "error": "rate_limited",
+                        "detail": (
+                            f"Too many requests — max ~{min_limit}/min"
+                            + (
+                                " for analyze"
+                                if self._is_analyze(path)
+                                else " for scans"
+                            )
+                            + (
+                                f" (force costs {self.force_cost}x)"
+                                if cost > 1
+                                else ""
+                            )
+                        ),
+                    },
+                    headers={"Retry-After": "20"},
+                )
+            for _ in range(cost):
+                qmin.append(now)
+                qburst.append(now)
         return await call_next(request)

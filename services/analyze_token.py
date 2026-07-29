@@ -47,12 +47,22 @@ _padre = PadreClient()
 _evm = EVMAnalyzer()
 _sol = SolanaAnalyzer()
 _learning: Any = None
+_analyze_sem: asyncio.Semaphore | None = None
 
 
 def bind_learning(engine: Any) -> None:
     """Wire LearningEngine from app startup (same DB as main)."""
     global _learning
     _learning = engine
+
+
+def _get_analyze_sem() -> asyncio.Semaphore:
+    global _analyze_sem
+    if _analyze_sem is None:
+        from config import ANALYZE_CONCURRENCY
+
+        _analyze_sem = asyncio.Semaphore(max(1, int(ANALYZE_CONCURRENCY)))
+    return _analyze_sem
 
 
 def format_pair_summary(pair: dict) -> dict:
@@ -164,6 +174,20 @@ def token_mcap(pair: dict, candidate: dict | None = None) -> float:
 
 
 async def analyze_token(
+    chain_id: str,
+    token_address: str,
+    candidate: dict | None = None,
+    *,
+    fast: bool = False,
+) -> dict:
+    """Full token analysis — global concurrency limited (anti-amp)."""
+    async with _get_analyze_sem():
+        return await _analyze_token_body(
+            chain_id, token_address, candidate, fast=fast
+        )
+
+
+async def _analyze_token_body(
     chain_id: str,
     token_address: str,
     candidate: dict | None = None,

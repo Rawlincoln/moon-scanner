@@ -240,6 +240,16 @@ async def scan_safe_snipes(
             if not t.get("snipe"):
                 t["snipe"] = evaluate_snipe(t)
 
+        # Train learning model on shown snipes
+        try:
+            from services.scan_moon import get_learning
+
+            eng = get_learning()
+            if eng is not None and display:
+                eng.observe_feed_cards(display, source="snipes", limit=limit)
+        except Exception as exc:
+            logger.debug("learning observe snipes failed: %s", exc)
+
         reject_breakdown = {
             **{f"pre_{k}": v for k, v in pre_reject.items()},
             **{f"post_{k}": v for k, v in post_reject.items()},

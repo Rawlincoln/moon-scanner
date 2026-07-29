@@ -56,3 +56,79 @@ def test_is_hard_avoid_shared():
     assert hard2 is True
     soft, _ = is_hard_avoid({"avoid": {"hard_avoid": False, "flags": ["wash_buys"]}})
     assert soft is False
+
+
+def test_client_ip_ignores_xff_when_untrusted(monkeypatch):
+    from app import security as sec
+    from starlette.requests import Request
+    from starlette.datastructures import Headers
+
+    monkeypatch.setattr(sec, "TRUST_X_FORWARDED_FOR", False)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/",
+        "raw_path": b"/",
+        "query_string": b"",
+        "headers": [(b"x-forwarded-for", b"8.8.8.8, 1.2.3.4")],
+        "client": ("9.9.9.9", 12345),
+        "server": ("127.0.0.1", 80),
+    }
+    req = Request(scope)
+    assert sec.client_ip(req) == "9.9.9.9"
+
+
+def test_client_ip_uses_rightmost_xff_when_trusted(monkeypatch):
+    from app import security as sec
+    from starlette.requests import Request
+
+    monkeypatch.setattr(sec, "TRUST_X_FORWARDED_FOR", True)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/",
+        "raw_path": b"/",
+        "query_string": b"",
+        "headers": [(b"x-forwarded-for", b"8.8.8.8, 1.2.3.4")],
+        "client": ("9.9.9.9", 12345),
+        "server": ("127.0.0.1", 80),
+    }
+    req = Request(scope)
+    assert sec.client_ip(req) == "1.2.3.4"
+
+
+def test_observe_feed_card_maps_moon_shape():
+    from services.learning.memory import LearningMemory
+    from services.learning.tracker import LearningEngine
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as td:
+        mem = LearningMemory(Path(td) / "t.db")
+        eng = LearningEngine(mem)
+        card = {
+            "tokenAddress": "TokenMintAbcdefghijkmnopqrstuvwxyz123pump",
+            "name": "Test",
+            "symbol": "TST",
+            "mcap_usd": 8000,
+            "enrich_ok": True,
+            "pumpfun": {
+                "usd_market_cap": 8000,
+                "ath_market_cap": 9000,
+                "reply_count": 15,
+            },
+            "safety": {"total_holders": 40, "top_holders": [{"pct": 2}]},
+            "socialSignals": {"has_edge": True, "replies": 15},
+            "moon_label": "WATCH",
+        }
+        out = eng.observe_feed_card(card, source="moon")
+        assert out
+        assert mem.get_token(card["tokenAddress"]) is not None

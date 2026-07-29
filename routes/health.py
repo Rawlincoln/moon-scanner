@@ -14,6 +14,8 @@ from config import (
     DEFAULT_MAX_AGE_MINUTES,
     EVM_CHAIN_IDS,
     IS_RENDER,
+    LEARNING_ACTIVE_CAP_PAID,
+    LEARNING_ACTIVE_CAP_PUBLIC,
     MAX_AGE_MINUTES_CAP,
     PADRE_TRADE_URL,
     SUPPORTED_CHAINS,
@@ -51,7 +53,13 @@ async def health():
         "runner_alerts": t_health["runner_alerts"],
         "learning": {
             "tracked": learn.get("total_tracked", 0),
-            "active": learn.get("active", 0),
+            "active_in_db": learn.get("active", 0),
+            "active": learn.get("active", 0),  # legacy alias
+            "poll_cap": (
+                LEARNING_ACTIVE_CAP_PAID
+                if rpc_is_paid()
+                else LEARNING_ACTIVE_CAP_PUBLIC
+            ),
             "finalized": learn.get("finalized", 0),
         },
         "realtime": realtime_bus.stats().get("feed", {}),

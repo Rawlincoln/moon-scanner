@@ -39,7 +39,11 @@ SQLite under `data/` is **ephemeral** on free tier (lost on redeploy). Use a per
 | `ADMIN_API_KEY` | **recommended** | Protects `POST /api/learning/reseed` and `/rebuild` |
 | `CORS_ORIGINS` | optional | Comma-separated; defaults to known Render URLs in prod |
 | `SOLANA_RPC_HTTP` / `SOLANA_RPC_WSS` | optional | Override Helius auto-wire |
-| `RATE_LIMIT_PER_MIN` | optional | Default 45 expensive API calls / IP / min |
+| `RATE_LIMIT_PER_MIN` | optional | Default 30 scan calls / IP / min |
+| `RATE_LIMIT_ANALYZE_PER_MIN` | optional | Default 12 deep analyze / IP / min |
+| `RATE_LIMIT_FORCE_COST` | optional | `force=true` costs N tokens (default 4) |
+| `TRUST_X_FORWARDED_FOR` | optional | Default on in production; rightmost XFF hop |
+| `ANALYZE_CONCURRENCY` | optional | Global concurrent deep analyzes (default 4) |
 
 **Never** commit real keys. API responses redact RPC hosts (no `api-key=` leakage).
 

@@ -35,12 +35,23 @@ _padre_feed = PadreFeedClient()
 _moon_cache: dict[str, Any] = {"data": None, "ts": 0.0}
 _moon_lock = asyncio.Lock()
 _outcomes: MoonOutcomes | None = None
+_learning: Any = None
 
 
 def init_outcomes(base_dir: Path | None = None) -> MoonOutcomes:
     global _outcomes
     _outcomes = get_outcomes(base_dir)
     return _outcomes
+
+
+def bind_learning(engine: Any) -> None:
+    """Wire LearningEngine so moon/snipe UI recs train the model."""
+    global _learning
+    _learning = engine
+
+
+def get_learning() -> Any:
+    return _learning
 
 
 def get_moon_outcomes() -> MoonOutcomes:
@@ -486,6 +497,13 @@ async def scan_moon_tokens(
                 logger.info("Moon outcomes recorded %s new recs", rec_n)
         except Exception as exc:
             logger.debug("moon outcomes record failed: %s", exc)
+
+        # Train learning model on what the UI actually showed
+        if _learning is not None and display:
+            try:
+                _learning.observe_feed_cards(display, source="moon", limit=limit)
+            except Exception as exc:
+                logger.debug("learning observe moon failed: %s", exc)
 
         outcome_sum: dict[str, Any] = {}
         try:

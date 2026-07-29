@@ -172,12 +172,26 @@ _cors_raw = os.getenv("CORS_ORIGINS", "").strip()
 CORS_ORIGINS_LIST: list[str] = (
     [o.strip() for o in _cors_raw.split(",") if o.strip()] if _cors_raw else []
 )
-# Expensive API routes (moon/snipes/analyze) — per IP per minute
-RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "45") or "45")
-RATE_LIMIT_BURST = int(os.getenv("RATE_LIMIT_BURST", "12") or "12")
+# Expensive API routes — per IP sliding windows
+RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "30") or "30")
+RATE_LIMIT_BURST = int(os.getenv("RATE_LIMIT_BURST", "8") or "8")  # short 10s window
+# Stricter for deep analyze / checkers (third-party amplification)
+RATE_LIMIT_ANALYZE_PER_MIN = int(os.getenv("RATE_LIMIT_ANALYZE_PER_MIN", "12") or "12")
+# force=true costs this many tokens (anti-amp)
+RATE_LIMIT_FORCE_COST = int(os.getenv("RATE_LIMIT_FORCE_COST", "4") or "4")
+# Client IP: when True (default on production), use rightmost X-Forwarded-For hop
+# (proxy-appended). When False, ignore XFF — prevents client spoofing.
+_trust_xff_raw = os.getenv("TRUST_X_FORWARDED_FOR", "").strip().lower()
+TRUST_X_FORWARDED_FOR = (
+    _trust_xff_raw in ("1", "true", "yes")
+    if _trust_xff_raw
+    else IS_PRODUCTION
+)
 # Learning poll cap (unpaid RPC / free host should stay low)
 LEARNING_ACTIVE_CAP_PAID = int(os.getenv("LEARNING_ACTIVE_CAP_PAID", "80") or "80")
 LEARNING_ACTIVE_CAP_PUBLIC = int(os.getenv("LEARNING_ACTIVE_CAP_PUBLIC", "40") or "40")
+# Concurrent deep analyzes (global process cap)
+ANALYZE_CONCURRENCY = int(os.getenv("ANALYZE_CONCURRENCY", "4") or "4")
 
 
 def _solana_rpc_http() -> str:

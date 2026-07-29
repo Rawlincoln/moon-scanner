@@ -256,6 +256,98 @@ class LearningEngine:
 
         return pred
 
+    def observe_feed_card(
+        self, card: dict[str, Any], *, source: str = "feed"
+    ) -> dict[str, Any]:
+        """Observe a moon/snipe UI card (lighter than full analyze_token).
+
+        Maps feed card shape into observe_analysis so the model learns from
+        what the product actually recommended, not only deep /api/analyze.
+        """
+        if not isinstance(card, dict):
+            return {}
+        mint = (card.get("tokenAddress") or card.get("mint") or "").strip()
+        if not mint:
+            return {}
+        # Skip incomplete enrich — unknown safety should not train as "entry"
+        if card.get("enrich_ok") is False:
+            return {}
+
+        pump = card.get("pumpfun") or {}
+        market = card.get("market") or {}
+        safety = card.get("safety") or {}
+        avoid = (
+            card.get("avoid")
+            or (card.get("safetyReport") or {}).get("avoid")
+            or safety.get("avoid")
+            or {}
+        )
+        # Normalize avoid onto safety for extract_features
+        if avoid and not safety.get("avoid"):
+            safety = {**safety, "avoid": avoid}
+
+        mcap = _f(
+            card.get("mcap_usd")
+            or pump.get("usd_market_cap")
+            or market.get("marketCap")
+        )
+        # Build analyze-like result for observe_analysis
+        result = {
+            "tokenAddress": mint,
+            "mcap_usd": mcap,
+            "safety": safety,
+            "market": {
+                **market,
+                "marketCap": market.get("marketCap") or mcap,
+                "priceChange": card.get("priceChange") or market.get("priceChange"),
+                "txns_m5": (market.get("txns") or {}).get("m5")
+                or market.get("txns_m5"),
+                "txns_h1": (market.get("txns") or {}).get("h1")
+                or market.get("txns_h1"),
+                "pumpfun": pump,
+                "age_minutes": card.get("age_minutes"),
+                "baseToken": {
+                    "name": card.get("name") or pump.get("name") or "",
+                    "symbol": card.get("symbol") or pump.get("symbol") or "",
+                },
+            },
+            "socialSignals": card.get("socialSignals"),
+            "smartMoney": card.get("smartMoney"),
+            "alphaSetup": card.get("alphaSetup"),
+            "migrationPath": card.get("migrationPath")
+            or {
+                "bonding_pct": card.get("bonding_progress")
+                or pump.get("bonding_progress")
+            },
+            "runnerRadar": card.get("runnerRadar"),
+            "bundleSniper": card.get("bundleSniper"),
+            "_feed_source": source,
+            "_feed_label": card.get("moon_label")
+            or card.get("snipe_label")
+            or (card.get("moon") or {}).get("label")
+            or (card.get("snipe") or {}).get("label"),
+        }
+        try:
+            pred = self.observe_analysis(result)
+            # Always mark observed even if predictor returns empty
+            return pred if pred else {"observed": True, "mint": mint, "source": source}
+        except Exception as exc:
+            logger.debug("observe_feed_card %s: %s", mint[:8], exc)
+            return {}
+
+    def observe_feed_cards(
+        self, cards: list[dict[str, Any]], *, source: str = "feed", limit: int = 16
+    ) -> int:
+        """Batch-observe shown feed tokens. Returns count observed."""
+        n = 0
+        for card in (cards or [])[: max(0, int(limit))]:
+            out = self.observe_feed_card(card, source=source)
+            if out:
+                n += 1
+        if n:
+            logger.info("Learning observed %s %s feed cards", n, source)
+        return n
+
     async def poll_active(self) -> int:
         """Refresh active tokens from pump.fun; detect dump/crash; finalize."""
         from config import (

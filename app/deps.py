@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from services.analyze_token import bind_learning
+from services.analyze_token import bind_learning as bind_analyze_learning
 from services.learning.memory import LearningMemory
 from services.learning.tracker import LearningEngine
 from services.padre import PadreClient
 from services.pumpfun import PumpFunClient
+from services.scan_moon import bind_learning as bind_moon_learning
 from services.scan_moon import init_outcomes
 from services.scan_trenches import bind_learning_memory
 
@@ -22,5 +23,6 @@ learning = LearningEngine(learning_memory)
 def init_shared() -> None:
     """Bind learning + outcomes once at app creation."""
     init_outcomes(BASE_DIR)
-    bind_learning(learning)
+    bind_analyze_learning(learning)
+    bind_moon_learning(learning)
     bind_learning_memory(learning_memory)
