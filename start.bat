@@ -2,9 +2,13 @@
 cd /d "%~dp0"
 title Moon Scanner
 echo Moon Scanner — http://127.0.0.1:8765
+echo.
+echo  RPC tips: free Helius/Alchemy key in .env  OR  double-click start-free.bat
+echo            Guide: FREE_RPC.md
+echo.
 if not exist ".env" if exist ".env.example" (
   copy /Y ".env.example" ".env" >nul
-  echo Created .env from .env.example — set HELIUS_API_KEY to stop Solana 429s.
+  echo Created .env from .env.example — see FREE_RPC.md for free RPC options.
 )
 if exist ".env" (
   echo Loading .env ^(HELIUS_API_KEY / SOLANA_RPC_* if set^)

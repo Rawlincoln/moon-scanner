@@ -47,22 +47,34 @@ SQLite under `data/` is **ephemeral** on free tier (lost on redeploy). Use a per
 
 **Never** commit real keys. API responses redact RPC hosts (no `api-key=` leakage).
 
-## 5. Local vs Render
+## 5. Free RPC (no paid Helius)
+
+You do **not** need a paid plan. Options:
+
+| Mode | How |
+|------|-----|
+| Zero signup | `start-free.bat` (public RPC, WS off) |
+| Free key | Helius free tier **or** Alchemy free Solana → see **FREE_RPC.md** |
+| Permanent free | `DISABLE_SOLANA_WS=1` in `.env` |
+
+Full guide: [FREE_RPC.md](./FREE_RPC.md)
+
+## 6. Local vs Render
 
 | | Local | Render |
 |---|-------|--------|
 | URL | http://127.0.0.1:8765 | your onrender.com URL |
-| Start | `start.bat` | Automatic |
+| Start | `start.bat` or `start-free.bat` | Automatic |
 | Config | `.env` (from `.env.example`) | Dashboard env vars |
 | Background trenches warm | Off by default | Controlled by config |
 | Learning poll cap | 40 (public) / 80 (paid RPC) | same |
 
-## 6. Health
+## 7. Health
 
 - `GET /api/health` — includes `rpc.paid`, `rpc.provider` (no secrets)
 - Moons: `/` · Safe Snipes: `/snipes`
 
-## 7. Admin routes
+## 8. Admin routes
 
 Header only (never put the key in the query string):
 
