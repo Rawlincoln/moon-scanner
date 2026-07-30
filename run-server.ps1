@@ -1,11 +1,11 @@
-# Moon Scanner durable launcher — single instance, auto-restart, free-safe defaults.
+# Moon Scanner durable launcher - single instance, auto-restart, free-safe defaults.
 # Usage:  powershell -ExecutionPolicy Bypass -File .\run-server.ps1
 # Or double-click start.bat
 
 $ErrorActionPreference = "Continue"
 Set-Location $PSScriptRoot
 
-$Host.UI.RawUI.WindowTitle = "Moon Scanner — keep this window open"
+$Host.UI.RawUI.WindowTitle = "Moon Scanner - keep this window open"
 $port = 8765
 $url = "http://127.0.0.1:$port"
 $lockFile = Join-Path $PSScriptRoot "data\server.lock"
@@ -23,7 +23,7 @@ function Test-ServerUp {
 
 function Stop-PortListeners {
   param([int]$Port)
-  # IMPORTANT: never use $pid — PowerShell automatic variable is THIS process
+  # IMPORTANT: never use $pid - PowerShell automatic variable is THIS process
   try {
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     foreach ($c in $conns) {
@@ -55,7 +55,7 @@ if (Test-ServerUp) {
   while ($true) {
     Start-Sleep 10
     if (-not (Test-ServerUp)) {
-      Write-Host "$(Get-Date -Format o) Server went down — will restart..."
+      Write-Host "$(Get-Date -Format o) Server went down - will restart..."
       break
     }
   }
@@ -89,7 +89,7 @@ if ($env:HELIUS_API_KEY -or $env:SOLANA_RPC_HTTP -or $env:SOLANA_RPC_WSS) {
 if (-not $env:DISABLE_SOLANA_WS) {
   if ($hasPaidRpc) {
     # Leave unset so config.py auto-enables WS with paid endpoint
-    Write-Host "Mode: paid/custom RPC detected — Solana WS left to config auto"
+    Write-Host "Mode: paid/custom RPC detected - Solana WS left to config auto"
   } else {
     $env:DISABLE_SOLANA_WS = "1"
     Write-Host "Mode: free-safe (Solana WS off; set HELIUS_API_KEY or DISABLE_SOLANA_WS=0)"
@@ -129,7 +129,7 @@ while ($true) {
   }
 
   "$($p.Id)|$(Get-Date -Format o)" | Set-Content -Path $lockFile -Encoding ascii
-  Write-Host "  PID $($p.Id) — waiting for health..."
+  Write-Host "  PID $($p.Id) - waiting for health..."
 
   $up = $false
   for ($i = 0; $i -lt 20; $i++) {
@@ -153,17 +153,17 @@ while ($true) {
     while (-not $p.HasExited) {
       Start-Sleep -Seconds 5
       if (-not (Test-ServerUp)) {
-        # process might still be hanging — kill and restart
-        Write-Host "$(Get-Date -Format o) Health failed — restarting..."
+        # process might still be hanging - kill and restart
+        Write-Host "$(Get-Date -Format o) Health failed - restarting..."
         try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
         break
       }
     }
     if ($p.HasExited) {
-      Write-Host "$(Get-Date -Format o) uvicorn exited code=$($p.ExitCode) — restart in 3s"
+      Write-Host "$(Get-Date -Format o) uvicorn exited code=$($p.ExitCode) - restart in 3s"
     }
   } else {
-    Write-Host "  Did not become healthy — restart in 3s"
+    Write-Host "  Did not become healthy - restart in 3s"
     if (-not $p.HasExited) {
       try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
     }
