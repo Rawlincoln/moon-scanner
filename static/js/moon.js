@@ -388,14 +388,20 @@ async function scan(force = false) {
   } catch (e) {
     const msg = e?.name === "AbortError" ? "Scan timed out" : e?.message || String(e);
     const mode = localStorage.getItem("moon_api_mode") || "local";
-    let hint = "Open http://127.0.0.1:8765 (not a file:// page) and run start.bat.";
+    let hint = "Double-click start.bat and leave the window open. Then open http://127.0.0.1:8765";
     if (!IS_LOCAL_PAGE && mode === "cloud") {
       hint = "API mode is Cloud — switch Backend to Local, or wait for Render to wake.";
     } else if (msg === "Failed to fetch" || /NetworkError|Load failed/i.test(msg)) {
       hint =
-        "Local API not reachable. Run start.bat, then open http://127.0.0.1:8765 and set Backend → Local.";
+        "Server is OFF. Run C:\\Users\\MMghongo\\moon-scanner\\start.bat and keep that window open.";
     }
     setStatus(`Scan failed: ${msg}. ${hint}`, "err");
+    // Auto-retry when server was briefly down
+    if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) {
+      setTimeout(() => {
+        if (!scanning) scan(false);
+      }, 5000);
+    }
   } finally {
     scanning = false;
     if (btn) btn.disabled = false;

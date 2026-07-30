@@ -255,7 +255,15 @@ async function scan(force = false) {
     if ($("#rule") && data.rule) $("#rule").textContent = data.rule;
   } catch (e) {
     const msg = e?.name === "AbortError" ? "Timed out" : e?.message || String(e);
-    setStatus(`Failed: ${msg}`, "err");
+    let hint = "";
+    if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) {
+      hint =
+        " — Server is OFF. Run start.bat in moon-scanner and keep the window open, then open http://127.0.0.1:8765/snipes";
+      setTimeout(() => {
+        if (!scanning) scan(false);
+      }, 5000);
+    }
+    setStatus(`Failed: ${msg}${hint}`, "err");
   } finally {
     scanning = false;
     if (btn) btn.disabled = false;

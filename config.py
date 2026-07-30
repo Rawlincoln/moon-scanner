@@ -150,14 +150,30 @@ YELLOWSTONE_GRPC_TOKEN = os.getenv("YELLOWSTONE_GRPC_TOKEN", "").strip()
 YELLOWSTONE_COMMITMENT = os.getenv("YELLOWSTONE_COMMITMENT", "processed").strip() or "processed"
 # Optional earliest layer (UDP shreds). Jito official deprecating ~2026-09-05.
 SHREDSTREAM_ENDPOINT = os.getenv("SHREDSTREAM_ENDPOINT", "").strip()
-REALTIME_PUMP_POLL_SEC = float(os.getenv("REALTIME_PUMP_POLL_SEC", "2.0") or "2.0")
+# Default 4s on free/public (less load); set REALTIME_PUMP_POLL_SEC=2 when paid RPC
+_poll_default = "4.0" if not (
+    os.getenv("HELIUS_API_KEY", "").strip()
+    or (os.getenv("SOLANA_RPC_HTTP") or os.getenv("SOLANA_RPC_URL") or "").strip()
+) else "2.0"
+REALTIME_PUMP_POLL_SEC = float(
+    os.getenv("REALTIME_PUMP_POLL_SEC", _poll_default) or _poll_default
+)
 # logs | transaction | auto (transaction on paid WSS, else logs)
 SOLANA_WS_MODE = (os.getenv("SOLANA_WS_MODE", "auto") or "auto").strip().lower()
-DISABLE_SOLANA_WS = os.getenv("DISABLE_SOLANA_WS", "").strip().lower() in (
-    "1",
-    "true",
-    "yes",
-)
+# Default OFF on public/free RPC (avoids noisy WS + process thrash). Set
+# DISABLE_SOLANA_WS=0 to force-enable when you have Helius/Alchemy WSS.
+_disable_ws_raw = os.getenv("DISABLE_SOLANA_WS", "").strip().lower()
+if _disable_ws_raw in ("0", "false", "no", "off"):
+    DISABLE_SOLANA_WS = False
+elif _disable_ws_raw in ("1", "true", "yes", "on"):
+    DISABLE_SOLANA_WS = True
+else:
+    # Auto: disable WS when no paid RPC key/endpoint is configured
+    _has_helius = bool(os.getenv("HELIUS_API_KEY", "").strip())
+    _has_custom = bool(
+        (os.getenv("SOLANA_RPC_WSS") or os.getenv("YELLOWSTONE_WSS") or "").strip()
+    )
+    DISABLE_SOLANA_WS = not (_has_helius or _has_custom)
 YELLOWSTONE_ONLY = os.getenv("YELLOWSTONE_ONLY", "").strip().lower() in (
     "1",
     "true",
