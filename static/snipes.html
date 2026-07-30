@@ -38,6 +38,10 @@
     <label class="chk">
       <input type="checkbox" id="autoRefresh" checked /> Auto 12s
     </label>
+    <label class="chk" title="Desktop alerts for new SNIPE / SETUP picks">
+      <input type="checkbox" id="alertToggle" /> 🔔 Alerts
+    </label>
+    <span class="pill muted" id="alertStatus" style="font-size:0.78rem">Alerts off</span>
     <label class="field">
       Max age
       <select id="maxAge">
@@ -78,6 +82,7 @@
     · API: <a href="/api/snipes" style="color:inherit">/api/snipes</a>
   </footer>
 
-  <script src="/static/js/snipes.js?v=4"></script>
+  <script src="/static/js/alerts.js?v=1"></script>
+  <script src="/static/js/snipes.js?v=5"></script>
 </body>
 </html>

@@ -38,6 +38,10 @@
     <label class="chk">
       <input type="checkbox" id="autoRefresh" checked /> Auto 10s
     </label>
+    <label class="chk" title="Desktop alerts for new MOON / WATCH picks">
+      <input type="checkbox" id="alertToggle" /> 🔔 Alerts
+    </label>
+    <span class="pill muted" id="alertStatus" style="font-size:0.78rem">Alerts off</span>
     <label class="field">
       Max age
       <select id="maxAge">
@@ -76,6 +80,7 @@
     Track results: <a href="/api/moon/outcomes" style="color:inherit">/api/moon/outcomes</a>
   </footer>
 
-  <script src="/static/js/moon.js?v=12"></script>
+  <script src="/static/js/alerts.js?v=1"></script>
+  <script src="/static/js/moon.js?v=13"></script>
 </body>
 </html>

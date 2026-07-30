@@ -238,6 +238,11 @@ async function scan(force = false) {
     const data = await res.json();
     const tokens = data.tokens || [];
     render(tokens, data.counts || {}, data.near_misses || []);
+    try {
+      if (window.MoonAlerts) MoonAlerts.alertNewPicks("snipe", tokens);
+    } catch {
+      /* optional */
+    }
     const c = data.counts || {};
     const t = data.scanned_at
       ? new Date(data.scanned_at * 1000).toLocaleTimeString()
@@ -276,6 +281,13 @@ function bind() {
   const sel = $("#apiBackend");
   if (sel && !IS_LOCAL_PAGE && !IS_CLOUD) {
     sel.value = localStorage.getItem("moon_api_mode") || "local";
+  }
+  try {
+    if (window.MoonAlerts) {
+      MoonAlerts.wireToggle($("#alertToggle"), $("#alertStatus"));
+    }
+  } catch {
+    /* optional */
   }
   updateBackendPill();
   scan(true);

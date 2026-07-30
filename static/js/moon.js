@@ -309,6 +309,11 @@ async function scan(force = false) {
     const data = await res.json();
     lastTokens = data.tokens || [];
     render(lastTokens, data.counts || {}, data.near_misses || []);
+    try {
+      if (window.MoonAlerts) MoonAlerts.alertNewPicks("moon", lastTokens);
+    } catch {
+      /* optional */
+    }
     const c = data.counts || {};
     const t = data.scanned_at
       ? new Date(data.scanned_at * 1000).toLocaleTimeString()
@@ -424,6 +429,13 @@ function init() {
   $("#autoRefresh")?.addEventListener("change", setupAuto);
   $("#limit")?.addEventListener("change", () => scan(true));
   $("#maxAge")?.addEventListener("change", () => scan(true));
+  try {
+    if (window.MoonAlerts) {
+      MoonAlerts.wireToggle($("#alertToggle"), $("#alertStatus"));
+    }
+  } catch {
+    /* optional */
+  }
   setupAuto();
   scan(true);
 }
