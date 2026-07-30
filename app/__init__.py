@@ -12,7 +12,11 @@ from app.deps import init_shared
 from app.lifespan import lifespan
 from app.paths import BASE_DIR
 from config import IS_PRODUCTION
-from app.security import RateLimitMiddleware, cors_allow_origins
+from app.security import (
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
+    cors_allow_origins,
+)
 from routes.analyze import router as analyze_router
 from routes.health import router as health_router
 from routes.learning import router as learning_router
@@ -32,7 +36,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Moon Scanner",
         description="Identify safe early tokens on EVM & Solana with entry/exit signals",
-        version="1.3.0",
+        version="1.4.0",
         lifespan=lifespan,
         docs_url=None if IS_PRODUCTION else "/docs",
         redoc_url=None if IS_PRODUCTION else "/redoc",
@@ -40,7 +44,8 @@ def create_app() -> FastAPI:
     )
 
     origins = cors_allow_origins()
-    # Middleware order: last added runs first. CORS outermost, then rate limit.
+    # Middleware order: last added runs first → CORS outermost, then rate limit, headers.
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(
         CORSMiddleware,

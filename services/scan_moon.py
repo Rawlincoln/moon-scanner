@@ -201,14 +201,17 @@ async def enrich_moon_card(
     except Exception as exc:
         errors.append(f"bundle_lite:{type(exc).__name__}")
 
-    # Early narrative reject still skips expensive RugCheck for moon cost,
+    # Early narrative/capital reject still skips expensive RugCheck for moon cost,
     # but must never rank as a recommendation.
-    if not skip_narrative_gate and reject_reason(card):
-        card["enrich_skipped_rugcheck"] = True
-        card["enrich_ok"] = False
-        card["enrich_partial"] = True
-        card["enrich_errors"] = errors + ["skipped_rugcheck_narrative"]
-        return card
+    if not skip_narrative_gate:
+        pre_reason = reject_reason(card)
+        if pre_reason:
+            card["enrich_skipped_rugcheck"] = True
+            card["pre_enrich_reject"] = pre_reason
+            card["enrich_ok"] = False
+            card["enrich_partial"] = True
+            card["enrich_errors"] = errors + ["skipped_pre_enrich:" + pre_reason[:40]]
+            return card
 
     try:
         safety = await asyncio.wait_for(
@@ -421,22 +424,43 @@ async def scan_moon_tokens(
         # Never rank non-enriched "rest" cards — incomplete safety = not a moon rec
         for c in enriched:
             mint = (c.get("tokenAddress") or c.get("mint") or "").strip()
-            if not c.get("enrich_ok"):
+            errs = c.get("enrich_errors") or []
+            pre_reason = c.get("pre_enrich_reject")
+            # Missing enrich_ok counts as incomplete
+            if c.get("enrich_ok") is not True:
                 rejected += 1
-                post_reject["enrich"] = post_reject.get("enrich", 0) + 1
-                if len(near_misses) < 8:
-                    errs = c.get("enrich_errors") or ["incomplete"]
-                    near_misses.append(
-                        {
-                            "symbol": c.get("symbol") or "?",
-                            "name": c.get("name") or "",
-                            "tokenAddress": mint,
-                            "mcap_usd": c.get("mcap_usd"),
-                            "age_minutes": c.get("age_minutes"),
-                            "reject": "safety unknown — " + ", ".join(str(e) for e in errs[:2]),
-                            "reject_key": "enrich",
-                        }
-                    )
+                # Pre-enrich reject (narrative/ATH/etc.) — not a RugCheck failure
+                if pre_reason or c.get("enrich_skipped_rugcheck"):
+                    reason = pre_reason or "filtered before safety enrich"
+                    key = _short_moon_reject(reason)
+                    post_reject[key] = post_reject.get(key, 0) + 1
+                    if len(near_misses) < 8:
+                        near_misses.append(
+                            {
+                                "symbol": c.get("symbol") or "?",
+                                "name": c.get("name") or "",
+                                "tokenAddress": mint,
+                                "mcap_usd": c.get("mcap_usd"),
+                                "age_minutes": c.get("age_minutes"),
+                                "reject": reason,
+                                "reject_key": key,
+                            }
+                        )
+                else:
+                    post_reject["enrich"] = post_reject.get("enrich", 0) + 1
+                    if len(near_misses) < 8:
+                        near_misses.append(
+                            {
+                                "symbol": c.get("symbol") or "?",
+                                "name": c.get("name") or "",
+                                "tokenAddress": mint,
+                                "mcap_usd": c.get("mcap_usd"),
+                                "age_minutes": c.get("age_minutes"),
+                                "reject": "safety unknown — "
+                                + ", ".join(str(e) for e in (errs or ["incomplete"])[:2]),
+                                "reject_key": "enrich",
+                            }
+                        )
                 continue
             reason = reject_reason(c)
             if reason:

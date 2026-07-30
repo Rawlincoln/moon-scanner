@@ -12,6 +12,7 @@ from config import MIGRATION_MCAP_MAX_USD
 from services.realtime_bus import realtime_bus
 from services.safe_snipes import (
     MAX_AGE_MIN,
+    MIN_AGE_MIN,
     SNIPE_MCAP_MAX,
     SNIPE_MCAP_MIN,
     TARGET_MULT,
@@ -151,7 +152,7 @@ async def scan_safe_snipes(
             seen.add(mint)
             scanned += 1
             age = PumpFunClient.coin_age_minutes(coin)
-            if age > age_cap or age < 0.8:
+            if age > age_cap or age < MIN_AGE_MIN:
                 rejected += 1
                 pre_reject["age"] += 1
                 continue
@@ -195,7 +196,7 @@ async def scan_safe_snipes(
         # Only fully enriched cards can become SNIPE/SETUP
         for c in enriched:
             mint = (c.get("tokenAddress") or c.get("mint") or "").strip()
-            if not c.get("enrich_ok"):
+            if c.get("enrich_ok") is not True:
                 rejected += 1
                 post_reject["enrich"] += 1
                 if len(near_misses) < 8:

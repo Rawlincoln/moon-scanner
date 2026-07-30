@@ -23,7 +23,7 @@ GRAD_SOFT_CAP = 55_000.0  # 2× should not need moonshot migration
 
 MIN_AGE_MIN = 1.5
 MAX_AGE_MIN = 75.0
-MIN_ATH_RETENTION = 0.70  # hide fades from ATH
+MIN_ATH_RETENTION = 0.80  # align DUMP_HIDE_FRAC — hide fades >=20% from ATH
 # SNIPE grade: clean book only. SETUP can stretch to ~8% bundle.
 MAX_BUNDLED_PCT = 5.0
 MAX_BUNDLED_PCT_SETUP = 8.0
@@ -97,15 +97,17 @@ def snipe_reject_reason(token: dict[str, Any]) -> str | None:
     if hard:
         return hard_why or "hard avoid"
 
-    # Incomplete enrich → never present as a "safe" snipe
-    if token.get("enrich_ok") is False:
+    # After enrich pipeline: enrich_ok must be True. Pre-enrich cards omit the key.
+    if "enrich_ok" in token and token.get("enrich_ok") is not True:
         errs = token.get("enrich_errors") or []
         return "safety unknown — " + (
             ", ".join(str(e) for e in errs[:2]) if errs else "enrich incomplete"
         )
 
     safety = token.get("safety") or {}
-    if safety.get("is_honeypot") or safety.get("rugged") or safety.get("honeypot"):
+    if safety.get("error") or safety.get("is_honeypot") or safety.get("rugged") or safety.get("honeypot"):
+        if safety.get("error"):
+            return "safety error / incomplete audit"
         return "honeypot / rugged"
     if safety.get("passed") is False and safety.get("issues"):
         issues = " ".join(str(i) for i in (safety.get("issues") or [])[:4]).lower()
@@ -126,7 +128,7 @@ def snipe_reject_reason(token: dict[str, Any]) -> str | None:
     if tx.get("tilt") == "DOWN" and _f(tx.get("total_m5") or tx.get("total") or 0) >= 8:
         return "tx tilt DOWN"
 
-    # Bundle / snipers — stricter than moon feed
+    # Bundle / snipers — match moon capital wall (hard_reject is always fatal)
     bs = token.get("bundleSniper")
     if not isinstance(bs, dict):
         bs = analyze_bundle_and_snipers(
@@ -146,9 +148,14 @@ def snipe_reject_reason(token: dict[str, Any]) -> str | None:
     sn = (bs.get("snipers") or {}) if isinstance(bs, dict) else {}
     max_w = _f(sn.get("max_wallet_pct"))
 
-    # Hard wall: critical risk or SETUP band breached (6–8% ok as SETUP, not SNIPE)
+    # Always honor analyzer hard_reject / critical (no SETUP escape hatch)
+    if bs.get("hard_reject"):
+        return bs.get("summary") or "bundle/sniper hard reject"
     if overall == "critical" or sn_lv == "critical":
-        return bs.get("summary") or f"sniper/bundle critical"
+        return bs.get("summary") or "sniper/bundle critical"
+    if overall == "high" or sn_lv == "high":
+        # High book risk is not "safe" — block display entirely
+        return bs.get("summary") or f"sniper/bundle high risk ({sn_lv or overall})"
     if bun_pct is not None and bun_pct > MAX_BUNDLED_PCT_SETUP:
         return (
             f"bundled {bun_pct:.0f}% > {MAX_BUNDLED_PCT_SETUP:.0f}% "
@@ -156,14 +163,6 @@ def snipe_reject_reason(token: dict[str, Any]) -> str | None:
         )
     if max_w > MAX_SNIPER_WALLET_SETUP:
         return f"max wallet {max_w:.1f}% — sniper bag"
-    # "high" overall / hard_reject from analyzer is soft for SETUP zone when
-    # still under 8% bundled — evaluate_snipe will block SNIPE grade.
-    if bs.get("hard_reject") and (
-        (bun_pct is not None and bun_pct > MAX_BUNDLED_PCT_SETUP)
-        or sn_lv == "critical"
-        or overall == "critical"
-    ):
-        return bs.get("summary") or "bundle/sniper hard reject"
 
     return None
 
@@ -376,7 +375,8 @@ def snipe_card_from_coin(coin: dict, *, source: str = "pump.fun") -> dict[str, A
     age = PumpFunClient.coin_age_minutes(coin)
     if mcap < SNIPE_MCAP_MIN * 0.85 or mcap > SNIPE_MCAP_MAX * 1.15:
         return None
-    if age < 0.8 or age > MAX_AGE_MIN + 15:
+    # Align pre-age with hard MIN_AGE_MIN so we don't waste enrich on sniper window
+    if age < MIN_AGE_MIN or age > MAX_AGE_MIN + 15:
         return None
     avoid = analyze_avoid_flags(
         safety={
@@ -388,14 +388,9 @@ def snipe_card_from_coin(coin: dict, *, source: str = "pump.fun") -> dict[str, A
         pump=coin,
         mint=mint,
     )
-    if avoid.get("avoid") and set(avoid.get("flags") or []) & {
-        "blocklist",
-        "banned",
-        "honeypot",
-        "rugged",
-        "flash_pump_dump",
-        "drained_curve",
-    }:
+    # Same hard-avoid early drop as moon (full HARD_AVOID_FLAGS / hard_avoid)
+    hard, _ = is_hard_avoid({"avoid": avoid})
+    if hard or avoid.get("hard_avoid"):
         return None
     social = analyze_social_narrative(
         pump_coin=coin,

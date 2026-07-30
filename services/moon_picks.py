@@ -147,9 +147,11 @@ def reject_reason(token: dict[str, Any]) -> str | None:
     if hard:
         return hard_why or "hard avoid"
 
-    # Incomplete enrich → never recommend as moon
-    if token.get("enrich_ok") is False:
+    # After enrich pipeline: enrich_ok must be True. Pre-enrich cards omit the key.
+    if "enrich_ok" in token and token.get("enrich_ok") is not True:
         errs = token.get("enrich_errors") or []
+        if any("narrative" in str(e).lower() for e in errs):
+            return "no narrative / influencer edge — random chart"
         return "safety unknown — " + (
             ", ".join(str(e) for e in errs[:2]) if errs else "enrich incomplete"
         )

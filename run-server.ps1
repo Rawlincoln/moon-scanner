@@ -23,22 +23,23 @@ function Test-ServerUp {
 
 function Stop-PortListeners {
   param([int]$Port)
+  # IMPORTANT: never use $pid — PowerShell automatic variable is THIS process
   try {
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     foreach ($c in $conns) {
-      $pid = $c.OwningProcess
-      if ($pid -and $pid -ne 0) {
-        Write-Host "  Stopping old PID $pid on port $Port"
-        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+      $procId = $c.OwningProcess
+      if ($procId -and $procId -ne 0 -and $procId -ne $PID) {
+        Write-Host "  Stopping old PID $procId on port $Port"
+        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
       }
     }
   } catch {
     # fallback netstat
     netstat -ano | Select-String ":$Port" | Select-String "LISTENING" | ForEach-Object {
-      $p = ($_.ToString() -split '\s+')[-1]
-      if ($p -match '^\d+$') {
-        Write-Host "  taskkill PID $p"
-        & taskkill /F /PID $p 2>$null
+      $procId = ($_.ToString() -split '\s+')[-1]
+      if ($procId -match '^\d+$' -and [int]$procId -ne $PID) {
+        Write-Host "  taskkill PID $procId"
+        & taskkill /F /PID $procId 2>$null
       }
     }
   }
@@ -67,13 +68,38 @@ Write-Host " KEEP THIS WINDOW OPEN or the site will go down."
 Write-Host "============================================================"
 Write-Host ""
 
-# Free / public-RPC safe defaults (do not override if user already set)
-if (-not $env:DISABLE_SOLANA_WS) { $env:DISABLE_SOLANA_WS = "1" }
-if (-not $env:REALTIME_PUMP_POLL_SEC) { $env:REALTIME_PUMP_POLL_SEC = "5" }
+# Free-safe defaults only when no paid RPC is configured (respect .env via child process).
+# Read .env for HELIUS / SOLANA_RPC without forcing WS off if user has a key.
+$envPath = Join-Path $PSScriptRoot ".env"
+$hasPaidRpc = $false
+if (Test-Path $envPath) {
+  Get-Content $envPath -ErrorAction SilentlyContinue | ForEach-Object {
+    $line = $_.Trim()
+    if ($line -match '^\s*#' -or $line -eq "") { return }
+    if ($line -match '^(HELIUS_API_KEY|SOLANA_RPC_HTTP|SOLANA_RPC_WSS|SOLANA_RPC_URL)\s*=\s*(.+)$') {
+      $val = $Matches[2].Trim().Trim('"').Trim("'")
+      if ($val.Length -gt 4) { $hasPaidRpc = $true }
+    }
+  }
+}
+if ($env:HELIUS_API_KEY -or $env:SOLANA_RPC_HTTP -or $env:SOLANA_RPC_WSS) {
+  $hasPaidRpc = $true
+}
+
+if (-not $env:DISABLE_SOLANA_WS) {
+  if ($hasPaidRpc) {
+    # Leave unset so config.py auto-enables WS with paid endpoint
+    Write-Host "Mode: paid/custom RPC detected — Solana WS left to config auto"
+  } else {
+    $env:DISABLE_SOLANA_WS = "1"
+    Write-Host "Mode: free-safe (Solana WS off; set HELIUS_API_KEY or DISABLE_SOLANA_WS=0)"
+  }
+}
+if (-not $env:REALTIME_PUMP_POLL_SEC) {
+  $env:REALTIME_PUMP_POLL_SEC = $(if ($hasPaidRpc) { "2" } else { "5" })
+}
 if (-not $env:LEARNING_ACTIVE_CAP_PUBLIC) { $env:LEARNING_ACTIVE_CAP_PUBLIC = "20" }
 if (-not $env:SOLANA_WS_MODE) { $env:SOLANA_WS_MODE = "logs" }
-
-Write-Host "Mode: free-safe (Solana WS off unless you set DISABLE_SOLANA_WS=0)"
 Write-Host ""
 
 $restart = 0

@@ -150,6 +150,32 @@ def client_ip(request: Request) -> str:
     return parts[-1]
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Basic browser hardening headers (no secrets)."""
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault(
+            "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+        )
+        # Allow same-origin API + fonts + padre/dex external navigations from UI
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com data:; "
+            "img-src 'self' https: data:; "
+            "connect-src 'self' https:; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'",
+        )
+        return response
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Per-IP sliding windows for expensive API routes.
 

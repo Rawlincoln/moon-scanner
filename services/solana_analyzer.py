@@ -502,6 +502,7 @@ class SolanaAnalyzer:
             "chain": "solana",
             "type": "solana",
             "passed": False,
+            "error": True,
             "issues": [f"No RugCheck data for {mint[:10]}..."],
         }
 
@@ -511,5 +512,6 @@ class SolanaAnalyzer:
             "chain": "solana",
             "type": "solana",
             "passed": False,
+            "error": True,
             "issues": [f"Analysis error: {msg[:100]}"],
         }

@@ -82,10 +82,16 @@ class YellowstoneFeed:
         default_poll = "3.0" if not _env("DISABLE_SOLANA_WS") else "2.0"
         poll_sec = float(_env("REALTIME_PUMP_POLL_SEC", default_poll) or default_poll)
 
+        from services.realtime_rpc import redact_rpc_url
+
+        # Host-only in status — never path/query/token fragments
+        ys_host = redact_rpc_url(endpoint) if endpoint else ""
+        shred_host = redact_rpc_url(shred) if shred else ""
+
         realtime_bus.feed_status["yellowstone"] = {
             "configured": bool(endpoint),
             "connected": False,
-            "endpoint": (endpoint[:48] + "…") if len(endpoint) > 48 else endpoint,
+            "endpoint": ys_host,
             "commitment": commitment,
             "program_filter": PUMPFUN_PROGRAM_ID,
             "detail": (
@@ -97,7 +103,7 @@ class YellowstoneFeed:
         realtime_bus.feed_status["shredstream"] = {
             "configured": bool(shred),
             "connected": False,
-            "endpoint": (shred[:48] + "…") if len(shred) > 48 else shred,
+            "endpoint": shred_host,
             "detail": (
                 "Optional earliest layer (custom UDP client)."
                 if not shred
@@ -288,6 +294,7 @@ def status_payload() -> dict[str, Any]:
     from services.realtime_rpc import is_paid_wss, redact_rpc_url, resolve_ws_mode, wss_url
     from config import HELIUS_API_KEY, SOLANA_WS_MODE
 
+    # Never expose full Yellowstone/shred endpoints (may contain tokens in URL)
     return {
         "ok": True,
         "latency_stack": LATENCY_STACK,

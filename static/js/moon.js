@@ -249,7 +249,20 @@ function nearMissHtml(misses = []) {
   </div>`;
 }
 
-function render(tokens, counts = {}, nearMisses = []) {
+function rejectBreakdownHtml(rb = {}, gates = {}) {
+  const entries = Object.entries(rb || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const parts = entries.map(([k, v]) => `${escapeHtml(k)}:${v}`);
+  let g = "";
+  if (gates && gates.min_score != null) {
+    g = ` · gates ≥${gates.min_score}/${gates.min_confidence}` +
+      (gates.require_influencer ? " +inf" : "") +
+      (gates.adapted ? " adaptive" : "");
+  }
+  if (!parts.length && !g) return "";
+  return `<p class="muted">Why empty: ${parts.join(" · ") || "filters"}${g}</p>`;
+}
+
+function render(tokens, counts = {}, nearMisses = [], extra = {}) {
   const list = $("#list");
   if (!list) return;
   if (!tokens.length) {
@@ -258,6 +271,7 @@ function render(tokens, counts = {}, nearMisses = []) {
       <strong>No narrative-backed climbers right now</strong>
       <p>We only show near-ATH tokens with real edge: influencer tweets (Elon/CZ/Trump…), trending tickers, or strong community. Random green charts are hidden — they almost always dump.</p>
       <p class="muted">Scanned ${counts.candidates_raw ?? "—"} · band hits ${band} · rejected ${counts.rejected ?? "—"}</p>
+      ${rejectBreakdownHtml(extra.reject_breakdown, extra.gates)}
       ${nearMissHtml(nearMisses)}
     </div>`;
   } else {
@@ -308,7 +322,10 @@ async function scan(force = false) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     lastTokens = data.tokens || [];
-    render(lastTokens, data.counts || {}, data.near_misses || []);
+    render(lastTokens, data.counts || {}, data.near_misses || [], {
+      reject_breakdown: data.reject_breakdown,
+      gates: data.gates || (data.outcomes || {}).gates,
+    });
     try {
       if (window.MoonAlerts) {
         MoonAlerts.alertNewPicks("moon", lastTokens);

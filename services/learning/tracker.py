@@ -224,12 +224,23 @@ class LearningEngine:
         )
 
         # Early finalize scams/avoid so model learns immediately
-        avoid = safety.get("avoid") or {}
-        if avoid.get("hard_avoid"):
+        avoid = safety.get("avoid") or result.get("avoid") or {}
+        hard = False
+        hard_why = None
+        try:
+            from services.avoid_filters import is_hard_avoid
+
+            hard, hard_why = is_hard_avoid(result)
+            if not hard:
+                hard, hard_why = is_hard_avoid({"avoid": avoid})
+        except Exception:
+            hard = bool(avoid.get("hard_avoid") or avoid.get("hard"))
+            hard_why = avoid.get("summary")
+        if hard:
             self.memory.finalize_outcome(
                 mint,
                 "SCAM",
-                notes=avoid.get("summary") or "hard_avoid",
+                notes=hard_why or avoid.get("summary") or "hard_avoid",
                 features=feats,
             )
         elif avoid.get("avoid") and feats.get("already_crashed"):
@@ -270,7 +281,7 @@ class LearningEngine:
         if not mint:
             return {}
         # Skip incomplete enrich — unknown safety should not train as "entry"
-        if card.get("enrich_ok") is False:
+        if card.get("enrich_ok") is not True:
             return {}
 
         pump = card.get("pumpfun") or {}

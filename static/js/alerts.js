@@ -268,21 +268,28 @@
     }
   }
 
+  const PADRE_HOSTS = new Set(["trade.padre.gg", "padre.gg"]);
+  const MAX_PADRE_QUEUE = 5;
+
   function padreUrl(mint, token) {
-    const u =
-      (token && (token.padre_url || token.padreUrl)) ||
-      (mint ? `https://trade.padre.gg/trade/solana/${mint}` : "");
+    // Always build from mint on allowlisted host — ignore untrusted padre_url hosts
+    if (!mint) return "";
+    return `https://trade.padre.gg/trade/solana/${encodeURIComponent(mint)}`;
+  }
+
+  function isAllowedPadreUrl(url) {
     try {
-      const x = new URL(String(u));
-      if (x.protocol === "http:" || x.protocol === "https:") return x.href;
+      const x = new URL(String(url));
+      if (x.protocol !== "https:" && x.protocol !== "http:") return false;
+      const host = (x.hostname || "").toLowerCase();
+      return PADRE_HOSTS.has(host) || host.endsWith(".padre.gg");
     } catch {
-      /* ignore */
+      return false;
     }
-    return mint ? `https://trade.padre.gg/trade/solana/${mint}` : "";
   }
 
   function openPadreTab(url) {
-    if (!url) return false;
+    if (!url || !isAllowedPadreUrl(url)) return false;
     try {
       const w = window.open(url, "_blank", "noopener,noreferrer");
       if (w) {
@@ -296,8 +303,10 @@
     } catch {
       /* blocked */
     }
-    // Popup blocked (common on auto-refresh) — queue until next user click
-    if (!pendingPadreUrls.includes(url)) pendingPadreUrls.push(url);
+    // Popup blocked — queue until next user click (capped)
+    if (!pendingPadreUrls.includes(url) && pendingPadreUrls.length < MAX_PADRE_QUEUE) {
+      pendingPadreUrls.push(url);
+    }
     return false;
   }
 
@@ -306,13 +315,16 @@
     document.addEventListener(
       "click",
       () => {
-        while (pendingPadreUrls.length) {
+        let n = 0;
+        while (pendingPadreUrls.length && n < MAX_PADRE_QUEUE) {
           const u = pendingPadreUrls.shift();
+          if (!isAllowedPadreUrl(u)) continue;
           try {
             window.open(u, "_blank", "noopener,noreferrer");
           } catch {
             /* ignore */
           }
+          n += 1;
         }
       },
       true

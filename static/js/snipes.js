@@ -180,15 +180,24 @@ function nearMissHtml(misses = []) {
   </div>`;
 }
 
-function render(tokens, counts = {}, nearMisses = []) {
+function rejectBreakdownHtml(rb = {}) {
+  const entries = Object.entries(rb || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (!entries.length) return "";
+  return `<p class="muted">Why empty: ${entries
+    .map(([k, v]) => `${escapeHtml(k)}:${v}`)
+    .join(" · ")}</p>`;
+}
+
+function render(tokens, counts = {}, nearMisses = [], extra = {}) {
   const list = $("#list");
   if (!list) return;
   if (!tokens.length) {
     const band = counts.band_hits != null ? counts.band_hits : "—";
     list.innerHTML = `<div class="empty">
       <strong>No safe 2× snipes right now</strong>
-      <p>We only show $3.5k–$16k climbers. SNIPE needs bundled ≤5% + clean snipers; SETUP allows up to ~8% (small size). Near-ATH, room to 2×. Empty is normal — most charts are sniper traps or dumps.</p>
+      <p>We only show $3.5k–$16k climbers. SNIPE needs bundled ≤5% + clean snipers; SETUP allows up to ~8% only without hard/high book risk. Near-ATH, room to 2×. Empty is normal — most charts are sniper traps or dumps.</p>
       <p class="muted">Scanned ${counts.candidates_raw ?? "—"} · band hits ${band} · rejected ${counts.rejected ?? "—"}</p>
+      ${rejectBreakdownHtml(extra.reject_breakdown)}
       ${nearMissHtml(nearMisses)}
     </div>`;
   } else {
@@ -237,7 +246,9 @@ async function scan(force = false) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const tokens = data.tokens || [];
-    render(tokens, data.counts || {}, data.near_misses || []);
+    render(tokens, data.counts || {}, data.near_misses || [], {
+      reject_breakdown: data.reject_breakdown,
+    });
     try {
       if (window.MoonAlerts) {
         MoonAlerts.alertNewPicks("snipe", tokens);
