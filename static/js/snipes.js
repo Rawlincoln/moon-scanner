@@ -239,7 +239,10 @@ async function scan(force = false) {
     const tokens = data.tokens || [];
     render(tokens, data.counts || {}, data.near_misses || []);
     try {
-      if (window.MoonAlerts) MoonAlerts.alertNewPicks("snipe", tokens);
+      if (window.MoonAlerts) {
+        MoonAlerts.alertNewPicks("snipe", tokens);
+        MoonAlerts.openPadreIfOnBoth("snipe", tokens, apiUrl);
+      }
     } catch {
       /* optional */
     }
@@ -293,6 +296,7 @@ function bind() {
   try {
     if (window.MoonAlerts) {
       MoonAlerts.wireToggle($("#alertToggle"), $("#alertStatus"));
+      MoonAlerts.wirePadreToggle($("#padreBothToggle"), $("#padreBothStatus"));
     }
   } catch {
     /* optional */

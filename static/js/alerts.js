@@ -229,6 +229,199 @@
     });
   }
 
+  // --- Auto-open Padre when token is on BOTH moon + safe snipes ---
+  const LS_PADRE_BOTH = "moon_padre_both_on";
+  const LS_PADRE_OPENED = "moon_padre_opened_v1";
+  const PADRE_TTL_MS = 60 * 60 * 1000; // once per mint per hour
+  const pendingPadreUrls = [];
+  let padrePrimed = false;
+
+  function padreBothEnabled() {
+    // default ON
+    const v = localStorage.getItem(LS_PADRE_BOTH);
+    return v === null || v === "1";
+  }
+
+  function setPadreBothEnabled(on) {
+    localStorage.setItem(LS_PADRE_BOTH, on ? "1" : "0");
+  }
+
+  function loadPadreOpened() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(LS_PADRE_OPENED) || "{}");
+      const now = Date.now();
+      const out = {};
+      for (const [k, ts] of Object.entries(raw || {})) {
+        if (now - Number(ts) < PADRE_TTL_MS) out[k] = Number(ts);
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  function savePadreOpened(map) {
+    try {
+      localStorage.setItem(LS_PADRE_OPENED, JSON.stringify(map));
+    } catch {
+      /* quota */
+    }
+  }
+
+  function padreUrl(mint, token) {
+    const u =
+      (token && (token.padre_url || token.padreUrl)) ||
+      (mint ? `https://trade.padre.gg/trade/solana/${mint}` : "");
+    try {
+      const x = new URL(String(u));
+      if (x.protocol === "http:" || x.protocol === "https:") return x.href;
+    } catch {
+      /* ignore */
+    }
+    return mint ? `https://trade.padre.gg/trade/solana/${mint}` : "";
+  }
+
+  function openPadreTab(url) {
+    if (!url) return false;
+    try {
+      const w = window.open(url, "_blank", "noopener,noreferrer");
+      if (w) {
+        try {
+          w.opener = null;
+        } catch {
+          /* ignore */
+        }
+        return true;
+      }
+    } catch {
+      /* blocked */
+    }
+    // Popup blocked (common on auto-refresh) — queue until next user click
+    if (!pendingPadreUrls.includes(url)) pendingPadreUrls.push(url);
+    return false;
+  }
+
+  // Flush queued Padre tabs on any user click (bypasses popup blocker)
+  if (typeof document !== "undefined") {
+    document.addEventListener(
+      "click",
+      () => {
+        while (pendingPadreUrls.length) {
+          const u = pendingPadreUrls.shift();
+          try {
+            window.open(u, "_blank", "noopener,noreferrer");
+          } catch {
+            /* ignore */
+          }
+        }
+      },
+      true
+    );
+  }
+
+  /**
+   * After a moon or snipes scan: if mint is on BOTH feeds, open Padre.
+   * @param {"moon"|"snipe"} kind
+   * @param {Array<object>} tokens
+   * @param {(path:string)=>string} apiUrlFn
+   */
+  async function openPadreIfOnBoth(kind, tokens, apiUrlFn) {
+    if (!padreBothEnabled()) return 0;
+    const list = Array.isArray(tokens) ? tokens : [];
+    if (!list.length) return 0;
+
+    const urlFn =
+      typeof apiUrlFn === "function"
+        ? apiUrlFn
+        : (p) => p;
+
+    // Fetch the other feed
+    const otherPath =
+      kind === "moon"
+        ? "/api/snipes?limit=24&force=false"
+        : "/api/moon?limit=24&force=false";
+    let otherTokens = [];
+    try {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 20000);
+      const res = await fetch(urlFn(otherPath), { signal: ctrl.signal });
+      clearTimeout(to);
+      if (!res.ok) return 0;
+      const data = await res.json();
+      otherTokens = data.tokens || [];
+    } catch {
+      return 0;
+    }
+
+    const otherByMint = new Map();
+    for (const t of otherTokens) {
+      const m = (t.tokenAddress || t.mint || "").trim();
+      if (m) otherByMint.set(m, t);
+    }
+
+    const opened = loadPadreOpened();
+    const now = Date.now();
+
+    // First run after load: seed current duals so we don't open a flood
+    if (!padrePrimed) {
+      for (const t of list) {
+        const m = (t.tokenAddress || t.mint || "").trim();
+        if (m && otherByMint.has(m)) opened[m] = now;
+      }
+      savePadreOpened(opened);
+      padrePrimed = true;
+      return 0;
+    }
+
+    let n = 0;
+    for (const t of list) {
+      const mint = (t.tokenAddress || t.mint || "").trim();
+      if (!mint || !otherByMint.has(mint)) continue;
+      if (opened[mint]) continue;
+
+      const other = otherByMint.get(mint);
+      const url = padreUrl(mint, t.padre_url ? t : other);
+      const sym = t.symbol || other.symbol || "?";
+      const moonLab = kind === "moon" ? t.moon_label || t.moon?.label : other.moon_label || other.moon?.label;
+      const snipeLab = kind === "snipe" ? t.snipe_label || t.snipe?.label : other.snipe_label || other.snipe?.label;
+
+      const ok = openPadreTab(url);
+      opened[mint] = now;
+      n += 1;
+
+      // Desktop notify even if popup blocked
+      if (enabled() && supported() && Notification.permission === "granted") {
+        notifyOne({
+          title: `◈⚡ BOTH: $${sym}`,
+          body: `On Moons (${moonLab || "pick"}) + Safe Snipes (${snipeLab || "pick"}) — Padre ${ok ? "opened" : "queued (click page to open)"}`,
+          tag: `both-padre:${mint}`,
+          url,
+        });
+      }
+      if (n >= 3) break; // safety cap per scan
+    }
+    if (n) savePadreOpened(opened);
+    return n;
+  }
+
+  function wirePadreToggle(checkboxEl, statusEl) {
+    if (!checkboxEl) return;
+    checkboxEl.checked = padreBothEnabled();
+    const sync = () => {
+      if (statusEl) {
+        statusEl.textContent = checkboxEl.checked
+          ? "Padre auto-open when on both"
+          : "Padre auto-open off";
+      }
+    };
+    sync();
+    checkboxEl.addEventListener("change", () => {
+      setPadreBothEnabled(checkboxEl.checked);
+      if (checkboxEl.checked) padrePrimed = false; // re-seed, no flood
+      sync();
+    });
+  }
+
   global.MoonAlerts = {
     enabled,
     setEnabled,
@@ -236,5 +429,8 @@
     alertNewPicks,
     wireToggle,
     supported,
+    openPadreIfOnBoth,
+    wirePadreToggle,
+    padreBothEnabled,
   };
 })(window);

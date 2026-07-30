@@ -42,6 +42,10 @@
       <input type="checkbox" id="alertToggle" /> 🔔 Alerts
     </label>
     <span class="pill muted" id="alertStatus" style="font-size:0.78rem">Alerts off</span>
+    <label class="chk" title="When a token is on Moons AND Safe Snipes, open Padre in a new tab">
+      <input type="checkbox" id="padreBothToggle" checked /> Padre if both
+    </label>
+    <span class="pill muted" id="padreBothStatus" style="font-size:0.78rem">Padre auto-open when on both</span>
     <label class="field">
       Max age
       <select id="maxAge">
@@ -82,7 +86,7 @@
     · API: <a href="/api/snipes" style="color:inherit">/api/snipes</a>
   </footer>
 
-  <script src="/static/js/alerts.js?v=1"></script>
-  <script src="/static/js/snipes.js?v=6"></script>
+  <script src="/static/js/alerts.js?v=2"></script>
+  <script src="/static/js/snipes.js?v=7"></script>
 </body>
 </html>

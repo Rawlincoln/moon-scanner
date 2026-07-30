@@ -310,7 +310,10 @@ async function scan(force = false) {
     lastTokens = data.tokens || [];
     render(lastTokens, data.counts || {}, data.near_misses || []);
     try {
-      if (window.MoonAlerts) MoonAlerts.alertNewPicks("moon", lastTokens);
+      if (window.MoonAlerts) {
+        MoonAlerts.alertNewPicks("moon", lastTokens);
+        MoonAlerts.openPadreIfOnBoth("moon", lastTokens, apiUrl);
+      }
     } catch {
       /* optional */
     }
@@ -438,6 +441,7 @@ function init() {
   try {
     if (window.MoonAlerts) {
       MoonAlerts.wireToggle($("#alertToggle"), $("#alertStatus"));
+      MoonAlerts.wirePadreToggle($("#padreBothToggle"), $("#padreBothStatus"));
     }
   } catch {
     /* optional */
