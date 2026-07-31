@@ -65,3 +65,14 @@
   color: #ff6b7a;
   font-weight: 600;
 }
+
+.dev-line {
+  font-size: 0.82rem !important;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.dev-line strong {
+  color: #ffb08a;
+  font-weight: 600;
+}

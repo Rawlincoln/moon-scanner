@@ -74,6 +74,11 @@ function cardHtml(t) {
   const shortMint = mint ? `${mint.slice(0, 4)}…${mint.slice(-4)}` : "";
   const risk = heat.risk_level || t.risk_level || "high";
   const replies = heat.replies ?? heat.meta?.replies;
+  const dev = heat.dev || t.dev || {};
+  const launched = dev.tokens_launched;
+  const migrated = dev.tokens_migrated;
+  const devSold = dev.creator_sold;
+  const thisStatus = dev.this_status || "";
   const icon = t.icon
     ? `<img class="icon" src="${escapeHtml(safeHttpUrl(t.icon, ""))}" alt="" onerror="this.outerHTML='<div class=\\'icon ph\\'>◎</div>'" />`
     : `<div class="icon ph">◎</div>`;
@@ -105,6 +110,23 @@ function cardHtml(t) {
     heat.holders_known === false
       ? `<span class="risk-tag">holders unknown</span>`
       : "";
+  const devSoldTag = devSold
+    ? `<span class="risk-tag">dev sold</span>`
+    : "";
+  const serialTag =
+    launched != null && launched >= 6 && (migrated == null || migrated === 0)
+      ? `<span class="risk-tag">serial farm?</span>`
+      : "";
+  const devLine = [
+    launched != null ? `dev tokens: ${launched}` : "dev tokens: ?",
+    migrated != null ? `migrated: ${migrated}` : null,
+    thisStatus ? `now: ${thisStatus.replace(/_/g, " ")}` : null,
+    devSold ? "dev SOLD" : dev.creator_pct != null && dev.creator_pct > 0
+      ? `dev holds ${Number(dev.creator_pct).toFixed(1)}%`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return `
     <article class="card ${escapeHtml(label.toLowerCase())}" data-mint="${escapeHtml(mint)}">
@@ -117,6 +139,8 @@ function cardHtml(t) {
           <span class="risk-tag">${escapeHtml(risk)}</span>
           ${enrichWarn}
           ${holdersWarn}
+          ${devSoldTag}
+          ${serialTag}
         </div>
         <div class="meta">
           <span>${fmtUsd(mcap)} mcap</span>
@@ -127,6 +151,7 @@ function cardHtml(t) {
           ${m5Html}
           <span>score ${score} · conf ${conf}</span>
         </div>
+        <div class="meta dev-line"><strong>Dev:</strong> ${escapeHtml(devLine)}</div>
         ${whyHtml}
         ${planHtml}
         <div class="actions">

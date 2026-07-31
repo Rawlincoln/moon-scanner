@@ -247,7 +247,33 @@ class SolanaAnalyzer:
         insider_networks = len(
             full.get("insiderNetworks") or summary.get("insiderNetworks") or []
         )
-        creator_tokens = len(full.get("creatorTokens") or [])
+        creator_token_rows = full.get("creatorTokens") or []
+        if not isinstance(creator_token_rows, list):
+            creator_token_rows = []
+        creator_tokens = len(creator_token_rows)
+        # Count prior graduations / migrations when RugCheck exposes signals
+        creator_migrated = 0
+        for ct in creator_token_rows:
+            if not isinstance(ct, dict):
+                continue
+            if (
+                ct.get("migrated")
+                or ct.get("complete")
+                or ct.get("raydiumPool")
+                or ct.get("raydium")
+                or ct.get("graduated")
+                or str(ct.get("status") or "").lower()
+                in ("migrated", "graduated", "complete")
+            ):
+                creator_migrated += 1
+                continue
+            try:
+                # High historical mcap on creator's other mints ≈ migrated/ran
+                mc = float(ct.get("marketCap") or ct.get("usd_market_cap") or 0)
+                if mc >= 50_000:
+                    creator_migrated += 1
+            except (TypeError, ValueError):
+                pass
         total_holders = int(full.get("totalHolders") or summary.get("totalHolders") or 0)
         rugged = bool(full.get("rugged") or summary.get("rugged"))
         insider_holders = [h for h in top_holders if h.get("insider")]
@@ -321,6 +347,8 @@ class SolanaAnalyzer:
             "insider_detected": insider_detected,
             "insider_networks": insider_networks,
             "creator_token_count": creator_tokens,
+            "creator_migrated_count": creator_migrated,
+            "creator_tokens": creator_token_rows[:25],
             "total_holders": total_holders,
             "rugged": rugged,
             "insider_holders": insider_holders[:5],

@@ -97,6 +97,98 @@ def _bundled_pct(token: dict[str, Any]) -> float | None:
     return None
 
 
+def _dev_profile(token: dict[str, Any]) -> dict[str, Any]:
+    """Creator history: sold bag, # tokens launched, # migrated, this mint status."""
+    safety = token.get("safety") or {}
+    pf = token.get("pumpfun") or {}
+    creator = (
+        safety.get("creator")
+        or pf.get("creator")
+        or token.get("creator")
+        or ""
+    )
+    launched = _i(
+        safety.get("creator_token_count")
+        if safety.get("creator_token_count") is not None
+        else token.get("creator_token_count")
+    )
+    rows = safety.get("creator_tokens") or token.get("creator_tokens") or []
+    if not isinstance(rows, list):
+        rows = []
+    if launched <= 0 and rows:
+        launched = len(rows)
+
+    migrated = _i(safety.get("creator_migrated_count"))
+    if migrated <= 0 and rows:
+        for ct in rows:
+            if not isinstance(ct, dict):
+                continue
+            if (
+                ct.get("migrated")
+                or ct.get("complete")
+                or ct.get("raydiumPool")
+                or ct.get("raydium")
+                or ct.get("graduated")
+                or str(ct.get("status") or "").lower()
+                in ("migrated", "graduated", "complete")
+            ):
+                migrated += 1
+                continue
+            try:
+                mc = float(ct.get("marketCap") or ct.get("usd_market_cap") or 0)
+                if mc >= 50_000:
+                    migrated += 1
+            except (TypeError, ValueError):
+                pass
+
+    creator_sold = bool(safety.get("creator_sold"))
+    creator_pct = _f(safety.get("creator_pct"))
+    creator_bal = _f(safety.get("creator_balance"))
+    # Infer sold if creator not in top holders and balance 0
+    if not creator_sold and safety.get("top_holders") and creator:
+        found = False
+        for h in safety.get("top_holders") or []:
+            owner = str(h.get("owner") or h.get("address") or "")
+            if creator and creator in owner:
+                found = True
+                creator_pct = max(creator_pct, _f(h.get("pct")))
+                break
+        if not found and creator_bal <= 0 and holders_known(token):
+            creator_sold = True
+
+    this_complete = bool(pf.get("complete") or token.get("complete"))
+    on_curve = safety.get("on_bonding_curve")
+    if on_curve is None:
+        on_curve = not this_complete
+    bond = _f(token.get("bonding_progress") or pf.get("bonding_progress"))
+    mcap = extract_mcap_usd(token)
+    # Migration path for THIS token
+    if this_complete or (on_curve is False and mcap >= 40_000):
+        this_status = "migrated"
+    elif bond >= 55 or mcap >= 40_000:
+        this_status = "near_migration"
+    elif bond >= 25 or mcap >= 15_000:
+        this_status = "climbing"
+    else:
+        this_status = "early_curve"
+
+    migrate_rate = (migrated / launched) if launched > 0 else None
+    return {
+        "creator": (str(creator)[:12] + "…") if creator and len(str(creator)) > 14 else str(creator or ""),
+        "creator_full": str(creator or ""),
+        "creator_sold": creator_sold,
+        "creator_pct": round(creator_pct, 2),
+        "creator_balance": creator_bal,
+        "tokens_launched": launched,
+        "tokens_migrated": migrated,
+        "migrate_rate": round(migrate_rate, 3) if migrate_rate is not None else None,
+        "this_status": this_status,
+        "this_complete": this_complete,
+        "on_bonding_curve": bool(on_curve),
+        "bonding_pct": round(bond, 1),
+    }
+
+
 def heat_reject_reason(token: dict[str, Any]) -> str | None:
     """Hard rejects only — intentionally looser than moon/snipe."""
     mint = (token.get("tokenAddress") or token.get("mint") or "").strip()
@@ -152,6 +244,24 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
     if safety.get("error") and token.get("enrich_ok") is True:
         # enrich claimed ok but safety error — treat as incomplete
         pass
+
+    # --- Dev / serial deployer / sold bag ---
+    dev = _dev_profile(token)
+    launched = int(dev.get("tokens_launched") or 0)
+    if launched >= 15:
+        return f"serial deployer — {launched} tokens launched"
+    if launched >= 8 and int(dev.get("tokens_migrated") or 0) == 0:
+        return f"serial deploys ({launched}) with 0 migrations — farm risk"
+    if (
+        dev.get("creator_sold")
+        and _f(dev.get("creator_pct")) < 0.5
+        and launched >= 3
+    ):
+        return "dev sold bag + multi-launch history"
+    if "creator_dumped" in flags or "dev_out_green_chart" in flags:
+        return "dev out / creator dumped"
+    if "serial_creator" in flags:
+        return f"serial creator ({launched or 'many'} tokens)"
 
     # After enrich pipeline: allow incomplete as RISKY later, but reject pure fail
     if "enrich_ok" in token and token.get("enrich_ok") is not True:
@@ -360,6 +470,55 @@ def _heat_signals(token: dict[str, Any]) -> tuple[int, list[str], dict[str, Any]
         score -= 5
         why.append("Incomplete safety enrich")
 
+    # --- Dev history (launched / migrated / sold) ---
+    dev = _dev_profile(token)
+    launched = int(dev.get("tokens_launched") or 0)
+    migrated = int(dev.get("tokens_migrated") or 0)
+    meta["dev"] = dev
+    if launched <= 0:
+        why.append("Dev history unknown")
+    elif launched == 1:
+        score += 6
+        why.append("First token from this dev")
+    elif launched == 2:
+        score += 3
+        why.append("Dev: 2 launches")
+    elif launched <= 5:
+        score -= 4
+        why.append(f"Dev launched {launched} tokens")
+    elif launched < 8:
+        score -= 10
+        why.append(f"Dev launched {launched} tokens — caution")
+    else:
+        score -= 18
+        why.append(f"Serial deployer: {launched} tokens")
+
+    if migrated >= 2 and launched > 0 and migrated / max(launched, 1) >= 0.25:
+        score += 10
+        why.append(f"Dev migrated {migrated}/{launched} prior — better track")
+    elif migrated == 1 and launched <= 4:
+        score += 5
+        why.append(f"Dev has {migrated} prior migration")
+    elif launched >= 4 and migrated == 0:
+        score -= 10
+        why.append(f"0/{launched} prior migrations — farm pattern")
+
+    if dev.get("creator_sold"):
+        score -= 16
+        why.append("Dev sold / not in holders")
+    elif _f(dev.get("creator_pct")) >= 3:
+        score += 3
+        why.append(f"Dev still holds ~{_f(dev.get('creator_pct')):.1f}%")
+
+    if dev.get("this_status") == "migrated":
+        score += 4
+        why.append("This token already migrated")
+    elif dev.get("this_status") == "near_migration":
+        score += 8
+        why.append(f"Near migration · bond {_f(dev.get('bonding_pct')):.0f}%")
+    elif dev.get("this_status") == "climbing":
+        score += 4
+
     score = max(0, min(99, score))
     return score, why, meta
 
@@ -390,15 +549,21 @@ def evaluate_heat(token: dict[str, Any]) -> dict[str, Any]:
     enrich_ok = token.get("enrich_ok") is True
     replies = _i(meta.get("replies"))
     ath_ok = ath_ret is None or ath_ret >= ATH_SOFT_FLOOR * 100
+    dev = meta.get("dev") or _dev_profile(token)
 
-    # Labels: HEAT needs real heat + not garbage book
+    # Labels: HEAT needs real heat + not garbage book + not serial farm
     conf = score
+    serial_ish = int(dev.get("tokens_launched") or 0) >= 6 and int(
+        dev.get("tokens_migrated") or 0
+    ) == 0
     if (
         score >= 64
         and replies >= 8
         and ath_ok
         and (enrich_ok or hk)
         and (bun is None or bun <= 18)
+        and not dev.get("creator_sold")
+        and not serial_ish
     ):
         label = LABEL_HEAT
         conf = max(conf, 58)
@@ -409,6 +574,10 @@ def evaluate_heat(token: dict[str, Any]) -> dict[str, Any]:
         label = LABEL_WARM
         conf = min(conf, 55)
         risk = "high"
+        if dev.get("creator_sold") or serial_ish:
+            label = LABEL_RISKY
+            conf = min(conf, 48)
+            risk = "very_high"
     elif score >= 36 and ath_ok:
         label = LABEL_RISKY
         conf = min(conf, 45)
@@ -424,6 +593,7 @@ def evaluate_heat(token: dict[str, Any]) -> dict[str, Any]:
             "risk_level": "skip",
             "why": why[:5] or ["Weak heat"],
             "ath_retention_pct": ath_ret,
+            "dev": dev,
             "plan": None,
         }
 
@@ -444,7 +614,7 @@ def evaluate_heat(token: dict[str, Any]) -> dict[str, Any]:
         "invalidation_usd": round(mcap * 0.70, 0) if mcap else None,
         "size_advice": (
             "HIGH RECALL mode — many of these dump. Dust size only. "
-            "Not a moon rec. Cut fast on −30% or dead replies."
+            "Check dev sold / launch count / migrations. Cut on −30%."
         ),
         "rule": "Organic heat ≠ safe. Prefer Moons tab for capital protection.",
     }
@@ -456,11 +626,12 @@ def evaluate_heat(token: dict[str, Any]) -> dict[str, Any]:
         "label": label,
         "confidence": max(0, min(99, int(conf))),
         "risk_level": risk,
-        "why": why[:7],
+        "why": why[:8],
         "ath_retention_pct": ath_ret,
         "holders_known": hk,
         "bundle_pct": bun,
         "replies": replies,
+        "dev": dev,
         "narrative": social.get("summary") or "",
         "badges": social.get("badges") or [],
         "plan": plan,
@@ -490,6 +661,7 @@ def filter_and_rank_heat(
         row["confidence"] = ev["confidence"]
         row["risk_level"] = ev.get("risk_level")
         row["ath_retention_pct"] = ev.get("ath_retention_pct")
+        row["dev"] = ev.get("dev")
         out.append(row)
 
     rank = {LABEL_HEAT: 0, LABEL_WARM: 1, LABEL_RISKY: 2}

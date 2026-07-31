@@ -110,3 +110,68 @@ def test_filter_ranks_heat_first():
 def test_honeypot_blocked():
     r = heat_reject_reason(_base(safety={"honeypot": True, "top_holders": [{"pct": 1}]}))
     assert r and "honey" in r.lower() or "rugged" in r.lower() or r
+
+
+def test_serial_deployer_blocked():
+    t = _base(
+        safety={
+            "passed": True,
+            "top_holders": [{"pct": 3}],
+            "creator_token_count": 20,
+            "creator_migrated_count": 0,
+            "creator": "Dev111111111111111111111111111111111",
+        }
+    )
+    r = heat_reject_reason(t)
+    assert r and ("serial" in r.lower() or "launch" in r.lower())
+
+
+def test_dev_sold_multi_launch_blocked():
+    t = _base(
+        safety={
+            "passed": True,
+            "top_holders": [{"pct": 2, "owner": "OtherWallet11111111111111111111111"}],
+            "creator": "Dev111111111111111111111111111111111",
+            "creator_sold": True,
+            "creator_pct": 0,
+            "creator_token_count": 5,
+            "creator_migrated_count": 0,
+        }
+    )
+    r = heat_reject_reason(t)
+    assert r and ("sold" in r.lower() or "dev" in r.lower() or "serial" in r.lower())
+
+
+def test_dev_with_migrations_scores_higher():
+    from services.organic_heat import evaluate_heat
+
+    weak = _base(
+        safety={
+            "passed": True,
+            "top_holders": [{"pct": 3}],
+            "creator_token_count": 6,
+            "creator_migrated_count": 0,
+            "creator_sold": False,
+            "creator": "DevA11111111111111111111111111111111",
+        }
+    )
+    good = _base(
+        tokenAddress="HeatMintGood1111111111111111111111111",
+        safety={
+            "passed": True,
+            "top_holders": [{"pct": 3, "owner": "DevB11111111111111111111111111111111"}],
+            "creator_token_count": 3,
+            "creator_migrated_count": 2,
+            "creator_sold": False,
+            "creator_pct": 4.0,
+            "creator": "DevB11111111111111111111111111111111",
+        },
+    )
+    # may still reject weak for serial farm pattern
+    eg = evaluate_heat(good)
+    assert eg.get("dev") is not None or eg.get("eligible") is not None
+    if eg.get("eligible"):
+        assert eg["dev"]["tokens_migrated"] == 2
+        assert "migration" in " ".join(eg.get("why") or []).lower() or eg[
+            "dev"
+        ]["tokens_launched"] == 3

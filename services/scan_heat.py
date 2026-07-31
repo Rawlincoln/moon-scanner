@@ -292,13 +292,14 @@ async def scan_organic_heat(
             "rule": (
                 "ORGANIC HEAT = high recall, NOT capital protection. "
                 f"Band ${HEAT_MCAP_MIN:,.0f}–${HEAT_MCAP_MAX:,.0f}. "
-                "Allows pullbacks, thin narrative, incomplete holders → labeled RISKY. "
-                "Still blocks rugs, critical bundles, hard dumps. "
+                "Checks dev sold, # tokens launched, # prior migrations, this mint curve status. "
+                "Serial farms (many launches / 0 migrations) and dev-sold bags blocked or demoted. "
+                "Pullbacks + thin narrative OK → RISKY labels. "
                 "Dust size only. Use Moons for high-accuracy picks."
             ),
             "warning": (
-                "Many HEAT/WARM/RISKY tokens dump. This feed exists to catch "
-                "organic runners Moons intentionally skip. Never size large."
+                "Many HEAT/WARM/RISKY tokens dump. Check the Dev line on each card "
+                "(launched / migrated / sold). Never size large."
             ),
         }
         _cache["data"] = payload
