@@ -1,0 +1,67 @@
+/* Organic Heat page accents */
+.page-heat .bg {
+  background:
+    radial-gradient(ellipse 55% 42% at 60% 0%, rgba(255, 90, 50, 0.14), transparent),
+    radial-gradient(ellipse 40% 30% at 10% 85%, rgba(255, 176, 32, 0.08), transparent);
+}
+
+.heat-mark {
+  color: #ff6b3d !important;
+  text-shadow: 0 0 24px rgba(255, 90, 50, 0.5) !important;
+}
+
+.page-heat .nav a.active {
+  color: #0a0b10;
+  background: linear-gradient(135deg, #ff6b3d, #ffb020);
+  border-color: transparent;
+}
+
+.heat-banner {
+  border-color: rgba(255, 90, 50, 0.4) !important;
+  background: rgba(255, 90, 50, 0.1) !important;
+}
+
+.heat-banner strong {
+  color: #ff8a5c;
+}
+
+.heat-banner a {
+  color: var(--green);
+}
+
+.card.heat {
+  border-color: rgba(255, 90, 50, 0.5);
+  box-shadow: 0 0 0 1px rgba(255, 90, 50, 0.15);
+}
+
+.card.warm {
+  border-color: rgba(255, 176, 32, 0.45);
+}
+
+.card.risky {
+  border-color: rgba(255, 80, 100, 0.4);
+  opacity: 0.95;
+}
+
+.badge.HEAT {
+  background: rgba(255, 90, 50, 0.2);
+  color: #ff8a5c;
+}
+
+.badge.WARM {
+  background: rgba(255, 176, 32, 0.18);
+  color: var(--warn);
+}
+
+.badge.RISKY {
+  background: rgba(255, 80, 100, 0.18);
+  color: #ff6b7a;
+}
+
+.risk-tag {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #ff6b7a;
+  font-weight: 600;
+}

@@ -3,50 +3,47 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Moon Scanner — High-accuracy climbers only</title>
+  <title>Organic Heat — High recall · Moon Scanner</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/moon.css?v=7" />
-  <link rel="stylesheet" href="/static/css/snipes.css?v=1" />
+  <link rel="stylesheet" href="/static/css/snipes.css?v=2" />
+  <link rel="stylesheet" href="/static/css/heat.css?v=1" />
 </head>
-<body>
+<body class="page-heat">
   <div class="bg"></div>
 
   <nav class="nav">
-    <a href="/" class="active">◈ Moons</a>
+    <a href="/">◈ Moons</a>
     <a href="/snipes">⚡ Safe Snipes 2×</a>
-    <a href="/heat">🔥 Organic Heat</a>
+    <a href="/heat" class="active">🔥 Organic Heat</a>
   </nav>
 
   <header class="top">
     <div class="brand">
-      <span class="mark">◈</span>
+      <span class="mark heat-mark">🔥</span>
       <div>
-        <h1>Moon Scanner</h1>
-        <p>Narrative + influencer edge only — random dumps stay hidden</p>
+        <h1>Organic Heat</h1>
+        <p>High recall — catch runners Moons skip · <strong>RISKY by design</strong></p>
       </div>
     </div>
     <div class="pills">
       <span class="pill" id="statShown">—</span>
-      <span class="pill" id="statMoon">0 moon</span>
+      <span class="pill" id="statHeat">0 heat</span>
       <span class="pill muted" id="statBackend">local</span>
     </div>
   </header>
 
   <section class="bar">
-    <button type="button" class="btn primary" id="scanBtn">Scan moons</button>
+    <button type="button" class="btn primary" id="scanBtn">Scan heat</button>
     <label class="chk">
-      <input type="checkbox" id="autoRefresh" checked /> Auto 10s
+      <input type="checkbox" id="autoRefresh" checked /> Auto 12s
     </label>
-    <label class="chk" title="Desktop alerts for new MOON / WATCH picks">
+    <label class="chk" title="Desktop alerts for new HEAT picks">
       <input type="checkbox" id="alertToggle" /> 🔔 Alerts
     </label>
     <span class="pill muted" id="alertStatus" style="font-size:0.78rem">Alerts off</span>
-    <label class="chk" title="When a token is on Moons AND Safe Snipes, open Padre in a new tab">
-      <input type="checkbox" id="padreBothToggle" checked /> Padre if both
-    </label>
-    <span class="pill muted" id="padreBothStatus" style="font-size:0.78rem">Padre auto-open when on both</span>
     <label class="field">
       Max age
       <select id="maxAge">
@@ -59,9 +56,8 @@
     <label class="field">
       Show
       <select id="limit">
-        <option value="8">8</option>
-        <option value="12" selected>12</option>
-        <option value="16">16</option>
+        <option value="12">12</option>
+        <option value="16" selected>16</option>
         <option value="24">24</option>
       </select>
     </label>
@@ -74,18 +70,23 @@
     </label>
   </section>
 
-  <p class="status" id="status">Ready — scanning for Elon/CZ/Trump tweets, hot tickers, real narratives</p>
+  <div class="plan-banner heat-banner" id="planBanner">
+    <strong>Not capital protection.</strong>
+    HEAT / WARM / RISKY = organic volume + replies + structure — many still dump.
+    Dust size · cut on −30% · use <a href="/">Moons</a> for high-accuracy narrative picks.
+  </div>
+
+  <p class="status" id="status">Ready — wider band, pullbacks allowed, narrative optional</p>
   <p class="rule" id="rule"></p>
-  <p class="rule" id="outcomeStats">Outcomes: —</p>
 
   <main id="list" class="list"></main>
 
   <footer class="foot">
-    Not financial advice. DYOR. Empty list is normal — most coins dump. We only surface near-ATH + narrative edge.
-    Track results: <a href="/api/moon/outcomes" style="color:inherit">/api/moon/outcomes</a>
+    Not financial advice. DYOR. This feed intentionally shows more noise to catch more runners.
+    API: <a href="/api/heat" style="color:inherit">/api/heat</a>
   </footer>
 
   <script src="/static/js/alerts.js?v=3"></script>
-  <script src="/static/js/moon.js?v=16"></script>
+  <script src="/static/js/heat.js?v=1"></script>
 </body>
 </html>

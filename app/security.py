@@ -33,6 +33,7 @@ _EVM_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 _EXPENSIVE_PREFIXES = (
     "/api/moon",
     "/api/snipes",
+    "/api/heat",
     "/api/analyze",
     "/api/checkers",
     "/api/scan",
