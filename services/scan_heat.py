@@ -235,7 +235,7 @@ async def scan_organic_heat(
             post_reject["not_enriched_overflow"] += len(rest)
 
         # Also try pre-enrich rejects that only failed enrich — already in accurate if pass
-        display = filter_and_rank_heat(accurate, min_score=42, limit=limit)
+        display = filter_and_rank_heat(accurate, min_score=36, limit=limit)
         for t in display:
             if not t.get("heat"):
                 t["heat"] = evaluate_heat(t)

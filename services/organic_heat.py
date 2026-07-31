@@ -19,13 +19,36 @@ from services.runner_radar import extract_ath_mcap, extract_mcap_usd, is_crashed
 from services.social_signals import analyze_social_narrative
 
 # Wider than moons — catch earlier / later meta
-HEAT_MCAP_MIN = 2_500.0
-HEAT_MCAP_MAX = 95_000.0
-MIN_AGE_MIN = 0.8
-MAX_AGE_MIN = 180.0
+HEAT_MCAP_MIN = 1_500.0
+HEAT_MCAP_MAX = 120_000.0
+MIN_AGE_MIN = 0.5
+MAX_AGE_MIN = 240.0
 # Allow deeper pullbacks than moon −12% wall
-ATH_HARD_DUMP = 0.55  # −45% = dead for heat too
-ATH_SOFT_FLOOR = 0.68  # −32% still visible as RISKY if heat signals
+ATH_HARD_DUMP = 0.50  # −50% = dead for heat too
+ATH_SOFT_FLOOR = 0.62  # −38% still visible as RISKY if heat signals
+
+# Only capital-true hard blocks in heat mode (social packaging is score demotion)
+HEAT_BLOCK_FLAGS = frozenset(
+    {
+        "blocklist",
+        "banned",
+        "rugged",
+        "honeypot",
+        "drained_curve",
+        "lp_unlocked",
+        "lp_not_locked",
+        "freeze_authority",
+        "mint_authority",
+        "flash_pump_dump",
+        "post_ath_crash",
+        "adult_bait",
+        "extreme_wash",
+        "spam_deploy_tool",
+        "serial_creator",
+        "ghost_launch",
+        "dev_out_green_chart",
+    }
+)
 
 LABEL_HEAT = "HEAT"  # best organic heat (still not "safe moon")
 LABEL_WARM = "WARM"  # mid heat
@@ -106,9 +129,22 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
     if ath >= 3_000 and mcap > 0 and mcap < ath * ATH_HARD_DUMP:
         return f"hard dump −{(1 - mcap / ath) * 100:.0f}% from ATH"
 
+    # Capital threats only — status-link / soft social spoof is demoted, not hidden
+    avoid = (
+        token.get("avoid")
+        or (token.get("safetyReport") or {}).get("avoid")
+        or (token.get("safety") or {}).get("avoid")
+        or {}
+    )
+    flags = set(avoid.get("flags") or []) if isinstance(avoid, dict) else set()
     hard, hard_why = is_hard_avoid(token)
     if hard:
-        return hard_why or "hard avoid"
+        if flags & HEAT_BLOCK_FLAGS:
+            return hard_why or "hard avoid"
+        if not flags:
+            # blocklist / hard_avoid bit with no flag detail
+            return hard_why or "hard avoid"
+        # Soft packaging only (fake_twitter / entry_trap_social) → allow + score demote
 
     safety = token.get("safety") or {}
     if safety.get("is_honeypot") or safety.get("rugged") or safety.get("honeypot"):
@@ -288,6 +324,19 @@ def _heat_signals(token: dict[str, Any]) -> tuple[int, list[str], dict[str, Any]
         score -= 8
         why.append("Name-jack packaging")
 
+    avoid = (
+        token.get("avoid")
+        or (token.get("safetyReport") or {}).get("avoid")
+        or {}
+    )
+    flags = set(avoid.get("flags") or []) if isinstance(avoid, dict) else set()
+    if "fake_twitter" in flags or "entry_trap_social" in flags:
+        score -= 10
+        why.append("Status-link social — packaging risk")
+    if "social_spoof_scam" in flags:
+        score -= 12
+        why.append("Social spoof packaging")
+
     # --- Book ---
     if hk:
         score += 8
@@ -300,7 +349,7 @@ def _heat_signals(token: dict[str, Any]) -> tuple[int, list[str], dict[str, Any]
             score -= 10
             why.append(f"Bundled {bun:.0f}%")
     else:
-        score -= 6
+        score -= 4
         why.append("Holders unknown — RISKY")
 
     if token.get("realtime"):
@@ -308,7 +357,7 @@ def _heat_signals(token: dict[str, Any]) -> tuple[int, list[str], dict[str, Any]
         why.append("Realtime hit")
 
     if token.get("enrich_ok") is not True:
-        score -= 8
+        score -= 5
         why.append("Incomplete safety enrich")
 
     score = max(0, min(99, score))
@@ -345,22 +394,24 @@ def evaluate_heat(token: dict[str, Any]) -> dict[str, Any]:
     # Labels: HEAT needs real heat + not garbage book
     conf = score
     if (
-        score >= 68
-        and replies >= 12
+        score >= 64
+        and replies >= 8
         and ath_ok
         and (enrich_ok or hk)
-        and (bun is None or bun <= 15)
+        and (bun is None or bun <= 18)
     ):
         label = LABEL_HEAT
-        conf = max(conf, 62)
+        conf = max(conf, 58)
         risk = "elevated"
-    elif score >= 52 and ath_ok and (replies >= 5 or token.get("realtime") or social.get("has_edge")):
+    elif score >= 48 and ath_ok and (
+        replies >= 3 or token.get("realtime") or social.get("has_edge") or mcap >= 5_000
+    ):
         label = LABEL_WARM
-        conf = min(conf, 58)
+        conf = min(conf, 55)
         risk = "high"
-    elif score >= 42 and ath_ok:
+    elif score >= 36 and ath_ok:
         label = LABEL_RISKY
-        conf = min(conf, 48)
+        conf = min(conf, 45)
         risk = "very_high"
         why = why + ["Dust size only — high false-positive rate"]
     else:
@@ -420,7 +471,7 @@ def evaluate_heat(token: dict[str, Any]) -> dict[str, Any]:
 def filter_and_rank_heat(
     tokens: list[dict[str, Any]],
     *,
-    min_score: int = 42,
+    min_score: int = 36,
     limit: int = 16,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
