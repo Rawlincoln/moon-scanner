@@ -52,22 +52,41 @@ def extract_mcap_usd(token: dict[str, Any]) -> float:
 
 
 def extract_ath_mcap(token: dict[str, Any]) -> float:
-    """Best-effort ATH mcap from token / pump / market payloads."""
-    ath = _f(token.get("ath_mcap") or token.get("ath_market_cap"))
-    if ath > 0:
-        return ath
+    """Best-effort multi-source ATH mcap (pump + peaks + market high-water).
+
+    Uses max across sources so lagged pump ATH does not mark a live high as fade.
+    """
+    cands: list[float] = []
+    for v in (
+        token.get("ath_mcap"),
+        token.get("ath_market_cap"),
+        token.get("_peak_mcap"),
+        token.get("peak_mcap"),
+    ):
+        f = _f(v)
+        if f > 0:
+            cands.append(f)
     pf = token.get("pumpfun") or {}
     mkt = token.get("market") or {}
     if not pf:
         pf = mkt.get("pumpfun") or {}
-    ath = _f(pf.get("ath_market_cap") or pf.get("ath_mcap"))
-    if ath > 0:
-        return ath
-    ath = _f(mkt.get("ath_market_cap") or mkt.get("ath_mcap"))
-    if ath > 0:
-        return ath
-    # Tracked peak from sticky / session stores
-    return _f(token.get("_peak_mcap") or token.get("peak_mcap"))
+    for src in (pf, mkt):
+        if not isinstance(src, dict):
+            continue
+        for k in ("ath_market_cap", "ath_mcap"):
+            f = _f(src.get(k))
+            if f > 0:
+                cands.append(f)
+    # Live mcap is a floor for ATH (price at high = ATH)
+    live = extract_mcap_usd(token)
+    if live > 0:
+        cands.append(live)
+    # Dex marketCap/fdv as weak high-water when pump ATH missing
+    for k in ("marketCap", "fdv"):
+        f = _f(mkt.get(k)) if isinstance(mkt, dict) else 0.0
+        if f > 0:
+            cands.append(f)
+    return max(cands) if cands else 0.0
 
 
 def is_crashed_runner(

@@ -20,6 +20,7 @@ from config import (
 )
 from services import http_client as http_pool
 from services.scan_moon import get_moon_outcomes
+from services.snipe_outcomes import get_snipe_outcomes
 from services.scan_trenches import (
     background_runner_alert_loop,
     background_trenches_warm,
@@ -66,6 +67,28 @@ async def _background_moon_outcomes_loop() -> None:
         await asyncio.sleep(90)
 
 
+async def _background_snipe_outcomes_loop() -> None:
+    """Poll mcap for safe-snipe recs; finalize 2× win/dump (shorter horizon)."""
+    await asyncio.sleep(28)
+    while True:
+        try:
+            outcomes = get_snipe_outcomes()
+            mints = outcomes.active_mints()
+            updated = 0
+            for mint in mints[:30]:
+                mcap = await outcomes.fetch_mcap(mint)
+                if mcap is not None:
+                    updated += outcomes.apply_mcap(mint, mcap)
+                await asyncio.sleep(0.15)
+            if updated:
+                logger.info(
+                    "Snipe outcomes updated %s rows (%s mints)", updated, len(mints)
+                )
+        except Exception as exc:
+            logger.warning("Snipe outcomes poll failed: %s", exc)
+        await asyncio.sleep(90)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     port = os.getenv("PORT", "8765")
@@ -105,6 +128,7 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(background_trenches_warm()))
     tasks.append(asyncio.create_task(_background_learning_loop()))
     tasks.append(asyncio.create_task(_background_moon_outcomes_loop()))
+    tasks.append(asyncio.create_task(_background_snipe_outcomes_loop()))
     if RUNNER_RADAR_INTERVAL_SEC > 0:
         tasks.append(asyncio.create_task(background_runner_alert_loop()))
 

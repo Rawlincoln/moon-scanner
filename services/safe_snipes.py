@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.accuracy import holders_known, learning_soft_adjust, merge_ath_into_token
 from services.avoid_filters import BLOCKED_MINTS, analyze_avoid_flags, is_hard_avoid
 from services.bundle_sniper import analyze_bundle_and_snipers
 from services.moon_picks import extract_ath_mcap, extract_mcap_usd
@@ -70,6 +71,7 @@ def snipe_reject_reason(token: dict[str, Any]) -> str | None:
     if token.get("skipped"):
         return token.get("skipReason") or "skipped"
 
+    merge_ath_into_token(token)
     mcap = extract_mcap_usd(token)
     ath = extract_ath_mcap(token)
     age = _f(token.get("age_minutes"))
@@ -266,23 +268,25 @@ def evaluate_snipe(token: dict[str, Any]) -> dict[str, Any]:
 
     score = max(0, min(99, score))
     conf = score
-    holders_known = bool(
-        (token.get("bundleSniper") or {}).get("holders_known")
-        or (token.get("safety") or {}).get("top_holders")
-    )
-    if not holders_known:
-        score -= 10
-        why.append("Holder book unknown — SETUP only")
-    clean_book = sn_lv in ("clean", "low", "unknown") and (
-        bun is None or bun <= 4
-    )
-    setup_book_ok = sn_lv != "critical" and (
-        bun is None or bun <= MAX_BUNDLED_PCT_SETUP
+    hk = holders_known(token)
+    if not hk:
+        score -= 12
+        why.append("Holder book unknown — not SNIPE grade")
+        # unknown sniper level without holders is not "clean"
+        if sn_lv in ("clean", "low", "unknown"):
+            sn_lv = "unknown"
+    # With holders known: treat missing bundled_pct as unknown (not auto-clean).
+    # With holders: allow SNIPE when known bundled_pct is low OR analyzer overall clean.
+    clean_book = hk and sn_lv in ("clean", "low") and (bun is None or bun <= 4)
+    setup_book_ok = (
+        hk
+        and sn_lv not in ("critical", "high")
+        and (bun is None or bun <= MAX_BUNDLED_PCT_SETUP)
     )
     if (
         score >= 72
         and clean_book
-        and holders_known
+        and hk
         and (bun is None or bun <= MAX_BUNDLED_PCT)
     ):
         label = LABEL_SNIPE
@@ -292,11 +296,19 @@ def evaluate_snipe(token: dict[str, Any]) -> dict[str, Any]:
         conf = min(conf, 68)
         if bun is not None and bun > MAX_BUNDLED_PCT:
             conf = min(conf, 58)
-        if not holders_known:
-            conf = min(conf, 55)
+        if not hk:
+            conf = min(conf, 50)
     else:
         label = LABEL_SKIP
         conf = min(conf, 45)
+
+    # Learning soft blend (demote toxic feature patterns)
+    score, conf, learn_meta = learning_soft_adjust(token, score, conf)
+    if learn_meta.get("applied") and score < 52:
+        label = LABEL_SKIP
+        conf = min(conf, 45)
+    elif label == LABEL_SNIPE and not hk:
+        label = LABEL_SETUP if setup_book_ok else LABEL_SKIP
 
     plan = {
         "entry_usd": round(mcap, 0),
@@ -317,7 +329,9 @@ def evaluate_snipe(token: dict[str, Any]) -> dict[str, Any]:
         "target_2x_usd": target,
         "invalidation_usd": plan["invalidation_usd"],
         "ath_retention_pct": ath_ret,
-        "why": why[:6] or ["Passed safe-snipe filters"],
+        "holders_known": hk,
+        "learning_soft": learn_meta if learn_meta.get("applied") else None,
+        "why": why[:7] or ["Passed safe-snipe filters"],
         "plan": plan,
         "bundle_pct": bun,
         "sniper_level": sn_lv,
@@ -329,6 +343,7 @@ def filter_and_rank_snipes(
     *,
     min_score: int = 55,
     limit: int = 12,
+    require_holders: bool = True,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for t in tokens:
@@ -337,8 +352,14 @@ def filter_and_rank_snipes(
         ev = evaluate_snipe(t)
         if not ev.get("eligible"):
             continue
+        if require_holders and not holders_known(t) and not ev.get("holders_known"):
+            continue
         if int(ev.get("snipe_score") or 0) < min_score:
             continue
+        ls = ev.get("learning_soft") or {}
+        if ls.get("applied") and str(ls.get("action") or "").upper() == "SKIP":
+            if float(ls.get("p_good") or 1) < 0.28:
+                continue
         row = dict(t)
         row["snipe"] = ev
         row["snipe_score"] = ev["snipe_score"]

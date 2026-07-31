@@ -41,11 +41,25 @@ def test_cz_status_url():
             "twitter": "https://twitter.com/cz_binance/status/99",
             "symbol": "CZM",
             "name": "CZ Meta",
-            "reply_count": 15,
+            "reply_count": 18,
         }
     )
     assert r["influencer_tweet"] is True
     assert "CZ" in (r["tweet_by"] or "")
+
+
+def test_keyword_only_no_community_not_edge():
+    r = analyze_social_narrative(
+        pump_coin={
+            "twitter": "",
+            "name": "Pepe Coin",
+            "symbol": "PEPE",
+            "description": "pepe moon",
+            "reply_count": 1,
+        }
+    )
+    assert r["has_edge"] is False
+    assert r.get("namejack_risk") is True
 
 
 def test_ansem_and_alon_handles_need_community():

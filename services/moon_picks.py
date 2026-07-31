@@ -19,6 +19,7 @@ from config import (
     MIGRATION_MCAP_MAX_USD,
     MIGRATION_NEAR_MIN_PCT,
 )
+from services.accuracy import holders_known, learning_soft_adjust, merge_ath_into_token
 from services.avoid_filters import BLOCKED_MINTS, is_hard_avoid
 from services.bundle_sniper import analyze_bundle_and_snipers
 from services.runner_radar import extract_ath_mcap, extract_mcap_usd, is_crashed_runner
@@ -28,8 +29,9 @@ from services.tx_activity import score_tx_activity
 # Stricter band — early dust rarely moons
 MIN_MCAP = 4_000
 MAX_MCAP = MIGRATION_MCAP_MAX_USD
-# Must be very close to ATH (user: almost everything recommended dumped)
-NEAR_ATH_FRAC = 0.88  # within −12% of ATH
+# Must be close to ATH; allow small healthy pullback when book is known (see reject)
+NEAR_ATH_FRAC = 0.88  # within −12% of ATH (strict default)
+NEAR_ATH_FRAC_STRONG = 0.85  # −15% ok only with holders + edge
 FADE_ATH_FRAC = 0.93
 
 LABEL_MOON = "MOON"
@@ -109,6 +111,7 @@ def reject_reason(token: dict[str, Any]) -> str | None:
     if token.get("skipped"):
         return str(token.get("skipReason") or token.get("skip_reason") or "skipped")
 
+    merge_ath_into_token(token)
     mcap = extract_mcap_usd(token)
     ath = extract_ath_mcap(token)
     peak = max(ath, _f(token.get("_peak_mcap") or token.get("peak_mcap")))
@@ -132,8 +135,13 @@ def reject_reason(token: dict[str, Any]) -> str | None:
     if high >= 2_500 and mcap > 0 and mcap < high * max(DUMP_HIDE_FRAC, 0.85):
         return f"dumped −{(1 - mcap / high) * 100:.0f}% from ${high:,.0f}"
 
-    # Stricter: must hold near ATH
-    if ath >= 3_500 and mcap > 0 and mcap < ath * NEAR_ATH_FRAC:
+    # Near-ATH gate: default −12%; strong book (holders + edge) may pull back to −15%
+    social_early = _ensure_social(token)
+    strong_book = holders_known(token) and (
+        social_early.get("influencer_tweet") or social_early.get("has_edge")
+    )
+    ath_floor = NEAR_ATH_FRAC_STRONG if strong_book else NEAR_ATH_FRAC
+    if ath >= 3_500 and mcap > 0 and mcap < ath * ath_floor:
         return f"faded from ATH ${ath:,.0f} → ${mcap:,.0f}"
 
     mkt = token.get("market") or {}
@@ -259,11 +267,8 @@ def reject_reason(token: dict[str, Any]) -> str | None:
             return (sn.get("flags") or ["high sniper risk"])[0]
 
     # Lightweight flash path — never overwrite full RugCheck bundle analysis
-    holders_known = bool(
-        (isinstance(bs, dict) and bs.get("holders_known"))
-        or (token.get("safety") or {}).get("top_holders")
-    )
-    if not holders_known:
+    hk = holders_known(token)
+    if not hk:
         lite = analyze_bundle_and_snipers(
             {},
             _pf(token),
@@ -284,6 +289,12 @@ def reject_reason(token: dict[str, Any]) -> str | None:
         ):
             if _i((lite.get("snipers") or {}).get("score")) >= 45:
                 return lite.get("summary") or "sniper/bundle pattern"
+
+    # After enrich: incomplete holder book cannot be "clean" MOON path
+    # (WATCH also demoted in moon_label when holders unknown)
+    if "enrich_ok" in token and token.get("enrich_ok") is True and not hk:
+        # Still allow through reject_reason for near-miss labeling; grades capped later
+        pass
 
     return None
 
@@ -475,9 +486,10 @@ def moon_label(
         and (social.get("influencer_tweet") or social.get("has_edge"))
     ):
         return LABEL_MOON
-    if score >= 58 and momentum >= 70 and narrative >= 40:
+    # WATCH also needs holder book truth — unknown book is not a recommendation grade
+    if holders_known and score >= 58 and momentum >= 70 and narrative >= 40:
         return LABEL_WATCH
-    if score >= 50 and social.get("influencer_tweet") and momentum >= 75:
+    if holders_known and score >= 50 and social.get("influencer_tweet") and momentum >= 75:
         return LABEL_WATCH
     return LABEL_WEAK
 
@@ -502,6 +514,7 @@ def evaluate(token: dict[str, Any]) -> dict[str, Any]:
             "tweet_by": social.get("tweet_by"),
         }
 
+    merge_ath_into_token(token)
     mcap = extract_mcap_usd(token)
     ath = extract_ath_mcap(token)
     bond = _bond(token, mcap)
@@ -511,30 +524,42 @@ def evaluate(token: dict[str, Any]) -> dict[str, Any]:
     i_sc, i_why = _pillar_interest(token)
     safe_sc, safe_why = _pillar_safety(token)
 
-    holders_known = bool(
-        (token.get("bundleSniper") or {}).get("holders_known")
-        or (token.get("safety") or {}).get("top_holders")
-    )
+    hk = holders_known(token)
     score = moon_score(token)
     label = moon_label(
         score,
         momentum=m_sc,
         narrative=n_sc,
         social=social,
-        holders_known=holders_known,
+        holders_known=hk,
     )
     conf = int(
         round(0.30 * m_sc + 0.15 * s_sc + 0.30 * n_sc + 0.15 * i_sc + 0.10 * safe_sc)
     )
     if social.get("influencer_tweet"):
         conf = min(99, conf + 10)
-    if not holders_known:
-        conf = min(conf, 60)
+    if not hk:
+        conf = min(conf, 48)
+        safe_sc = min(safe_sc, 50)
     if label == LABEL_MOON:
         conf = max(conf, 75)
     if label == LABEL_WEAK:
         conf = min(conf, 45)
     conf = max(0, min(99, conf))
+
+    # Soft blend learned P(good)/P(bad) into score + conf
+    score, conf, learn_meta = learning_soft_adjust(token, score, conf)
+    if learn_meta.get("applied") and learn_meta.get("delta_score", 0) < 0:
+        # Re-label after demote
+        label = moon_label(
+            score,
+            momentum=m_sc,
+            narrative=n_sc,
+            social=social,
+            holders_known=hk,
+        )
+        if label == LABEL_WEAK:
+            conf = min(conf, 45)
 
     ath_ret = round(100 * mcap / ath, 1) if ath > 0 and mcap > 0 else None
     why: list[str] = []
@@ -542,6 +567,13 @@ def evaluate(token: dict[str, Any]) -> dict[str, Any]:
     why.extend(m_why[:1])
     why.extend(s_why[:1])
     why.extend(i_why[:1])
+    if not hk:
+        why.append("Holder book incomplete — not MOON/WATCH grade")
+    if learn_meta.get("applied"):
+        why.append(
+            f"Learn P(good)≈{100 * float(learn_meta.get('p_good') or 0):.0f}%"
+            f" ({learn_meta.get('delta_score', 0):+d} score)"
+        )
     if not why:
         why.append("Passed capital-protection filters")
 
@@ -553,7 +585,9 @@ def evaluate(token: dict[str, Any]) -> dict[str, Any]:
         "confidence": conf,
         "stage": stage_of(token),
         "ath_retention_pct": ath_ret,
-        "why": why[:6],
+        "holders_known": hk,
+        "learning_soft": learn_meta if learn_meta.get("applied") else None,
+        "why": why[:7],
         "pillars": {
             "momentum": m_sc,
             "structure": s_sc,
@@ -582,10 +616,12 @@ def filter_and_rank(
     min_confidence: int = 52,
     max_bundled_pct: float | None = 12.0,
     require_influencer: bool = False,
+    require_holders: bool = True,
 ) -> list[dict[str, Any]]:
     """Only high-confidence WATCH/MOON with narrative edge.
 
     Optional adaptive gates (Phase 3): max_bundled_pct, require_influencer.
+    require_holders: never show MOON/WATCH without RugCheck holder book.
     """
     out: list[dict[str, Any]] = []
     for t in tokens:
@@ -596,10 +632,17 @@ def filter_and_rank(
             continue
         if ev["label"] == LABEL_WEAK:
             continue  # never recommend weak
+        if require_holders and not holders_known(t) and not ev.get("holders_known"):
+            continue
         if int(ev["moon_score"]) < min_score:
             continue
         if int(ev.get("confidence") or 0) < min_confidence:
             continue
+        # Soft learning floor: high P(bad) already demoted score; extra skip if SKIP
+        ls = ev.get("learning_soft") or t.get("learning_soft") or {}
+        if ls.get("applied") and str(ls.get("action") or "").upper() == "SKIP":
+            if float(ls.get("p_good") or 1) < 0.28:
+                continue
         if require_influencer and not (
             ev.get("influencer_tweet")
             or (t.get("socialSignals") or {}).get("influencer_tweet")

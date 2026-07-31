@@ -22,6 +22,7 @@ from services.safe_snipes import (
     snipe_reject_reason,
 )
 from services.scan_moon import enrich_moon_card
+from services.snipe_outcomes import get_snipe_outcomes
 from services.padre_feed import PadreFeedClient
 from services.pumpfun import PumpFunClient
 
@@ -178,7 +179,7 @@ async def scan_safe_snipes(
             return ret * 40 - abs(m - 7_000) / 400 + min(float(c.get("age_minutes") or 0), 30)
 
         cards.sort(key=_prio, reverse=True)
-        enrich_n = min(len(cards), max(limit * 4, 20))
+        enrich_n = min(len(cards), max(limit * 4, 20) + (6 if rt else 0))
         to_enrich = cards[:enrich_n]
         rest = cards[enrich_n:]
 
@@ -188,58 +189,92 @@ async def scan_safe_snipes(
             async with sem:
                 return await enrich_moon_card(c, skip_narrative_gate=True)
 
-        enriched = await asyncio.gather(*[_one(c) for c in to_enrich])
+        enriched = list(await asyncio.gather(*[_one(c) for c in to_enrich]))
         accurate: list[dict] = []
         post_reject: Counter[str] = Counter()
         near_misses: list[dict] = []
 
-        # Only fully enriched cards can become SNIPE/SETUP
-        for c in enriched:
-            mint = (c.get("tokenAddress") or c.get("mint") or "").strip()
-            if c.get("enrich_ok") is not True:
-                rejected += 1
-                post_reject["enrich"] += 1
-                if len(near_misses) < 8:
-                    errs = c.get("enrich_errors") or ["incomplete"]
-                    near_misses.append(
-                        {
-                            "symbol": c.get("symbol") or "?",
-                            "name": c.get("name") or "",
-                            "tokenAddress": mint,
-                            "mcap_usd": c.get("mcap_usd"),
-                            "age_minutes": c.get("age_minutes"),
-                            "reject": "safety unknown — "
-                            + ", ".join(str(e) for e in errs[:2]),
-                            "reject_key": "enrich",
-                        }
-                    )
-                continue
-            reason = snipe_reject_reason(c)
-            if reason:
-                rejected += 1
-                key = _short_reject(reason)
-                post_reject[key] += 1
-                if len(near_misses) < 8:
-                    near_misses.append(
-                        {
-                            "symbol": c.get("symbol") or "?",
-                            "name": c.get("name") or "",
-                            "tokenAddress": mint,
-                            "mcap_usd": c.get("mcap_usd"),
-                            "age_minutes": c.get("age_minutes"),
-                            "reject": reason,
-                            "reject_key": key,
-                        }
-                    )
-                continue
-            accurate.append(c)
+        def _consume(batch: list) -> None:
+            nonlocal rejected
+            for c in batch:
+                mint = (c.get("tokenAddress") or c.get("mint") or "").strip()
+                if c.get("enrich_ok") is not True:
+                    rejected += 1
+                    post_reject["enrich"] += 1
+                    if len(near_misses) < 10:
+                        errs = c.get("enrich_errors") or ["incomplete"]
+                        near_misses.append(
+                            {
+                                "symbol": c.get("symbol") or "?",
+                                "name": c.get("name") or "",
+                                "tokenAddress": mint,
+                                "mcap_usd": c.get("mcap_usd"),
+                                "ath_mcap": c.get("ath_mcap"),
+                                "age_minutes": c.get("age_minutes"),
+                                "reject": "safety unknown — "
+                                + ", ".join(str(e) for e in errs[:2]),
+                                "reject_key": "enrich",
+                            }
+                        )
+                    continue
+                reason = snipe_reject_reason(c)
+                if reason:
+                    rejected += 1
+                    key = _short_reject(reason)
+                    post_reject[key] += 1
+                    if len(near_misses) < 10:
+                        near_misses.append(
+                            {
+                                "symbol": c.get("symbol") or "?",
+                                "name": c.get("name") or "",
+                                "tokenAddress": mint,
+                                "mcap_usd": c.get("mcap_usd"),
+                                "ath_mcap": c.get("ath_mcap"),
+                                "age_minutes": c.get("age_minutes"),
+                                "reject": reason,
+                                "reject_key": key,
+                            }
+                        )
+                    continue
+                accurate.append(c)
+
+        _consume(enriched)
+
+        # Second wave when first pass found nothing
+        if not accurate and rest:
+            wave2_n = min(len(rest), max(limit * 3, 12))
+            wave2 = rest[:wave2_n]
+            rest = rest[wave2_n:]
+            enriched2 = list(await asyncio.gather(*[_one(c) for c in wave2]))
+            enrich_n += wave2_n
+            post_reject["second_wave_enrich"] += wave2_n
+            _consume(enriched2)
+
         if rest:
             post_reject["not_enriched_overflow"] += len(rest)
 
-        display = filter_and_rank_snipes(accurate, min_score=55, limit=limit)
+        gates = {"min_score": 55, "adapted": False, "sample_n": 0, "reasons": ["defaults"]}
+        try:
+            gates = get_snipe_outcomes().suggested_gates()
+        except Exception as exc:
+            logger.debug("snipe gates failed: %s", exc)
+
+        display = filter_and_rank_snipes(
+            accurate,
+            min_score=int(gates.get("min_score") or 55),
+            limit=limit,
+            require_holders=True,
+        )
         for t in display:
             if not t.get("snipe"):
                 t["snipe"] = evaluate_snipe(t)
+
+        try:
+            sn = get_snipe_outcomes().record_shown(display)
+            if sn:
+                logger.info("Snipe outcomes recorded %s", sn)
+        except Exception as exc:
+            logger.debug("snipe outcomes record failed: %s", exc)
 
         # Train learning model on shown snipes
         try:
@@ -273,19 +308,21 @@ async def scan_safe_snipes(
                 "rejected": rejected,
             },
             "reject_breakdown": reject_breakdown,
+            "gates": gates,
             "band": {
                 "mcap_min": SNIPE_MCAP_MIN,
                 "mcap_max": SNIPE_MCAP_MAX,
                 "target_mult": TARGET_MULT,
                 "max_bundled_pct_snipe": 5.0,
                 "max_bundled_pct_setup": 8.0,
-                "min_ath_retention": 0.70,
+                "min_ath_retention": 0.80,
             },
             "rule": (
                 "Safe snipes for ~2× only. Entry $3.5k–$16k mcap. "
-                "SNIPE: bundled ≤5% + clean snipers. SETUP: up to ~8% bundle "
-                f"(smaller size). No dump from ATH, age {1.5:.0f}–{MAX_AGE_MIN:.0f}m. "
-                "Take profit near 2× — not a moon hold. Empty list is normal."
+                "SNIPE: holders known + bundled ≤5% + clean snipers. "
+                "SETUP: up to ~8% bundle with holders (smaller size). "
+                f"No dump from ATH, age {MIN_AGE_MIN:.1f}–{MAX_AGE_MIN:.0f}m. "
+                "Learning soft-rank + adaptive min_score. Empty list is normal."
             ),
         }
         _cache["data"] = payload

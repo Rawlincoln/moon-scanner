@@ -83,19 +83,79 @@ class MoonOutcomes:
                         outcome TEXT,
                         outcome_ts REAL,
                         multiple REAL,
-                        active INTEGER DEFAULT 1
+                        active INTEGER DEFAULT 1,
+                        cohort TEXT DEFAULT 'shown'
                     );
                     CREATE INDEX IF NOT EXISTS idx_moon_recs_mint ON moon_recs(mint);
                     CREATE INDEX IF NOT EXISTS idx_moon_recs_active ON moon_recs(active);
                     CREATE INDEX IF NOT EXISTS idx_moon_recs_shown ON moon_recs(shown_at);
                     """
                 )
+                # Migrate older DBs
+                try:
+                    cols = {
+                        r[1]
+                        for r in conn.execute("PRAGMA table_info(moon_recs)").fetchall()
+                    }
+                    if "cohort" not in cols:
+                        conn.execute(
+                            "ALTER TABLE moon_recs ADD COLUMN cohort TEXT DEFAULT 'shown'"
+                        )
+                except Exception:
+                    pass
                 conn.commit()
             finally:
                 conn.close()
 
     def record_shown(self, tokens: list[dict[str, Any]]) -> int:
         """Record tokens displayed by /api/moon (dedupe same mint within 30m)."""
+        return self._record_cohort(tokens, cohort="shown")
+
+    def record_near_misses(self, misses: list[dict[str, Any]], *, limit: int = 6) -> int:
+        """Sample rejected near-misses to measure false negatives vs dumps.
+
+        Uses cohort='near_miss'. Caps inserts per call. Does not affect adaptive
+        gates (gates still use entry_label MOON/WATCH only via sample filters).
+        """
+        if not misses:
+            return 0
+        rows: list[dict[str, Any]] = []
+        for m in misses[:limit]:
+            if not isinstance(m, dict):
+                continue
+            mint = str(m.get("tokenAddress") or m.get("mint") or "").strip()
+            if not mint:
+                continue
+            rows.append(
+                {
+                    "tokenAddress": mint,
+                    "symbol": m.get("symbol") or "?",
+                    "name": m.get("name") or "",
+                    "mcap_usd": m.get("mcap_usd") or 0,
+                    "ath_mcap": m.get("ath_mcap") or 0,
+                    "moon_label": "NEAR_MISS",
+                    "moon_score": 0,
+                    "confidence": 0,
+                    "moon": {
+                        "label": "NEAR_MISS",
+                        "narrative": (m.get("reject") or "")[:120],
+                    },
+                    "reject": m.get("reject"),
+                    "reject_key": m.get("reject_key"),
+                    "socialSignals": m.get("socialSignals") or {},
+                    "bundle": m.get("bundle") or {},
+                    "bundleSniper": m.get("bundleSniper") or {},
+                }
+            )
+        return self._record_cohort(rows, cohort="near_miss", dedupe_sec=6 * 3600)
+
+    def _record_cohort(
+        self,
+        tokens: list[dict[str, Any]],
+        *,
+        cohort: str = "shown",
+        dedupe_sec: float = 30 * 60,
+    ) -> int:
         if not tokens:
             return 0
         now = time.time()
@@ -110,16 +170,18 @@ class MoonOutcomes:
                     recent = conn.execute(
                         """
                         SELECT id FROM moon_recs
-                        WHERE mint=? AND shown_at > ?
+                        WHERE mint=? AND shown_at > ? AND COALESCE(cohort,'shown')=?
                         ORDER BY shown_at DESC LIMIT 1
                         """,
-                        (mint, now - 30 * 60),
+                        (mint, now - dedupe_sec, cohort),
                     ).fetchone()
                     if recent:
                         continue
                     moon = t.get("moon") or {}
                     social = t.get("socialSignals") or {}
                     bun = t.get("bundle") or (t.get("bundleSniper") or {}).get("bundle") or {}
+                    if not isinstance(bun, dict):
+                        bun = {}
                     mcap = float(t.get("mcap_usd") or 0)
                     ath = float(t.get("ath_mcap") or 0)
                     feats = {
@@ -128,14 +190,18 @@ class MoonOutcomes:
                         "bundled_pct": bun.get("bundled_pct"),
                         "realtime": t.get("realtime"),
                         "realtime_source": t.get("realtime_source"),
+                        "cohort": cohort,
+                        "reject": t.get("reject") or moon.get("narrative"),
+                        "reject_key": t.get("reject_key"),
                     }
                     conn.execute(
                         """
                         INSERT INTO moon_recs (
                             mint, symbol, name, shown_at, entry_mcap, entry_ath,
                             entry_label, entry_score, entry_confidence, entry_bundled_pct,
-                            influencer_tweet, narrative, features, peak_mcap, low_mcap, active
-                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+                            influencer_tweet, narrative, features, peak_mcap, low_mcap,
+                            active, cohort
+                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)
                         """,
                         (
                             mint,
@@ -158,6 +224,7 @@ class MoonOutcomes:
                             json.dumps(feats),
                             mcap,
                             mcap,
+                            cohort,
                         ),
                     )
                     n += 1
@@ -195,22 +262,26 @@ class MoonOutcomes:
             return None
 
     def _classify(self, entry: float, peak: float, last: float) -> tuple[str, float]:
+        """Classify using peak multiple for wins (caught the move even if later dump)."""
         if entry <= 0 or last is None or last <= 0:
             return "unknown", 0.0
-        mult = last / entry
+        last_mult = last / entry
+        peak_mult = (peak / entry) if peak and peak > 0 else last_mult
+        best = max(last_mult, peak_mult)
+        # Win if path hit target (peak), even if closed lower — better for calibration
+        if best >= WIN_2:
+            return "win_2x", round(best, 3)
+        if best >= WIN_1_5:
+            return "win_1_5x", round(best, 3)
         if last <= entry * HARD_DUMP_FRAC or (
-            peak > 0 and last <= peak * 0.45 and mult < 0.85
+            peak > 0 and last <= peak * 0.45 and last_mult < 0.85
         ):
-            return "dump", round(mult, 3)
+            return "dump", round(last_mult, 3)
         if last <= entry * DUMP_FRAC:
-            return "dump", round(mult, 3)
-        if mult >= WIN_2:
-            return "win_2x", round(mult, 3)
-        if mult >= WIN_1_5:
-            return "win_1_5x", round(mult, 3)
-        if mult >= 0.80:
-            return "hold", round(mult, 3)
-        return "dump", round(mult, 3)
+            return "dump", round(last_mult, 3)
+        if last_mult >= 0.80:
+            return "hold", round(last_mult, 3)
+        return "dump", round(last_mult, 3)
 
     def apply_mcap(self, mint: str, mcap: float) -> int:
         """Update all active recs for mint with current mcap; finalize if due."""
@@ -333,26 +404,42 @@ class MoonOutcomes:
         finalized = conn.execute(
             "SELECT COUNT(*) AS n FROM moon_recs WHERE outcome IS NOT NULL"
         ).fetchone()["n"]
-        overall = self._segment_stats(conn, "1=1")
+        # Adaptive gates use shown cohort only (not near-miss sample)
+        shown_where = "COALESCE(cohort,'shown')='shown'"
+        overall = self._segment_stats(conn, shown_where)
         by_label: dict[str, Any] = {}
         for lab in ("MOON", "WATCH", "WEAK"):
-            by_label[lab] = self._segment_stats(conn, "entry_label=?", (lab,))
+            by_label[lab] = self._segment_stats(
+                conn, f"{shown_where} AND entry_label=?", (lab,)
+            )
         by_influencer = {
-            "yes": self._segment_stats(conn, "influencer_tweet=1"),
-            "no": self._segment_stats(conn, "influencer_tweet=0"),
+            "yes": self._segment_stats(
+                conn, f"{shown_where} AND influencer_tweet=1"
+            ),
+            "no": self._segment_stats(
+                conn, f"{shown_where} AND influencer_tweet=0"
+            ),
         }
         by_bundled = {
             "lt5": self._segment_stats(
-                conn, "entry_bundled_pct IS NULL OR entry_bundled_pct < 5"
+                conn,
+                f"{shown_where} AND (entry_bundled_pct IS NULL OR entry_bundled_pct < 5)",
             ),
             "5_12": self._segment_stats(
-                conn, "entry_bundled_pct >= 5 AND entry_bundled_pct < 12"
+                conn,
+                f"{shown_where} AND entry_bundled_pct >= 5 AND entry_bundled_pct < 12",
             ),
             "12_20": self._segment_stats(
-                conn, "entry_bundled_pct >= 12 AND entry_bundled_pct < 20"
+                conn,
+                f"{shown_where} AND entry_bundled_pct >= 12 AND entry_bundled_pct < 20",
             ),
-            "ge20": self._segment_stats(conn, "entry_bundled_pct >= 20"),
+            "ge20": self._segment_stats(
+                conn, f"{shown_where} AND entry_bundled_pct >= 20"
+            ),
         }
+        near_miss = self._segment_stats(
+            conn, "COALESCE(cohort,'shown')='near_miss'"
+        )
         recent = []
         for row in conn.execute(
             """
@@ -376,6 +463,7 @@ class MoonOutcomes:
             "by_label": by_label,
             "by_influencer": by_influencer,
             "by_bundled_band": by_bundled,
+            "near_miss": near_miss,
             "recent": recent,
         }
 

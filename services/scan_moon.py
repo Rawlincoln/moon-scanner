@@ -16,6 +16,7 @@ from services.avoid_filters import BLOCKED_MINTS, analyze_avoid_flags
 from services.bundle_sniper import analyze_bundle_and_snipers
 from services.dexscreener import DexScreenerClient
 from services.moon_outcomes import MoonOutcomes, get_outcomes
+from services.accuracy import merge_ath_into_token
 from services.moon_picks import evaluate, filter_and_rank, reject_reason
 from services.padre_feed import PadreFeedClient
 from services.pumpfun import PumpFunClient
@@ -172,13 +173,19 @@ async def enrich_moon_card(
             card["dex_url"] = pair.get("url")
             try:
                 dex_mcap = float(pair.get("marketCap") or 0)
-                if dex_mcap > 0 and not card.get("mcap_usd"):
-                    card["mcap_usd"] = dex_mcap
+                if dex_mcap > 0:
+                    if not card.get("mcap_usd"):
+                        card["mcap_usd"] = dex_mcap
+                    # Multi-source ATH high-water from Dex
+                    prev_ath = float(card.get("ath_mcap") or 0)
+                    if dex_mcap > prev_ath:
+                        card["ath_mcap"] = max(prev_ath, dex_mcap)
             except (TypeError, ValueError):
                 pass
             card["txActivity"] = score_tx_activity(
                 pair=market, pump=card.get("pumpfun")
             )
+            merge_ath_into_token(card)
         else:
             errors.append("dex_no_pair")
     except Exception as exc:
@@ -256,6 +263,15 @@ async def enrich_moon_card(
         errors.append(f"rugcheck:{type(exc).__name__}")
 
     # Pump bonding tokens may lack Dex pair — pump mcap is acceptable if safety ok.
+    # Full enrich_ok requires safety without error; holders_known tracked separately
+    # so ranking can demand holder book for MOON/WATCH grades.
+    if safety_ok:
+        merge_ath_into_token(card)
+        safety = card.get("safety") or {}
+        holders = bool(safety.get("top_holders"))
+        card["holders_known"] = holders
+        if not holders:
+            errors.append("holders_unknown")
     card["enrich_dex_ok"] = dex_ok
     card["enrich_partial"] = bool(errors) or not safety_ok
     card["enrich_errors"] = errors
@@ -264,13 +280,30 @@ async def enrich_moon_card(
 
 
 def rough_priority(card: dict[str, Any]) -> float:
-    """Pre-rank before expensive dex enrich — prefer near-ATH climbers."""
+    """Pre-rank before expensive dex enrich — prefer near-ATH + social + realtime."""
     mcap = float(card.get("mcap_usd") or 0)
     ath = float(card.get("ath_mcap") or 0)
     bond = float(card.get("bonding_progress") or 0)
     replies = int((card.get("pumpfun") or {}).get("reply_count") or 0)
     ret = (mcap / ath) if ath > 0 else 0.85
-    return ret * 50 + min(bond, 80) * 0.4 + min(replies, 40) * 0.3 + min(mcap / 1000, 40)
+    social = card.get("socialSignals") or {}
+    edge = float(social.get("edge_score") or 0)
+    boost = 0.0
+    if card.get("realtime"):
+        boost += 12
+    if social.get("influencer_tweet"):
+        boost += 18
+    elif social.get("has_edge"):
+        boost += 10
+    elif edge >= 30:
+        boost += 5
+    return (
+        ret * 50
+        + min(bond, 80) * 0.4
+        + min(replies, 40) * 0.35
+        + min(mcap / 1000, 40)
+        + boost
+    )
 
 
 async def _discover_moon_coins() -> list[dict]:
@@ -407,7 +440,9 @@ async def scan_moon_tokens(
             cards.append(card)
 
         cards.sort(key=rough_priority, reverse=True)
-        enrich_n = min(len(cards), max(limit * 2, 16))
+        # Extra enrich budget when realtime heat or discovery is deep
+        base_enrich = max(limit * 2, 16) + (8 if rt_mints else 0)
+        enrich_n = min(len(cards), base_enrich)
         to_enrich = cards[:enrich_n]
         rest = cards[enrich_n:]
 
@@ -417,70 +452,93 @@ async def scan_moon_tokens(
             async with sem:
                 return await enrich_moon_card(c)
 
-        enriched = await asyncio.gather(*[_one(c) for c in to_enrich])
+        enriched = list(await asyncio.gather(*[_one(c) for c in to_enrich]))
         accurate: list[dict] = []
         near_misses: list[dict] = []
         post_reject: dict[str, int] = {}
-        # Never rank non-enriched "rest" cards — incomplete safety = not a moon rec
-        for c in enriched:
+
+        def _consume_enriched(batch: list) -> None:
+            nonlocal rejected
+            for c in batch:
+                _consume_one(c)
+
+        def _consume_one(c: dict) -> None:
+            nonlocal rejected
             mint = (c.get("tokenAddress") or c.get("mint") or "").strip()
             errs = c.get("enrich_errors") or []
             pre_reason = c.get("pre_enrich_reject")
-            # Missing enrich_ok counts as incomplete
             if c.get("enrich_ok") is not True:
                 rejected += 1
-                # Pre-enrich reject (narrative/ATH/etc.) — not a RugCheck failure
                 if pre_reason or c.get("enrich_skipped_rugcheck"):
                     reason = pre_reason or "filtered before safety enrich"
                     key = _short_moon_reject(reason)
                     post_reject[key] = post_reject.get(key, 0) + 1
-                    if len(near_misses) < 8:
+                    if len(near_misses) < 10:
                         near_misses.append(
                             {
                                 "symbol": c.get("symbol") or "?",
                                 "name": c.get("name") or "",
                                 "tokenAddress": mint,
                                 "mcap_usd": c.get("mcap_usd"),
+                                "ath_mcap": c.get("ath_mcap"),
                                 "age_minutes": c.get("age_minutes"),
                                 "reject": reason,
                                 "reject_key": key,
+                                "socialSignals": c.get("socialSignals"),
                             }
                         )
                 else:
                     post_reject["enrich"] = post_reject.get("enrich", 0) + 1
-                    if len(near_misses) < 8:
+                    if len(near_misses) < 10:
                         near_misses.append(
                             {
                                 "symbol": c.get("symbol") or "?",
                                 "name": c.get("name") or "",
                                 "tokenAddress": mint,
                                 "mcap_usd": c.get("mcap_usd"),
+                                "ath_mcap": c.get("ath_mcap"),
                                 "age_minutes": c.get("age_minutes"),
                                 "reject": "safety unknown — "
                                 + ", ".join(str(e) for e in (errs or ["incomplete"])[:2]),
                                 "reject_key": "enrich",
                             }
                         )
-                continue
+                return
             reason = reject_reason(c)
             if reason:
                 rejected += 1
                 key = _short_moon_reject(reason)
                 post_reject[key] = post_reject.get(key, 0) + 1
-                if len(near_misses) < 8:
+                if len(near_misses) < 10:
                     near_misses.append(
                         {
                             "symbol": c.get("symbol") or "?",
                             "name": c.get("name") or "",
                             "tokenAddress": mint,
                             "mcap_usd": c.get("mcap_usd"),
+                            "ath_mcap": c.get("ath_mcap"),
                             "age_minutes": c.get("age_minutes"),
                             "reject": reason,
                             "reject_key": key,
+                            "socialSignals": c.get("socialSignals"),
+                            "bundleSniper": c.get("bundleSniper"),
                         }
                     )
-                continue
+                return
             accurate.append(c)
+
+        _consume_enriched(enriched)
+
+        # Second-wave enrich when first wave yielded nothing rankable
+        if not accurate and rest:
+            wave2_n = min(len(rest), max(limit * 2, 12))
+            wave2 = rest[:wave2_n]
+            rest = rest[wave2_n:]
+            enriched2 = list(await asyncio.gather(*[_one(c) for c in wave2]))
+            enrich_n += wave2_n
+            post_reject["second_wave_enrich"] = wave2_n
+            _consume_enriched(enriched2)
+
         # Count rest as not considered for rank (discovery overflow)
         if rest:
             post_reject["not_enriched_overflow"] = len(rest)
@@ -497,6 +555,19 @@ async def scan_moon_tokens(
         }
         try:
             gates = get_moon_outcomes().suggested_gates()
+            # Slight relax when empty feed + small sample (avoid permanent zero-show)
+            if (
+                not accurate
+                and int(gates.get("sample_n") or 0) < 8
+                and not gates.get("adapted")
+            ):
+                gates = {
+                    **gates,
+                    "min_score": max(52, int(gates.get("min_score") or 55) - 2),
+                    "min_confidence": max(50, int(gates.get("min_confidence") or 52) - 2),
+                    "reasons": list(gates.get("reasons") or [])
+                    + ["empty-wave soft floor"],
+                }
         except Exception as exc:
             logger.debug("suggested_gates failed: %s", exc)
 
@@ -506,6 +577,7 @@ async def scan_moon_tokens(
             min_confidence=int(gates.get("min_confidence") or 52),
             max_bundled_pct=float(gates.get("max_bundled_pct") or 12.0),
             require_influencer=bool(gates.get("require_influencer")),
+            require_holders=True,
         )[:limit]
 
         for t in display:
@@ -516,9 +588,14 @@ async def scan_moon_tokens(
                 t["confidence"] = t["moon"]["confidence"]
 
         try:
-            rec_n = get_moon_outcomes().record_shown(display)
+            outs = get_moon_outcomes()
+            rec_n = outs.record_shown(display)
             if rec_n:
                 logger.info("Moon outcomes recorded %s new recs", rec_n)
+            # Sample near-misses for false-negative / precision study
+            nm_n = outs.record_near_misses(near_misses, limit=6)
+            if nm_n:
+                logger.info("Moon near-miss sample recorded %s", nm_n)
         except Exception as exc:
             logger.debug("moon outcomes record failed: %s", exc)
 

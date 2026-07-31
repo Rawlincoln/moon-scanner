@@ -36,7 +36,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Moon Scanner",
         description="Identify safe early tokens on EVM & Solana with entry/exit signals",
-        version="1.4.0",
+        version="1.5.0",
         lifespan=lifespan,
         docs_url=None if IS_PRODUCTION else "/docs",
         redoc_url=None if IS_PRODUCTION else "/redoc",

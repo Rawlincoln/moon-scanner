@@ -19,6 +19,21 @@ def _base_token(**kwargs):
         "age_minutes": 25,
         "name": "Mars Dog",
         "symbol": "MARS",
+        "enrich_ok": True,
+        "safety": {
+            "passed": True,
+            "top_holders": [
+                {"pct": 3.0, "owner": "HolderA11111111111111111111111111111"},
+                {"pct": 2.5, "owner": "HolderB11111111111111111111111111111"},
+            ],
+        },
+        "bundleSniper": {
+            "holders_known": True,
+            "hard_reject": False,
+            "overall": "low",
+            "bundle": {"bundled_pct": 2.0, "risk_level": "low"},
+            "snipers": {"risk_level": "low", "max_wallet_pct": 3.0},
+        },
         "pumpfun": {
             "twitter": "https://x.com/elonmusk/status/1",
             "reply_count": 30,
@@ -31,7 +46,7 @@ def _base_token(**kwargs):
     }
     t.update(kwargs)
     if "pumpfun" in kwargs:
-        pf = dict(t["pumpfun"])
+        pf = dict(t.get("pumpfun") or {})
         pf.update(kwargs["pumpfun"])
         t["pumpfun"] = pf
     return t

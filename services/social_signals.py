@@ -364,17 +364,27 @@ def analyze_social_narrative(
         and ("x.com/" in twitter.lower() or "twitter.com/" in twitter.lower())
     )
 
-    # Corroborated "influencer tweet" only when claim + community (anti-spoof)
+    # Corroborated "influencer tweet" only when claim + strong community (anti-spoof).
+    # Status URLs are spoofable; require reply heat or own project X + replies.
     influencer_tweet = bool(
         influencer_tweet_claim
         and tweet_by
-        and (replies >= 12 or (real_x and replies >= 8) or replies >= 20)
+        and (
+            replies >= 15
+            or (real_x and replies >= 10)
+            or replies >= 25
+        )
     )
 
-    # Name-jacking: narrative words without corroborated influencer link
+    # Name-jacking: narrative words without corroborated influencer + thin community
     namejack = bool(narratives) and not influencer_tweet and not influencer_accounts
-    namejack_risk = namejack and replies < 5
+    namejack_risk = namejack and replies < 12
     status_only = _is_tweet_url(twitter) and not influencer_tweet
+
+    # Keyword narrative alone is weak unless community corroborates
+    narrative_backed = bool(narratives) and (
+        replies >= 8 or real_x or influencer_tweet or has_tiktok
+    )
 
     # --- Edge score (0–100) ---
     edge = 0
@@ -383,32 +393,38 @@ def analyze_social_narrative(
         edge += 50
         edge_reasons.append(f"🔥 {tweet_by} tweet + community")
     elif influencer_tweet_claim and tweet_by:
-        edge += 12  # claimed only — spoofable
+        edge += 8  # claimed only — spoofable (hard demote)
         edge_reasons.append(f"Claimed {tweet_by} tweet link (unverified)")
     elif profile_only_influencer:
-        edge += 14
+        edge += 10
         edge_reasons.append(f"Linked to {influencer_accounts[0]} (profile only)")
-    if narratives and not namejack_risk:
+    if narrative_backed and not namejack_risk:
         edge += 18
         edge_reasons.append(narratives[0])
     elif narratives and namejack_risk:
-        edge += 4
+        edge += 3
         edge_reasons.append(f"Name-jack risk: {narratives[0]}")
-    if has_tiktok:
+    elif narratives and not narrative_backed:
+        edge += 4
+        edge_reasons.append(f"Keyword only (no community): {narratives[0]}")
+    if has_tiktok and (replies >= 5 or real_x):
         edge += 12
         edge_reasons.append("TikTok")
+    elif has_tiktok:
+        edge += 4
+        edge_reasons.append("TikTok (thin community)")
     if real_x:
         edge += 10
         edge_reasons.append("Own X account")
     if replies >= 30:
         edge += 15
         edge_reasons.append(f"{replies} replies")
-    elif replies >= 12:
+    elif replies >= 15:
         edge += 10
         edge_reasons.append(f"{replies} replies")
-    elif replies >= 5:
+    elif replies >= 8:
         edge += 5
-    if tq.get("hot_ticker") and (replies >= 8 or real_x or influencer_tweet):
+    if tq.get("hot_ticker") and (replies >= 12 or (real_x and replies >= 6) or influencer_tweet):
         edge += 12
         edge_reasons.append(f"Hot ticker ${symbol}")
     if not tq.get("ok"):
@@ -417,21 +433,25 @@ def analyze_social_narrative(
 
     edge = max(0, min(100, edge))
 
-    # Must have a real story — claim-only influencer URLs are NOT enough
+    # Must have a real story — claim-only / keyword-only without community is NOT edge
     has_edge = (
         influencer_tweet
         or (
-            edge >= 40
-            and (narratives or has_tiktok or replies >= 12)
-            and not (influencer_tweet_claim and not influencer_tweet and edge < 45)
+            edge >= 42
+            and narrative_backed
+            and not (influencer_tweet_claim and not influencer_tweet and edge < 48)
         )
-        or (profile_only_influencer and replies >= 12)
-        or (bool(narratives) and real_x and replies >= 10 and not namejack_risk)
+        or (profile_only_influencer and replies >= 15 and real_x)
+        or (bool(narratives) and real_x and replies >= 12 and not namejack_risk)
+        or (has_tiktok and real_x and replies >= 12)
     )
     # Pure claim without community cannot be sole edge
     if influencer_tweet_claim and not influencer_tweet and not (
-        replies >= 12 or (real_x and replies >= 8) or (narratives and replies >= 10)
+        replies >= 15 or (real_x and replies >= 10) or (narrative_backed and replies >= 12)
     ):
+        has_edge = False
+    # Keyword namejack without community never counts as edge
+    if namejack_risk and not influencer_tweet:
         has_edge = False
 
     badges: list[dict[str, str]] = []

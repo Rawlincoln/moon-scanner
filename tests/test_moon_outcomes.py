@@ -12,6 +12,8 @@ def test_classify_win_and_dump():
     assert o._classify(10_000, 12_000, 9_000)[0] == "hold"
     assert o._classify(10_000, 12_000, 6_000)[0] == "dump"
     assert o._classify(10_000, 12_000, 4_000)[0] == "dump"
+    # Peak hit 2× even if last closed lower → still a win for calibration
+    assert o._classify(10_000, 25_000, 8_000)[0] == "win_2x"
 
 
 def test_suggested_gates_defaults_small_sample():
