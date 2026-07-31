@@ -537,8 +537,11 @@ def heat_card_from_coin(coin: dict, *, source: str = "pump.fun") -> dict[str, An
         pump=coin,
         mint=mint,
     )
-    hard, _ = is_hard_avoid({"avoid": avoid})
-    if hard or avoid.get("hard_avoid"):
+    # Pre-card: only true capital threats (not status-link soft hard_avoid)
+    flags = set(avoid.get("flags") or [])
+    if flags & HEAT_BLOCK_FLAGS or mint in BLOCKED_MINTS:
+        return None
+    if avoid.get("hard_avoid") and not flags:
         return None
 
     social = analyze_social_narrative(
