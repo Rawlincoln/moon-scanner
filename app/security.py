@@ -42,6 +42,8 @@ _EXPENSIVE_PREFIXES = (
     "/api/runner-radar",
     "/api/learning/predict",
     "/api/pumpfun",
+    "/api/alerts/telegram/cycle",
+    "/api/alerts/telegram/tick",
 )
 
 _ANALYZE_PREFIXES = (

@@ -255,6 +255,8 @@ TELEGRAM_ALERT_HEAT_LABELS = {
     ).split(",")
     if x.strip()
 }
+# Optional shared secret for GET /api/alerts/telegram/tick (external cron 24/7)
+TELEGRAM_CRON_SECRET = os.getenv("TELEGRAM_CRON_SECRET", "").strip()
 
 
 def _solana_rpc_http() -> str:

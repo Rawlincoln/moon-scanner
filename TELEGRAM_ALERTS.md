@@ -1,6 +1,54 @@
 # Telegram alerts — don’t miss Moons / Snipes / Heat
 
-Browser desktop alerts only work when a tab is open. **Telegram alerts run on the server** every ~45s while `start.bat` is running.
+Browser desktop alerts only work when a tab is open. **Telegram alerts run on the server** every ~45s while the process is up.
+
+## 24/7 when your PC is OFF
+
+Your laptop must **not** be the only place the scanner runs. Alerts need a **cloud process**.
+
+| Option | Cost | 24/7 reliability |
+|--------|------|------------------|
+| **A) Render Starter** (recommended) | ~$7/mo | Always on — background loop sends Telegram |
+| **B) Render Free + external cron** | $0 | Free tier **sleeps** when idle; cron wakes it every 2–3 min |
+| Local only (`start.bat`) | $0 | **Stops when PC is off** |
+
+### Option A — Always-on Render (best)
+
+1. Deploy moon-scanner on [Render](https://dashboard.render.com) (see `DEPLOY.md`).
+2. Upgrade service plan to **Starter** (or set `plan: starter` in `render.yaml` and redeploy).
+3. In Render → **Environment**, set:
+
+```text
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+TELEGRAM_ALERTS=1
+TELEGRAM_ALERT_FEEDS=moon,snipe,heat
+TELEGRAM_ALERT_INTERVAL_SEC=45
+ADMIN_API_KEY=some-long-random-string
+```
+
+4. Redeploy. Open your onrender URL `/api/alerts/status` → `"configured": true`.
+5. You should get “alerts ON” in Telegram. PC can be off.
+
+### Option B — Free Render + cron (PC still off)
+
+Free web services **spin down** after ~15 min idle, so the in-app 45s loop dies. Fix: an external cron hits a wake endpoint.
+
+1. Keep Render on **free** plan.
+2. Set env vars as above, plus:
+
+```text
+TELEGRAM_CRON_SECRET=another-long-random-string
+```
+
+3. Create a free cron job at [cron-job.org](https://cron-job.org) (or similar):
+   - **URL:** `https://YOUR-SERVICE.onrender.com/api/alerts/telegram/tick?key=YOUR_TELEGRAM_CRON_SECRET`
+   - **Schedule:** every **2–3 minutes**
+   - Method: GET
+
+Each tick wakes the app, scans moons/snipes/heat, and Telegrams new picks. Expect cold starts (~30–60s) after sleep — not as fast as Starter, but works with the PC off.
+
+**Never** put tokens in GitHub. Only Render dashboard / cron URL (cron URL should not be public).
 
 ---
 
@@ -117,3 +165,6 @@ TELEGRAM_ALERTS=0
 | `chat not found` | Message the bot first, then re-check chat id |
 | Too many messages | Raise `TELEGRAM_ALERT_DEDUPE_SEC` or narrow labels |
 | Empty feeds | Normal — capital filters. Heat is noisier for more pings |
+| PC off, no alerts | App only runs locally — deploy to Render (see **24/7** above) |
+| Free Render, alerts stop | Service slept — use cron tick or upgrade to Starter |
+| Cron 401 | Wrong `key=` — must match `TELEGRAM_CRON_SECRET` or `ADMIN_API_KEY` |

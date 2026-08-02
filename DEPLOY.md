@@ -44,8 +44,16 @@ SQLite under `data/` is **ephemeral** on free tier (lost on redeploy). Use a per
 | `RATE_LIMIT_FORCE_COST` | optional | `force=true` costs N tokens (default 4) |
 | `TRUST_X_FORWARDED_FOR` | optional | Default on in production; rightmost XFF hop |
 | `ANALYZE_CONCURRENCY` | optional | Global concurrent deep analyzes (default 4) |
+| `TELEGRAM_BOT_TOKEN` | for 24/7 alerts | BotFather token |
+| `TELEGRAM_CHAT_ID` | for 24/7 alerts | Your Telegram user/group id |
+| `TELEGRAM_ALERTS` | optional | `1` to force on |
+| `TELEGRAM_CRON_SECRET` | free-tier 24/7 | Secret for GET `/api/alerts/telegram/tick?key=` |
 
 **Never** commit real keys. API responses redact RPC hosts (no `api-key=` leakage).
+
+### 24/7 Telegram (PC off)
+
+See **[TELEGRAM_ALERTS.md](./TELEGRAM_ALERTS.md)** — use **Render Starter** (always on) or **Free + cron** wake URL.
 
 ## 5. Free RPC (no paid Helius)
 
