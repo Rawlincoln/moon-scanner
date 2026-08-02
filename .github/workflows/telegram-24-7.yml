@@ -1,0 +1,41 @@
+# 24/7 Telegram alerts — runs on GitHub free minutes (PC can be off).
+# One-time: add repo secrets TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# Optional: TELEGRAM_CRON_SECRET (same as Render) to use server-side tick.
+name: telegram-24-7
+
+on:
+  schedule:
+    # every 5 minutes
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore alert dedupe cache
+        uses: actions/cache@v4
+        with:
+          path: data/gha_telegram_seen.json
+          key: gha-telegram-seen-v1
+          restore-keys: |
+            gha-telegram-seen-
+
+      - name: Run alert worker
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CRON_SECRET: ${{ secrets.TELEGRAM_CRON_SECRET }}
+          BASE_URL: https://moon-scanner-9tlz.onrender.com
+          SEEN_PATH: data/gha_telegram_seen.json
+        run: python scripts/gha_telegram_alerts.py
+
+      - name: Save alert dedupe cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/gha_telegram_seen.json
+          key: gha-telegram-seen-v1-${{ github.run_id }}
