@@ -99,6 +99,15 @@ function cardHtml(t) {
   const m5Html = Number.isFinite(m5)
     ? `<span class="${m5 >= 0 ? "up" : "down"}">m5 ${m5 >= 0 ? "+" : ""}${m5.toFixed(1)}%</span>`
     : "";
+  const tp2x = heat.target_2x_usd ?? plan.take_profit_2x_usd ?? t.target_2x_usd;
+  const zone = heat.target_zone_usd || plan.target_zone_usd || [12000, 21000];
+  const tpHtml =
+    tp2x != null
+      ? `<span class="up">2× ${fmtUsd(tp2x)}</span>`
+      : "";
+  const zoneHtml = zone
+    ? `<span>target ${fmtUsd(zone[0])}–${fmtUsd(zone[1])}</span>`
+    : "";
   const planHtml = plan.size_advice
     ? `<div class="plan-box">${escapeHtml(plan.size_advice)}</div>`
     : "";
@@ -149,6 +158,8 @@ function cardHtml(t) {
           <span>${age}</span>
           ${replies != null ? `<span>${replies} replies</span>` : ""}
           ${m5Html}
+          ${tpHtml}
+          ${zoneHtml}
           <span>score ${score} · conf ${conf}</span>
         </div>
         <div class="meta dev-line"><strong>Dev:</strong> ${escapeHtml(devLine)}</div>

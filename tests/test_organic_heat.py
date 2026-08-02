@@ -13,8 +13,8 @@ from services.organic_heat import (
 def _base(**kw):
     t = {
         "tokenAddress": "HeatMint1111111111111111111111111111111",
-        "mcap_usd": 12_000,
-        "ath_mcap": 13_000,
+        "mcap_usd": 8_000,
+        "ath_mcap": 8_500,
         "age_minutes": 20,
         "bonding_progress": 32,
         "enrich_ok": True,
@@ -24,8 +24,8 @@ def _base(**kw):
             "twitter": "https://x.com/someproject",
             "name": "HeatCoin",
             "symbol": "HEAT",
-            "usd_market_cap": 12_000,
-            "ath_market_cap": 13_000,
+            "usd_market_cap": 8_000,
+            "ath_market_cap": 8_500,
         },
         "name": "HeatCoin",
         "symbol": "HEAT",
@@ -47,32 +47,45 @@ def _base(**kw):
     return t
 
 
-def test_heat_allows_pullback_moons_would_kill():
-    """−20% from ATH is still heat (moons would reject at −12%)."""
-    t = _base(mcap_usd=10_400, ath_mcap=13_000)
+def test_heat_requires_6k_min():
+    r = heat_reject_reason(_base(mcap_usd=4_500, ath_mcap=5_000))
+    assert r and ("6k" in r.lower() or "below" in r.lower() or "band" in r.lower())
+
+
+def test_heat_blocks_above_12k_entry():
+    r = heat_reject_reason(_base(mcap_usd=15_000, ath_mcap=16_000))
+    assert r and ("above" in r.lower() or "room" in r.lower() or "band" in r.lower())
+
+
+def test_heat_allows_pullback_in_6k_band():
+    """−20% from ATH still ok if still in $6–12k entry band."""
+    t = _base(mcap_usd=8_000, ath_mcap=10_000)
     assert heat_reject_reason(t) is None
     ev = evaluate_heat(t)
     assert ev["eligible"] is True
     assert ev["label"] in (LABEL_HEAT, LABEL_WARM, LABEL_RISKY)
+    assert ev.get("target_2x_usd") == 16_000
+    assert ev.get("target_zone_usd") == [12_000, 21_000]
 
 
 def test_heat_blocks_hard_dump():
-    t = _base(mcap_usd=4_000, ath_mcap=13_000)  # ~31% — wait need <55%
-    t = _base(mcap_usd=5_000, ath_mcap=20_000)  # 25% retained = hard dump
+    t = _base(mcap_usd=7_000, ath_mcap=20_000)  # 35% retained = hard dump
     r = heat_reject_reason(t)
     assert r and "dump" in r.lower()
 
 
 def test_heat_no_narrative_still_eligible_with_replies():
     t = _base(
+        mcap_usd=7_500,
+        ath_mcap=8_000,
         pumpfun={
             "reply_count": 30,
             "twitter": "",
             "name": "Rand",
             "symbol": "RNDX",
             "description": "just a coin",
-            "usd_market_cap": 12_000,
-            "ath_market_cap": 12_500,
+            "usd_market_cap": 7_500,
+            "ath_market_cap": 8_000,
         },
         name="Rand",
         symbol="RNDX",
@@ -88,15 +101,15 @@ def test_filter_ranks_heat_first():
     good = _base(tokenAddress="A" + "1" * 40)
     weak = _base(
         tokenAddress="B" + "1" * 40,
-        mcap_usd=3_000,
-        ath_mcap=3_200,
+        mcap_usd=6_500,
+        ath_mcap=7_000,
         pumpfun={
             "reply_count": 4,
             "twitter": "",
             "name": "Thin",
             "symbol": "THIN",
-            "usd_market_cap": 3_000,
-            "ath_market_cap": 3_200,
+            "usd_market_cap": 6_500,
+            "ath_market_cap": 7_000,
         },
         bonding_progress=8,
         priceChange={"m5": 1, "h1": 2},

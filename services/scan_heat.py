@@ -235,7 +235,7 @@ async def scan_organic_heat(
             post_reject["not_enriched_overflow"] += len(rest)
 
         # Also try pre-enrich rejects that only failed enrich — already in accurate if pass
-        display = filter_and_rank_heat(accurate, min_score=36, limit=limit)
+        display = filter_and_rank_heat(accurate, min_score=44, limit=limit)
         for t in display:
             if not t.get("heat"):
                 t["heat"] = evaluate_heat(t)
@@ -284,22 +284,22 @@ async def scan_organic_heat(
             "band": {
                 "mcap_min": HEAT_MCAP_MIN,
                 "mcap_max": HEAT_MCAP_MAX,
-                "ath_soft_floor": 0.68,
+                "target_tp_low": 12_000,
+                "target_tp_high": 21_000,
+                "sweet_entry": [6_000, 10_500],
+                "ath_soft_floor": 0.70,
                 "ath_hard_dump": 0.55,
                 "min_age": MIN_AGE_MIN,
                 "max_age": MAX_AGE_MIN,
             },
             "rule": (
-                "ORGANIC HEAT = high recall, NOT capital protection. "
-                f"Band ${HEAT_MCAP_MIN:,.0f}–${HEAT_MCAP_MAX:,.0f}. "
-                "Checks dev sold, # tokens launched, # prior migrations, this mint curve status. "
-                "Serial farms (many launches / 0 migrations) and dev-sold bags blocked or demoted. "
-                "Pullbacks + thin narrative OK → RISKY labels. "
-                "Dust size only. Use Moons for high-accuracy picks."
+                "ORGANIC HEAT (tighter) — entry $6k–$12k with path to $12–21k "
+                f"(~2–3.5× from $6k). Sweet entry $6–10.5k (2× lands in target). "
+                "Dev sold / serial farms blocked. Still not capital-safe moons — size small."
             ),
             "warning": (
-                "Many HEAT/WARM/RISKY tokens dump. Check the Dev line on each card "
-                "(launched / migrated / sold). Never size large."
+                "Only ≥$6k entries with room into $12–21k. Many still dump — "
+                "check Dev line (launched / migrated / sold)."
             ),
         }
         _cache["data"] = payload
