@@ -670,4 +670,12 @@ async def scan_moon_tokens(
         }
         _moon_cache["data"] = payload
         _moon_cache["ts"] = time.time()
+        # Telegram push (deduped; no-op if not configured)
+        if display:
+            try:
+                from services.telegram_alerts import notify_new_picks
+
+                asyncio.create_task(notify_new_picks("moon", display))
+            except Exception:
+                pass
         return payload

@@ -72,7 +72,25 @@ async def health():
                 else "Set HELIUS_API_KEY in .env to stop public RPC 429s"
             ),
         },
+        "telegram_alerts": _telegram_health(),
     }
+
+
+def _telegram_health() -> dict:
+    try:
+        from services.telegram_alerts import status as tg_status
+
+        st = tg_status()
+        return {
+            "enabled": st.get("enabled"),
+            "configured": st.get("configured"),
+            "interval_sec": st.get("interval_sec"),
+            "feeds": st.get("feeds"),
+            "last_sent": (st.get("last_cycle") or {}).get("sent"),
+            "last_error": (st.get("last_cycle") or {}).get("error"),
+        }
+    except Exception:
+        return {"configured": False}
 
 
 @router.get("/api/chains")

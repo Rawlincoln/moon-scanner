@@ -209,6 +209,53 @@ LEARNING_ACTIVE_CAP_PUBLIC = int(os.getenv("LEARNING_ACTIVE_CAP_PUBLIC", "40") o
 # Concurrent deep analyzes (global process cap)
 ANALYZE_CONCURRENCY = int(os.getenv("ANALYZE_CONCURRENCY", "4") or "4")
 
+# --- Telegram push alerts (works without browser open) ---
+# Create bot via @BotFather → token; message the bot → get chat id via getUpdates
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+_tg_en = os.getenv("TELEGRAM_ALERTS", "").strip().lower()
+if _tg_en in ("0", "false", "no", "off"):
+    TELEGRAM_ALERTS_ENABLED = False
+elif _tg_en in ("1", "true", "yes", "on"):
+    TELEGRAM_ALERTS_ENABLED = True
+else:
+    # Auto-on when both token + chat are set
+    TELEGRAM_ALERTS_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+_tg_feeds = os.getenv("TELEGRAM_ALERT_FEEDS", "moon,snipe,heat").strip()
+TELEGRAM_ALERT_FEEDS: list[str] = [
+    f.strip().lower() for f in _tg_feeds.split(",") if f.strip()
+] or ["moon", "snipe", "heat"]
+TELEGRAM_ALERT_INTERVAL_SEC = float(
+    os.getenv("TELEGRAM_ALERT_INTERVAL_SEC", "45") or "45"
+)
+TELEGRAM_ALERT_DEDUPE_SEC = float(
+    os.getenv("TELEGRAM_ALERT_DEDUPE_SEC", str(45 * 60)) or str(45 * 60)
+)
+TELEGRAM_ALERT_MAX_PER_CYCLE = int(
+    os.getenv("TELEGRAM_ALERT_MAX_PER_CYCLE", "6") or "6"
+)
+TELEGRAM_ALERT_MOON_LABELS = {
+    x.strip().upper()
+    for x in (os.getenv("TELEGRAM_ALERT_MOON_LABELS", "MOON,WATCH") or "MOON,WATCH").split(
+        ","
+    )
+    if x.strip()
+}
+TELEGRAM_ALERT_SNIPE_LABELS = {
+    x.strip().upper()
+    for x in (
+        os.getenv("TELEGRAM_ALERT_SNIPE_LABELS", "SNIPE,SETUP") or "SNIPE,SETUP"
+    ).split(",")
+    if x.strip()
+}
+TELEGRAM_ALERT_HEAT_LABELS = {
+    x.strip().upper()
+    for x in (
+        os.getenv("TELEGRAM_ALERT_HEAT_LABELS", "HEAT,WARM") or "HEAT,WARM"
+    ).split(",")
+    if x.strip()
+}
+
 
 def _solana_rpc_http() -> str:
     explicit = (

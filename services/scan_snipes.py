@@ -327,4 +327,11 @@ async def scan_safe_snipes(
         }
         _cache["data"] = payload
         _cache["ts"] = time.time()
+        if display:
+            try:
+                from services.telegram_alerts import notify_new_picks
+
+                asyncio.create_task(notify_new_picks("snipe", display))
+            except Exception:
+                pass
         return payload

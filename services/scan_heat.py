@@ -304,4 +304,11 @@ async def scan_organic_heat(
         }
         _cache["data"] = payload
         _cache["ts"] = time.time()
+        if display:
+            try:
+                from services.telegram_alerts import notify_new_picks
+
+                asyncio.create_task(notify_new_picks("heat", display))
+            except Exception:
+                pass
         return payload
