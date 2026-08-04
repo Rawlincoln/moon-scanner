@@ -57,16 +57,29 @@ def _lp_status(safety: dict[str, Any], market: dict[str, Any]) -> str:
     if safety.get("lp_burned") or safety.get("lp_burn"):
         return "burned"
     # pump.fun bonding / graduated often program-held LP
-    if safety.get("on_bonding_curve") is True:
+    if safety.get("on_bonding_curve") is True or market.get("on_bonding_curve"):
         return "program_custodied"
     if market.get("is_pumpfun_synthetic"):
         return "program_custodied"
-    liq = _f((market.get("liquidity") or {}).get("usd") if isinstance(market.get("liquidity"), dict) else market.get("liquidity_usd") or market.get("liquidity"))
+    pf = market.get("pumpfun") if isinstance(market.get("pumpfun"), dict) else {}
+    if pf and not pf.get("complete", True):
+        return "program_custodied"
+    liq = _f(
+        (market.get("liquidity") or {}).get("usd")
+        if isinstance(market.get("liquidity"), dict)
+        else market.get("liquidity_usd") or market.get("liquidity")
+    )
     if liq is not None and liq <= 0:
         return "unknown"
     if lp_locked is False:
         return "unlocked"
-    return "unknown"
+    if lock_pct is not None and lock_pct < 50:
+        return "unlocked"
+    if liq and liq > 0 and lock_pct is None and not market.get("pairAddress"):
+        return "unknown"
+    if liq and liq > 0:
+        return "unknown"  # have liq, lock state not proven
+    return "n/a"
 
 
 def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
@@ -78,18 +91,32 @@ def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(bs, dict):
         bs = {}
 
-    # Liquidity
+    # Liquidity — multi-source; never treat missing as $0 in UI
     liq = None
-    raw_liq = market.get("liquidity")
-    if isinstance(raw_liq, dict):
-        liq = _f(raw_liq.get("usd"))
-    if liq is None:
-        liq = _f(market.get("liquidity_usd") or market.get("liquidity") or safety.get("liquidity"))
+    liq_source = market.get("liquidity_source")
+    for cand in (
+        market.get("liquidity_usd"),
+        (market.get("liquidity") or {}).get("usd")
+        if isinstance(market.get("liquidity"), dict)
+        else market.get("liquidity"),
+        safety.get("liquidity_usd"),
+        safety.get("lp_quote_usd"),
+        safety.get("lp_locked_usd"),
+        market.get("curve_sol_usd"),
+    ):
+        v = _f(cand)
+        if v is not None and v > 0:
+            liq = v if liq is None else max(liq, v)
+    if not liq_source and liq:
+        liq_source = "merged"
+    liq_sources = market.get("liquidity_sources") or {}
 
     # Pools / pairs
     pools = _i(market.get("pair_count") or market.get("pools") or safety.get("pools"))
     if pools is None and market.get("url"):
         pools = 1  # at least one pair if dex URL exists
+    if pools is None and market.get("on_bonding_curve"):
+        pools = 1  # bonding curve counts as one venue
     if pools is None:
         pools = None  # n/a
 
@@ -130,7 +157,7 @@ def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
             p = _f(h.get("pct") or h.get("percentage") or h.get("share"))
             if p is not None:
                 pcts.append(p)
-        # Prefer non-pool rows for top1 when possible
+        # Prefer non-pool rows for top1 (pool bags often 40%+ / curve vault)
         non_pool = []
         for h in top:
             if not isinstance(h, dict):
@@ -138,9 +165,15 @@ def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
             if h.get("is_pool") or h.get("pool"):
                 continue
             p = _f(h.get("pct") or h.get("percentage") or h.get("share"))
-            if p is not None and p > 0:
-                non_pool.append(p)
-        use = non_pool if non_pool else [p for p in pcts if p is not None]
+            if p is None or p <= 0:
+                continue
+            # Heuristic: ≥40% bag is almost always bonding curve / AMM pool
+            if p >= 40.0:
+                continue
+            non_pool.append(p)
+        use = non_pool if non_pool else [p for p in pcts if p is not None and p < 40.0]
+        if not use:
+            use = [p for p in pcts if p is not None]
         if use:
             top1 = round(use[0], 2)
             top5 = round(sum(use[:5]), 2)
@@ -184,14 +217,27 @@ def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
         vol24 = _f(market.get("volume_h24") or market.get("volume24h"))
 
     bun = None
-    if isinstance(bs.get("bundle"), dict):
-        bun = _f(bs["bundle"].get("bundled_pct"))
-    if bun is None:
-        bun = _f(bs.get("bundled_pct"))
-
     sn_lv = None
-    if isinstance(bs.get("snipers"), dict):
-        sn_lv = bs["snipers"].get("risk_level")
+    sn_max = None
+    sn_flags: list[str] = []
+    holders_known_bs = bs.get("holders_known")
+    if isinstance(bs, dict) and bs:
+        if isinstance(bs.get("bundle"), dict):
+            bun = _f(bs["bundle"].get("bundled_pct"))
+        if bun is None:
+            bun = _f(bs.get("bundled_pct"))
+        # If no holder book, bundled % of 0 is not meaningful
+        if not holders_known_bs and not top and (bun is None or bun <= 0):
+            bun = None
+        sn = bs.get("snipers") if isinstance(bs.get("snipers"), dict) else {}
+        sn_lv = sn.get("risk_level") or bs.get("overall")
+        sn_max = _f(sn.get("max_wallet_pct"))
+        sn_flags = list(sn.get("flags") or [])[:4]
+        if not holders_known_bs and not top:
+            sn_lv = "unknown"
+            sn_max = None
+        elif sn_lv in (None, "", "clean") and sn_max is not None and sn_max <= 0 and not top:
+            sn_lv = "unknown"
 
     # Coverage: how many core cells resolved
     cells = {
@@ -237,7 +283,9 @@ def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
         "freeze_authority": freeze_s,
         "lp_status": _lp_status(safety, market),
         # Market
-        "liquidity_usd": round(liq, 2) if liq is not None else None,
+        "liquidity_usd": round(liq, 2) if liq is not None and liq > 0 else None,
+        "liquidity_source": liq_source,
+        "liquidity_sources": liq_sources,
         "mcap_usd": round(mcap, 2) if mcap is not None else None,
         "volume_24h_usd": round(vol24, 2) if vol24 is not None else None,
         "pools": pools,
@@ -255,6 +303,11 @@ def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
         # Book (our extra, still facts)
         "bundled_pct": round(bun, 2) if bun is not None else None,
         "sniper_risk": sn_lv or "n/a",
+        "sniper_max_wallet_pct": round(sn_max, 2) if sn_max is not None and sn_max > 0 else None,
+        "sniper_flags": sn_flags,
+        "sniper_score": _i((bs.get("snipers") or {}).get("score"))
+        if isinstance(bs.get("snipers"), dict)
+        else None,
         # Meta
         "coverage_pct": coverage_pct,
         "cells_resolved": covered,
@@ -380,8 +433,15 @@ def format_cockpit_telegram(cockpit: dict[str, Any]) -> str:
     hold = cockpit.get("holders")
     hold_s = str(hold) if hold is not None else "n/a"
     liq = _u(cockpit.get("liquidity_usd"))
+    liq_src = cockpit.get("liquidity_source")
+    if liq != "n/a" and liq_src:
+        liq = f"{liq} ({liq_src})"
     bun = cockpit.get("bundled_pct")
     bun_s = f"{bun}%" if bun is not None else "n/a"
+    sn = cockpit.get("sniper_risk") or "n/a"
+    sn_max = cockpit.get("sniper_max_wallet_pct")
+    if sn not in ("n/a", "unknown") and sn_max is not None:
+        sn = f"{sn} max {sn_max}%"
     cov = cockpit.get("coverage_pct")
     cov_s = f"{cov}%" if cov is not None else "n/a"
     flash = ""
@@ -397,7 +457,7 @@ def format_cockpit_telegram(cockpit: dict[str, Any]) -> str:
         f"\n\n🔬 <b>LAB</b> (facts · not a buy call)\n"
         f"mint <b>{mint_s}</b> · freeze <b>{freeze_s}</b> · LP {lp}\n"
         f"liq {liq} · top1 {top1_s} · holders {hold_s}\n"
-        f"bundled {bun_s} · coverage {cov_s}"
+        f"bundled {bun_s} · snipers {sn} · coverage {cov_s}"
         f"{flash}"
     )
 

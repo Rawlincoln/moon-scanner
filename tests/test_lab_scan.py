@@ -1,6 +1,6 @@
 """Fast lab multi-source merge + uniqueness of API shape."""
 
-from services.lab_scan import _merge_market
+from services.lab_scan import _curve_sol_usd, _merge_market
 
 
 def test_merge_prefers_pump_on_curve():
@@ -21,6 +21,7 @@ def test_merge_prefers_pump_on_curve():
     assert m["pair_count"] == 2
     assert m["sources_mcap"]["pump"] == 12_000
     assert m["sources_mcap"]["dex"] == 11_500
+    assert m["liquidity_source"] == "dex"
 
 
 def test_merge_prefers_dex_when_complete():
@@ -29,3 +30,23 @@ def test_merge_prefers_dex_when_complete():
         {"pair": {"marketCap": 52_000, "liquidity": {"usd": 20_000}}, "pair_count": 1},
     )
     assert m["marketCap"] == 52_000
+
+
+def test_curve_liquidity_from_lamports():
+    # ~10 SOL in lamports
+    usd = _curve_sol_usd({"real_sol_reserves": 10 * 1e9, "complete": False})
+    assert usd > 500  # at least some USD at default SOL price
+
+
+def test_merge_uses_curve_when_no_dex():
+    m = _merge_market(
+        {
+            "usd_market_cap": 8_000,
+            "complete": False,
+            "real_sol_reserves": 20 * 1e9,
+        },
+        None,
+    )
+    assert m["liquidity_usd"] is not None and m["liquidity_usd"] > 0
+    assert m["liquidity_source"] == "bonding_curve"
+    assert m["on_bonding_curve"] is True

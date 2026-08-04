@@ -97,18 +97,73 @@ async def _fetch_rug_full(mint: str) -> dict | None:
     return resp.json()
 
 
-def _merge_market(pump: dict | None, dex: dict | None) -> dict[str, Any]:
+def _curve_sol_usd(pump: dict | None) -> float:
+    """Bonding-curve exit liquidity from pump reserves (lamports → USD)."""
+    if not pump:
+        return 0.0
+    # real_sol_reserves often lamports; virtual_sol_reserves same
+    for key in ("real_sol_reserves", "virtual_sol_reserves", "realSolReserves"):
+        raw = pump.get(key)
+        if raw is None:
+            continue
+        try:
+            v = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if v <= 0:
+            continue
+        sol = v / 1e9 if v > 1_000_000 else v  # lamports vs already SOL
+        from config import SOL_USD
+
+        return max(0.0, sol * float(SOL_USD or 150))
+    return 0.0
+
+
+def _merge_market(
+    pump: dict | None,
+    dex: dict | None,
+    *,
+    safety: dict | None = None,
+) -> dict[str, Any]:
     pair = (dex or {}).get("pair") or {}
     pump = pump or {}
-    liq = 0.0
+    safety = safety or {}
+    liq_dex = 0.0
     if isinstance(pair.get("liquidity"), dict):
-        liq = _f(pair["liquidity"].get("usd"))
+        liq_dex = _f(pair["liquidity"].get("usd"))
+    elif pair.get("liquidity") is not None:
+        liq_dex = _f(pair.get("liquidity"))
+    # RugCheck market LP quote+base
+    liq_rug = max(
+        _f(safety.get("liquidity_usd")),
+        _f(safety.get("lp_quote_usd")) + _f(safety.get("lp_locked_usd")) * 0,  # quote side
+        _f(safety.get("lp_quote_usd")),
+    )
+    # If rug has quote+base style stored separately
+    if _f(safety.get("lp_quote_usd")) > 0:
+        # total pool ≈ 2x quote on balanced pools, but use max(quote, locked_usd)
+        liq_rug = max(
+            liq_rug,
+            _f(safety.get("lp_quote_usd")),
+            _f(safety.get("lp_locked_usd")),
+        )
+    on_curve = bool(pump and not pump.get("complete", True))
+    liq_curve = _curve_sol_usd(pump) if on_curve else 0.0
+    # Choose best available liquidity source
+    liq = 0.0
+    liq_source = None
+    candidates = [("dex", liq_dex), ("rugcheck", liq_rug)]
+    if on_curve:
+        candidates.append(("bonding_curve", liq_curve))
+    for label, val in candidates:
+        if val and val > liq:
+            liq = val
+            liq_source = label
+
     mcap_dex = _f(pair.get("marketCap") or pair.get("fdv"))
     mcap_pump = _f(pump.get("usd_market_cap"))
-    # Prefer higher non-zero as high-water; for current use max of live sources when both
     mcap = 0.0
     if mcap_dex > 0 and mcap_pump > 0:
-        # Prefer dex when graduated (complete); pump when on curve
         if pump.get("complete"):
             mcap = mcap_dex or mcap_pump
         else:
@@ -121,15 +176,27 @@ def _merge_market(pump: dict | None, dex: dict | None) -> dict[str, Any]:
         mcap_pump,
     )
     base = pair.get("baseToken") if isinstance(pair.get("baseToken"), dict) else {}
+    pair_count = (dex or {}).get("pair_count")
+    if not pair_count:
+        pair_count = 1 if pair else (1 if not pump.get("complete") else 0)
     return {
         "priceChange": pair.get("priceChange") or {},
         "txns": pair.get("txns") or {},
         "volume": pair.get("volume") or {},
-        "liquidity": pair.get("liquidity") or {"usd": liq},
-        "liquidity_usd": liq,
+        "liquidity": pair.get("liquidity")
+        if isinstance(pair.get("liquidity"), dict)
+        else {"usd": liq if liq > 0 else None},
+        "liquidity_usd": liq if liq > 0 else None,
+        "liquidity_source": liq_source,
+        "liquidity_sources": {
+            "dex": liq_dex or None,
+            "rugcheck": liq_rug or None,
+            "bonding_curve": liq_curve or None,
+            "chosen": liq if liq > 0 else None,
+        },
         "marketCap": mcap,
         "url": pair.get("url"),
-        "pair_count": (dex or {}).get("pair_count") or (1 if pair else 0),
+        "pair_count": pair_count,
         "dexId": pair.get("dexId"),
         "pairAddress": pair.get("pairAddress"),
         "baseToken": base,
@@ -140,6 +207,8 @@ def _merge_market(pump: dict | None, dex: dict | None) -> dict[str, Any]:
             "chosen": mcap or None,
         },
         "ath_merged": ath or None,
+        "on_bonding_curve": bool(pump and not pump.get("complete", True)),
+        "curve_sol_usd": liq_curve or None,
     }
 
 
@@ -154,7 +223,7 @@ def _build_result(
     source_errors: dict[str, str],
     wall_ms: float,
 ) -> dict[str, Any]:
-    market = _merge_market(pump, dex)
+    market = _merge_market(pump, dex, safety=safety)
     pf = pump or {}
     age = PumpFunClient.coin_age_minutes(pf) if pf else None
     if age is not None and age < 9000:
@@ -162,6 +231,15 @@ def _build_result(
         market["pumpfun"] = pf
 
     mcap = _f(market.get("marketCap"))
+    # Back-fill safety liquidity for cockpit/sniper consumers
+    if market.get("liquidity_usd") and not safety.get("liquidity_usd"):
+        safety["liquidity_usd"] = market["liquidity_usd"]
+    if market.get("curve_sol_usd") and not safety.get("lp_quote_usd"):
+        safety["lp_quote_usd"] = market["curve_sol_usd"]
+        safety["lp_quote_sol"] = _f(market["curve_sol_usd"]) / float(
+            __import__("config", fromlist=["SOL_USD"]).SOL_USD or 150
+        )
+
     symbol = (
         pf.get("symbol")
         or (market.get("baseToken") or {}).get("symbol")
@@ -202,6 +280,20 @@ def _build_result(
             age_minutes=token.get("age_minutes"),
             mcap_usd=mcap or None,
         )
+        # Explicit holders_known for UI (n/a snipers when book missing)
+        tops = safety.get("top_holders") or []
+        th = safety.get("total_holders")
+        bs["holders_known"] = bool(tops) or (th is not None and int(th or 0) > 0)
+        if not bs["holders_known"]:
+            sn = bs.get("snipers") if isinstance(bs.get("snipers"), dict) else {}
+            sn = dict(sn)
+            sn["risk_level"] = "unknown"
+            sn["flags"] = list(sn.get("flags") or []) + [
+                "Holder book incomplete — sniper score n/a"
+            ]
+            bs["snipers"] = sn
+            if bs.get("overall") in ("clean", "low"):
+                bs["overall"] = "unknown"
         token["bundleSniper"] = bs
         safety["bundleSniper"] = bs
     except Exception:

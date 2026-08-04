@@ -124,7 +124,13 @@ function renderCockpit(data) {
         ${fact("Mint auth", c.mint_authority, authCls(c.mint_authority))}
         ${fact("Freeze", c.freeze_authority, authCls(c.freeze_authority))}
         ${fact("LP status", c.lp_status)}
-        ${fact("Liquidity", fmtUsd(c.liquidity_usd))}
+        ${fact(
+          "Liquidity",
+          c.liquidity_usd != null
+            ? fmtUsd(c.liquidity_usd) +
+              (c.liquidity_source ? " · " + c.liquidity_source : "")
+            : "n/a"
+        )}
         ${fact("Mcap", fmtUsd(c.mcap_usd))}
         ${fact("Vol 24h", fmtUsd(c.volume_24h_usd))}
         ${fact("Vol 5m", fmtUsd(c.vol_m5_usd))}
@@ -138,8 +144,28 @@ function renderCockpit(data) {
           c.flash_holders ? "bad" : ""
         )}
         ${fact("Pools", c.pools ?? "n/a")}
-        ${fact("Bundled", c.bundled_pct != null ? c.bundled_pct + "%" : "n/a")}
-        ${fact("Snipers", c.sniper_risk || "n/a")}
+        ${fact(
+          "Bundled",
+          c.bundled_pct != null ? c.bundled_pct + "%" : "n/a",
+          c.bundled_pct != null && c.bundled_pct >= 12 ? "bad" : ""
+        )}
+        ${fact(
+          "Snipers",
+          (() => {
+            const r = c.sniper_risk || "n/a";
+            if (!r || r === "unknown" || r === "n/a") return "n/a";
+            const max =
+              c.sniper_max_wallet_pct != null
+                ? " · max " + c.sniper_max_wallet_pct + "%"
+                : "";
+            return r + max;
+          })(),
+          c.sniper_risk === "critical" || c.sniper_risk === "high"
+            ? "bad"
+            : c.sniper_risk === "low" || c.sniper_risk === "clean"
+              ? "ok"
+              : ""
+        )}
         ${flash}
         ${fact("Fee quality", feeQ || "n/a", feeQ === "organic" ? "ok" : feeQ === "flash_sniper" || feeQ === "wash" ? "bad" : "")}
         ${fact("Ticker", ticker || "n/a", c.ticker_unique ? "ok" : "")}
