@@ -130,7 +130,13 @@ function renderCockpit(data) {
         ${fact("Vol 5m", fmtUsd(c.vol_m5_usd))}
         ${fact("Top 1", c.top1_pct != null ? c.top1_pct + "%" : "n/a", c.top1_pct > 20 ? "bad" : "")}
         ${fact("Top 10", c.top10_pct != null ? c.top10_pct + "%" : "n/a")}
-        ${fact("Holders", c.holders ?? "n/a")}
+        ${fact(
+          "Holders",
+          c.holders != null
+            ? String(c.holders) + (c.holders_estimated ? " (est.)" : "")
+            : "n/a",
+          c.flash_holders ? "bad" : ""
+        )}
         ${fact("Pools", c.pools ?? "n/a")}
         ${fact("Bundled", c.bundled_pct != null ? c.bundled_pct + "%" : "n/a")}
         ${fact("Snipers", c.sniper_risk || "n/a")}

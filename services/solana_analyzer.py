@@ -154,10 +154,17 @@ class SolanaAnalyzer:
         if pump_coin and pump_coin.get("complete"):
             issues.append("Already graduated from bonding curve")
 
-        # Extract mint authority / freeze from full report
+        # Extract mint authority / freeze from full report (summary rarely has these)
         mint_authority = full.get("mintAuthority")
+        if mint_authority is None and "mintAuthority" not in full:
+            mint_authority = summary.get("mintAuthority")
         freeze_authority = full.get("freezeAuthority")
+        if freeze_authority is None and "freezeAuthority" not in full:
+            freeze_authority = summary.get("freezeAuthority")
         mutable_metadata = full.get("mutableMetadata", False)
+        if not full and not summary.get("mintAuthority"):
+            # summary-only: leave authorities unknown (None) without inventing revoked
+            pass
 
         if mint_authority:
             issues.append("Mint authority not revoked — supply can be inflated")
@@ -166,10 +173,38 @@ class SolanaAnalyzer:
         if mutable_metadata:
             issues.append("Token metadata is mutable")
 
-        # Rug indicators from full report (summary may carry a shorter list)
-        top_holders = full.get("topHolders") or summary.get("topHolders") or []
+        # Holders: full report only (summary typically omits totalHolders/topHolders)
+        top_holders = (
+            full.get("topHolders")
+            or full.get("top_holders")
+            or summary.get("topHolders")
+            or summary.get("top_holders")
+            or []
+        )
+        if not isinstance(top_holders, list):
+            top_holders = []
+        # Normalize holder rows (address/owner/pct)
+        norm_holders: list[dict] = []
+        for h in top_holders:
+            if not isinstance(h, dict):
+                continue
+            pct = h.get("pct")
+            if pct is None:
+                pct = h.get("percentage") or h.get("share")
+            try:
+                pct_f = float(pct) if pct is not None else 0.0
+            except (TypeError, ValueError):
+                pct_f = 0.0
+            norm_holders.append(
+                {
+                    **h,
+                    "pct": pct_f,
+                    "owner": h.get("owner") or h.get("address") or h.get("wallet") or "",
+                }
+            )
+        top_holders = norm_holders
         if top_holders:
-            top_pct = sum(h.get("pct", 0) for h in top_holders[:5])
+            top_pct = sum(float(h.get("pct") or 0) for h in top_holders[:5])
             if top_pct > 50:
                 issues.append(f"Top 5 holders own {top_pct:.1f}% of supply")
 
@@ -274,7 +309,20 @@ class SolanaAnalyzer:
                     creator_migrated += 1
             except (TypeError, ValueError):
                 pass
-        total_holders = int(full.get("totalHolders") or summary.get("totalHolders") or 0)
+        total_holders = 0
+        for key in ("totalHolders", "total_holders", "holderCount", "holders"):
+            raw = full.get(key) if full else None
+            if raw is None:
+                raw = summary.get(key)
+            if raw is not None:
+                try:
+                    total_holders = int(raw)
+                    break
+                except (TypeError, ValueError):
+                    pass
+        if total_holders <= 0 and top_holders:
+            # At least we saw N top rows (incomplete count)
+            total_holders = max(len(top_holders), total_holders)
         rugged = bool(full.get("rugged") or summary.get("rugged"))
         insider_holders = [h for h in top_holders if h.get("insider")]
         # Full deployer risk profile (prior rugs / serial farm)

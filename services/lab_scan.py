@@ -275,15 +275,17 @@ async def lab_fast_scan(mint: str, *, force: bool = False) -> dict[str, Any]:
 
     arch = get_archive()
 
-    # Parallel: pump + dex + rug summary (all we need for fast)
+    # Parallel: pump + dex + rug summary + full report
+    # (summary alone has NO totalHolders/topHolders — full report required for holders)
     results = await asyncio.gather(
         _timed("pump", _fetch_pump(mint), 2.8),
         _timed("dex", _fetch_dex(mint), 2.5),
         _timed("rugcheck", _fetch_rug_summary(mint), 3.2),
+        _timed("rug_full", _fetch_rug_full(mint), 4.5),
     )
     timings: dict[str, float] = {}
     errors: dict[str, str] = {}
-    pump = dex = rug_sum = None
+    pump = dex = rug_sum = rug_full = None
     for name, val, ms, err in results:
         timings[name] = ms
         if err:
@@ -294,6 +296,8 @@ async def lab_fast_scan(mint: str, *, force: bool = False) -> dict[str, Any]:
             dex = val
         elif name == "rugcheck":
             rug_sum = val
+        elif name == "rug_full":
+            rug_full = val
 
     if isinstance(rug_sum, dict) and rug_sum.get("_rate_limited"):
         errors["rugcheck"] = "rate_limited"
@@ -305,12 +309,25 @@ async def lab_fast_scan(mint: str, *, force: bool = False) -> dict[str, Any]:
         errors["rugcheck"] = str(rug_sum["_error"])
         rug_sum = None
 
-    # Parse safety: prefer rug summary via SolanaAnalyzer when we have data
+    # Parse safety: summary + full (holders/authorities live on full report)
     safety: dict[str, Any] = {}
     if rug_sum and isinstance(rug_sum, dict):
         try:
             safety = _sol._parse_response(
-                mint, rug_sum, {}, pump_coin=pump, padre_audit=None
+                mint,
+                rug_sum,
+                rug_full if isinstance(rug_full, dict) else {},
+                pump_coin=pump,
+                padre_audit=None,
+            )
+        except Exception as exc:
+            errors["rug_parse"] = str(exc)[:80]
+            safety = {}
+    elif isinstance(rug_full, dict):
+        # Full-only path when summary failed
+        try:
+            safety = _sol._parse_response(
+                mint, {}, rug_full, pump_coin=pump, padre_audit=None
             )
         except Exception as exc:
             errors["rug_parse"] = str(exc)[:80]
@@ -326,6 +343,26 @@ async def lab_fast_scan(mint: str, *, force: bool = False) -> dict[str, Any]:
             "issues": ["No safety source responded"],
             "top_holders": [],
         }
+
+    # Ensure holder fields populated even if parse missed alternate keys
+    if isinstance(rug_full, dict):
+        if not safety.get("total_holders"):
+            th = rug_full.get("totalHolders") or rug_full.get("total_holders")
+            if th is not None:
+                try:
+                    safety["total_holders"] = int(th)
+                except (TypeError, ValueError):
+                    pass
+        if not safety.get("top_holders"):
+            tops = rug_full.get("topHolders") or rug_full.get("top_holders") or []
+            if isinstance(tops, list) and tops:
+                safety["top_holders"] = tops[:20]
+        if "mint_authority" not in safety or safety.get("mint_authority") is True:
+            if "mintAuthority" in rug_full:
+                safety["mint_authority"] = rug_full.get("mintAuthority")
+        if "freeze_authority" not in safety or safety.get("freeze_authority") is True:
+            if "freezeAuthority" in rug_full:
+                safety["freeze_authority"] = rug_full.get("freezeAuthority")
 
     wall_ms = (time.perf_counter() - t_wall) * 1000
     token = _build_result(

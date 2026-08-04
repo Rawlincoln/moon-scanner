@@ -94,13 +94,29 @@ def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
         pools = None  # n/a
 
     # Holders
-    holders = _i(
-        safety.get("total_holders")
-        or safety.get("holder_count")
-        or safety.get("holders")
-        or pf.get("holder_count")
+    # Holders: do not use `or` chain on 0 (0 is valid and must show)
+    holders = None
+    for key_src in (
+        (safety, "total_holders"),
+        (safety, "holder_count"),
+        (safety, "holders"),
+        (safety, "totalHolders"),
+        (pf, "holder_count"),
+        (pf, "holders"),
+        (result, "total_holders"),
+    ):
+        src, key = key_src
+        if not isinstance(src, dict):
+            continue
+        if key in src and src.get(key) is not None:
+            holders = _i(src.get(key))
+            break
+    top = (
+        safety.get("top_holders")
+        or safety.get("topHolders")
+        or result.get("top_holders")
+        or []
     )
-    top = safety.get("top_holders") or []
     top1 = None
     top5 = None
     top10 = None
@@ -110,18 +126,33 @@ def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
         for h in top:
             if not isinstance(h, dict):
                 continue
-            # skip known pool labels if flagged
-            if h.get("is_pool") or h.get("pool") or h.get("insider"):
-                # still count unless clearly pool
-                pass
+            # skip pure zero-amount dust rows
             p = _f(h.get("pct") or h.get("percentage") or h.get("share"))
             if p is not None:
                 pcts.append(p)
-        if pcts:
-            top1 = round(pcts[0], 2)
-            top5 = round(sum(pcts[:5]), 2)
-            top10 = round(sum(pcts[:10]), 2)
-            wallets_gt_1pct = sum(1 for p in pcts if p >= 1.0)
+        # Prefer non-pool rows for top1 when possible
+        non_pool = []
+        for h in top:
+            if not isinstance(h, dict):
+                continue
+            if h.get("is_pool") or h.get("pool"):
+                continue
+            p = _f(h.get("pct") or h.get("percentage") or h.get("share"))
+            if p is not None and p > 0:
+                non_pool.append(p)
+        use = non_pool if non_pool else [p for p in pcts if p is not None]
+        if use:
+            top1 = round(use[0], 2)
+            top5 = round(sum(use[:5]), 2)
+            top10 = round(sum(use[:10]), 2)
+            wallets_gt_1pct = sum(1 for p in use if p >= 1.0)
+        # If total_holders missing, estimate from top list length (weak)
+        if holders is None and len(top) > 0:
+            holders = len(top)  # incomplete — mark below
+    holders_estimated = False
+    if holders is None and isinstance(top, list) and top:
+        holders = len(top)
+        holders_estimated = True
 
     mint_seen = "mint_authority" in safety or "mintAuthority" in safety
     freeze_seen = "freeze_authority" in safety or "freezeAuthority" in safety
@@ -212,11 +243,12 @@ def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
         "pools": pools,
         # Distribution
         "holders": holders,
+        "holders_estimated": holders_estimated,
         "top1_pct": top1,
         "top5_pct": top5,
         "top10_pct": top10,
         "wallets_gt_1pct": wallets_gt_1pct,
-        "holders_known": bool(top),
+        "holders_known": bool(top) or (holders is not None and holders > 0),
         "age_minutes": round(age_f, 2) if age_f is not None else None,
         "holders_per_min": holders_per_min,
         "flash_holders": flash_holders,
