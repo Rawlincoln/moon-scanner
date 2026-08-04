@@ -40,6 +40,11 @@ from services.cockpit import (
     format_cockpit_telegram,
     token_to_cockpit_input,
 )
+from services.dev_risk import (
+    attach_dev_risk,
+    dev_risk_gate,
+    format_dev_telegram,
+)
 from services.money_plan import build_money_plan
 
 logger = logging.getLogger("moon-scanner.telegram")
@@ -267,6 +272,16 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
     if cockpit and (MONEY_AUTO_LAB or TELEGRAM_MONEY_MODE or kind in ("moon", "snipe")):
         lab_lines = format_cockpit_telegram(cockpit)
 
+    dev_lines = ""
+    dev = t.get("devRisk") or t.get("_dev_risk")
+    if not isinstance(dev, dict) and (TELEGRAM_MONEY_MODE or kind in ("moon", "snipe")):
+        try:
+            dev = attach_dev_risk(t)
+        except Exception:
+            dev = None
+    if isinstance(dev, dict) and (TELEGRAM_MONEY_MODE or kind in ("moon", "snipe")):
+        dev_lines = format_dev_telegram(dev)
+
     body = (
         f"{title}\n"
         f"{_esc(kind.upper())} · {mcap} · age {age_s}"
@@ -274,6 +289,7 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
         + why_line
         + plan_lines
         + lab_lines
+        + dev_lines
         + (f"\n<a href=\"{padre}\">Padre</a> · <a href=\"{pump}\">Pump</a>" if mint else "")
         + (
             f" · <a href=\"https://moon-scanner-9tlz.onrender.com/lab\">Lab</a>"
@@ -432,6 +448,20 @@ async def notify_new_picks(
                     )
                     _last_cycle["control_skip"] = why_ctrl
                     continue
+
+            # Dev / serial rugger gate
+            try:
+                dev = attach_dev_risk(t)
+                t["_dev_risk"] = dev
+                t["devRisk"] = dev
+                if TELEGRAM_MONEY_MODE:
+                    ok_dev, why_dev = dev_risk_gate(dev)
+                    if not ok_dev:
+                        logger.info("skip %s dev risk: %s", mint[:8], why_dev)
+                        _last_cycle["dev_skip"] = why_dev
+                        continue
+            except Exception as exc:
+                logger.debug("dev risk failed: %s", exc)
 
             # Archive snapshot into Lab (non-blocking best-effort)
             if MONEY_AUTO_LAB and cockpit:

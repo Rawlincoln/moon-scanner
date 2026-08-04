@@ -261,9 +261,22 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
         # enrich claimed ok but safety error — treat as incomplete
         pass
 
-    # --- Dev / serial deployer / sold bag ---
+    # --- Dev / serial deployer / sold bag / prior rugs ---
     dev = _dev_profile(token)
     launched = int(dev.get("tokens_launched") or 0)
+    try:
+        from services.dev_risk import attach_dev_risk, dev_risk_gate
+
+        dr = attach_dev_risk(token)
+        ok_d, why_d = dev_risk_gate(dr)
+        if not ok_d:
+            return why_d or "dev risk — prior rugs / serial farm"
+        if int(dr.get("prior_rugs") or 0) >= 1 and launched >= 3:
+            # Soft block on heat for single prior rug + multi launch
+            if int(dr.get("prior_rugs") or 0) >= 2 or launched >= 6:
+                return dr.get("summary") or "prior rug history"
+    except Exception:
+        pass
     if launched >= 15:
         return f"serial deployer — {launched} tokens launched"
     if launched >= 8 and int(dev.get("tokens_migrated") or 0) == 0:

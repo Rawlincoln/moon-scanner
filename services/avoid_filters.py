@@ -51,6 +51,15 @@ HARD_AVOID_FLAGS: frozenset[str] = frozenset(
         "honeypot",
         "ghost_launch",
         "serial_creator",
+        "serial_farm",
+        "serial_zero_migrate",
+        "prior_rugs",
+        "prior_rug",
+        "dead_coin_farm",
+        "blocked_creator",
+        "dev_sold_multi",
+        "low_migrate_rate",
+        "zero_migrate_history",
         "drained_curve",
         "lp_unlocked",
         "lp_not_locked",
@@ -339,11 +348,39 @@ def analyze_avoid_flags(
             "— high flash-scam risk (do not FOMO)"
         )
 
-    # --- 4. Creator serial spammer ---
+    # --- 4. Creator serial spammer + rug history (dev_risk) ---
     creator_tokens = int(safety.get("creator_token_count") or 0)
     if creator_tokens >= 8:
         flags.append("serial_creator")
         reasons.append(f"Creator has launched {creator_tokens} tokens")
+    try:
+        from services.dev_risk import analyze_creator_history
+
+        dev = safety.get("dev_risk")
+        if not isinstance(dev, dict):
+            dev = analyze_creator_history(safety, pump=pump)
+        for f in dev.get("flags") or []:
+            if f not in flags:
+                flags.append(str(f))
+        for r in (dev.get("reasons") or [])[:3]:
+            if r and r not in reasons:
+                reasons.append(str(r))
+        if dev.get("hard_reject") and not any(
+            x in flags
+            for x in (
+                "prior_rugs",
+                "serial_farm",
+                "serial_zero_migrate",
+                "blocked_creator",
+            )
+        ):
+            # ensure at least one hard flag lands
+            if "prior_rug" not in flags and int(dev.get("prior_rugs") or 0) >= 1:
+                flags.append("prior_rug")
+            elif "serial_creator" not in flags and int(dev.get("tokens_launched") or 0) >= 5:
+                flags.append("serial_creator")
+    except Exception:
+        pass
 
     # --- 5. Liquidity pull / drain ---
     quote_sol = _safe_float(safety.get("lp_quote_sol"))

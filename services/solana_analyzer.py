@@ -277,6 +277,22 @@ class SolanaAnalyzer:
         total_holders = int(full.get("totalHolders") or summary.get("totalHolders") or 0)
         rugged = bool(full.get("rugged") or summary.get("rugged"))
         insider_holders = [h for h in top_holders if h.get("insider")]
+        # Full deployer risk profile (prior rugs / serial farm)
+        try:
+            from services.dev_risk import analyze_creator_history
+
+            _dev_pre = {
+                "creator": creator,
+                "creator_token_count": creator_tokens,
+                "creator_migrated_count": creator_migrated,
+                "creator_tokens": creator_token_rows,
+                "creator_sold": creator_sold,
+                "creator_pct": creator_pct,
+                "creator_balance": creator_balance,
+            }
+            dev_risk = analyze_creator_history(_dev_pre, pump=pump_coin or {})
+        except Exception:
+            dev_risk = {}
 
         # Re-evaluate LP with market data.
         # NOTE: pump.fun always reports lpLockedPct=100 — do NOT trust that alone.
@@ -349,6 +365,8 @@ class SolanaAnalyzer:
             "creator_token_count": creator_tokens,
             "creator_migrated_count": creator_migrated,
             "creator_tokens": creator_token_rows[:25],
+            "creator_prior_rugs": int((dev_risk or {}).get("prior_rugs") or 0),
+            "dev_risk": dev_risk or {},
             "total_holders": total_holders,
             "rugged": rugged,
             "insider_holders": insider_holders[:5],
