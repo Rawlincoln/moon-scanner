@@ -376,6 +376,17 @@ MONEY_SYSTEM_ARMED = (os.getenv("MONEY_SYSTEM_ARMED", "1") or "1").strip().lower
     "no",
     "off",
 )
+# Money alerts: require mint+freeze revoked (fail-closed on present or n/a)
+MONEY_REQUIRE_CONTROL_SURFACE = (
+    os.getenv("MONEY_REQUIRE_CONTROL_SURFACE", "1") or "1"
+).strip().lower() not in ("0", "false", "no", "off")
+# Attach Lab cockpit facts to every money Telegram alert + archive snapshot
+MONEY_AUTO_LAB = (os.getenv("MONEY_AUTO_LAB", "1") or "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
 
 
 def _solana_rpc_http() -> str:

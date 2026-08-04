@@ -253,6 +253,93 @@ def cockpit_delta(prev: dict[str, Any] | None, cur: dict[str, Any]) -> dict[str,
     return {"has_prev": True, "changes": changes}
 
 
+def token_to_cockpit_input(token: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a moon/snipe feed card into extract_cockpit input shape."""
+    safety = token.get("safety") or {}
+    market = token.get("market") or {}
+    if not market and token.get("priceChange"):
+        market = {
+            "priceChange": token.get("priceChange"),
+            "liquidity": token.get("liquidity"),
+            "volume": token.get("volume"),
+            "marketCap": token.get("mcap_usd"),
+        }
+    return {
+        "tokenAddress": token.get("tokenAddress") or token.get("mint") or "",
+        "chainId": token.get("chainId") or "solana",
+        "symbol": token.get("symbol"),
+        "name": token.get("name"),
+        "mcap_usd": token.get("mcap_usd"),
+        "analyzedAt": token.get("analyzedAt") or token.get("scanned_at"),
+        "safety": safety,
+        "market": {
+            **market,
+            "pumpfun": token.get("pumpfun") or market.get("pumpfun") or {},
+            "liquidity": market.get("liquidity")
+            or token.get("liquidity")
+            or {"usd": (token.get("market") or {}).get("liquidity_usd")},
+        },
+        "pumpfun": token.get("pumpfun") or {},
+        "bundleSniper": token.get("bundleSniper") or token.get("bundle_sniper") or {},
+    }
+
+
+def control_surface_gate(cockpit: dict[str, Any]) -> tuple[bool, str | None]:
+    """Money-mode fail-closed on mint/freeze.
+
+    - present → never alert (can inflate / freeze bags)
+    - n/a → never alert (incomplete audit — not proven clean)
+    - revoked → ok for control surface
+    """
+    mint_s = str(cockpit.get("mint_authority") or "n/a").lower()
+    freeze_s = str(cockpit.get("freeze_authority") or "n/a").lower()
+    if mint_s == "present":
+        return False, "mint authority still PRESENT — can inflate supply"
+    if freeze_s == "present":
+        return False, "freeze authority still PRESENT — can lock sells"
+    if mint_s == "n/a":
+        return False, "mint authority n/a — incomplete control surface"
+    if freeze_s == "n/a":
+        return False, "freeze authority n/a — incomplete control surface"
+    if mint_s != "revoked" or freeze_s != "revoked":
+        return False, f"control surface not clean (mint={mint_s}, freeze={freeze_s})"
+    return True, None
+
+
+def format_cockpit_telegram(cockpit: dict[str, Any]) -> str:
+    """Short Germanus-style fact blurb for money alerts."""
+
+    def _u(n: Any) -> str:
+        try:
+            v = float(n)
+        except (TypeError, ValueError):
+            return "n/a"
+        if v >= 1e6:
+            return f"${v / 1e6:.2f}M"
+        if v >= 1e3:
+            return f"${v / 1e3:.1f}k"
+        return f"${v:.0f}"
+
+    mint_s = cockpit.get("mint_authority") or "n/a"
+    freeze_s = cockpit.get("freeze_authority") or "n/a"
+    lp = cockpit.get("lp_status") or "n/a"
+    top1 = cockpit.get("top1_pct")
+    top1_s = f"{top1}%" if top1 is not None else "n/a"
+    hold = cockpit.get("holders")
+    hold_s = str(hold) if hold is not None else "n/a"
+    liq = _u(cockpit.get("liquidity_usd"))
+    bun = cockpit.get("bundled_pct")
+    bun_s = f"{bun}%" if bun is not None else "n/a"
+    cov = cockpit.get("coverage_pct")
+    cov_s = f"{cov}%" if cov is not None else "n/a"
+    return (
+        f"\n\n🔬 <b>LAB</b> (facts · not a buy call)\n"
+        f"mint <b>{mint_s}</b> · freeze <b>{freeze_s}</b> · LP {lp}\n"
+        f"liq {liq} · top1 {top1_s} · holders {hold_s}\n"
+        f"bundled {bun_s} · coverage {cov_s}"
+    )
+
+
 def liquidity_drift_pct(prev_liq: float | None, cur_liq: float | None) -> float | None:
     """Freshness probe — Germanus uses 10% liquidity drift threshold."""
     if prev_liq is None or cur_liq is None:

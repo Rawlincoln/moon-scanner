@@ -49,6 +49,26 @@ Set `TELEGRAM_MONEY_MODE=0` to restore multi-feed heat/grad alerts.
 
 Paper by default (`MONEY_PAPER_DEFAULT=1`). Only go live when E[R] &gt; 0 over ≥20 closed trades.
 
+## Auto-lab on money alerts (#4)
+
+When `MONEY_AUTO_LAB=1` (default), every MOON/SNIPE Telegram includes a **Lab cockpit** block:
+
+```
+🔬 LAB (facts · not a buy call)
+mint revoked · freeze revoked · LP …
+liq $x · top1 y% · holders n
+```
+
+When `MONEY_REQUIRE_CONTROL_SURFACE=1` (default), alerts are **fail-closed**:
+
+| mint / freeze | Money alert |
+|---------------|-------------|
+| **revoked** | allowed (if other gates pass) |
+| **present** | **blocked** |
+| **n/a** | **blocked** (incomplete audit) |
+
+Snapshots are also written to the Lab archive (`/lab`) for history.
+
 ## 24/7 when your PC is OFF
 
 Your laptop must **not** be the only place the scanner runs. Alerts need a **cloud process**.

@@ -16,6 +16,8 @@ from typing import Any
 
 from config import (
     DATA_DIR,
+    MONEY_AUTO_LAB,
+    MONEY_REQUIRE_CONTROL_SURFACE,
     PADRE_TRADE_URL,
     TELEGRAM_ALERT_DEDUPE_SEC,
     TELEGRAM_ALERT_FEEDS,
@@ -32,6 +34,12 @@ from config import (
 )
 from services.http_client import get_client
 from services.capital import can_open_trade, enrich_plan_with_size
+from services.cockpit import (
+    control_surface_gate,
+    extract_cockpit,
+    format_cockpit_telegram,
+    token_to_cockpit_input,
+)
 from services.money_plan import build_money_plan
 
 logger = logging.getLogger("moon-scanner.telegram")
@@ -248,13 +256,30 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
             f"<i>Skip if late (past TP1) · never average down · obey daily R stop</i>"
         )
 
+    # Auto-lab cockpit (Germanus-style facts on money alerts)
+    lab_lines = ""
+    cockpit = t.get("_cockpit") if isinstance(t.get("_cockpit"), dict) else None
+    if cockpit is None and (MONEY_AUTO_LAB or TELEGRAM_MONEY_MODE):
+        try:
+            cockpit = extract_cockpit(token_to_cockpit_input(t))
+        except Exception:
+            cockpit = None
+    if cockpit and (MONEY_AUTO_LAB or TELEGRAM_MONEY_MODE or kind in ("moon", "snipe")):
+        lab_lines = format_cockpit_telegram(cockpit)
+
     body = (
         f"{title}\n"
         f"{_esc(kind.upper())} · {mcap} · age {age_s}"
         + (f" · score {score}" if score is not None else "")
         + why_line
         + plan_lines
+        + lab_lines
         + (f"\n<a href=\"{padre}\">Padre</a> · <a href=\"{pump}\">Pump</a>" if mint else "")
+        + (
+            f" · <a href=\"https://moon-scanner-9tlz.onrender.com/lab\">Lab</a>"
+            if mint
+            else ""
+        )
         + (f"\n<code>{_esc(mint)}</code>" if mint else "")
     )
     return body
@@ -386,6 +411,37 @@ async def notify_new_picks(
             plan = enrich_plan_with_size(feed_key, t)
             t = dict(t)
             t["_money_plan"] = plan
+
+            # Auto-lab: cockpit facts + fail-closed control surface
+            cockpit = None
+            try:
+                cockpit = extract_cockpit(token_to_cockpit_input(t))
+                t["_cockpit"] = cockpit
+            except Exception as exc:
+                logger.debug("cockpit extract failed: %s", exc)
+                cockpit = None
+
+            if TELEGRAM_MONEY_MODE and MONEY_REQUIRE_CONTROL_SURFACE:
+                if cockpit is None:
+                    logger.info("skip %s — no cockpit/control surface", mint[:8])
+                    continue
+                ok_ctrl, why_ctrl = control_surface_gate(cockpit)
+                if not ok_ctrl:
+                    logger.info(
+                        "skip %s control surface: %s", mint[:8], why_ctrl
+                    )
+                    _last_cycle["control_skip"] = why_ctrl
+                    continue
+
+            # Archive snapshot into Lab (non-blocking best-effort)
+            if MONEY_AUTO_LAB and cockpit:
+                try:
+                    from services.scan_archive import get_archive
+
+                    get_archive().store(token_to_cockpit_input(t), store_raw=False)
+                except Exception as exc:
+                    logger.debug("auto-lab archive failed: %s", exc)
+
             msg = format_pick_message(feed_key, t)
             result = await send_telegram(msg)
             if result.get("ok"):

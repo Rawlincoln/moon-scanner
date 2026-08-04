@@ -83,6 +83,68 @@ def test_delta_and_drift():
     assert liquidity_drift_pct(20_000, 30_000) == 50.0
 
 
+def test_control_surface_gate():
+    from services.cockpit import control_surface_gate
+
+    ok, _ = control_surface_gate(
+        {"mint_authority": "revoked", "freeze_authority": "revoked"}
+    )
+    assert ok is True
+    bad, why = control_surface_gate(
+        {"mint_authority": "present", "freeze_authority": "revoked"}
+    )
+    assert bad is False and "mint" in (why or "").lower()
+    bad2, why2 = control_surface_gate(
+        {"mint_authority": "revoked", "freeze_authority": "n/a"}
+    )
+    assert bad2 is False and "n/a" in (why2 or "").lower()
+
+
+def test_format_cockpit_telegram():
+    from services.cockpit import format_cockpit_telegram
+
+    s = format_cockpit_telegram(
+        {
+            "mint_authority": "revoked",
+            "freeze_authority": "revoked",
+            "lp_status": "locked",
+            "liquidity_usd": 12_000,
+            "top1_pct": 3.2,
+            "holders": 400,
+            "bundled_pct": 2.0,
+            "coverage_pct": 90,
+        }
+    )
+    assert "LAB" in s
+    assert "revoked" in s
+    assert "mint" in s.lower()
+
+
+def test_format_pick_includes_lab():
+    from services.telegram_alerts import format_pick_message
+
+    msg = format_pick_message(
+        "moon",
+        {
+            "tokenAddress": "MintLabAuto1111111111111111111111111",
+            "symbol": "LABX",
+            "mcap_usd": 18_000,
+            "age_minutes": 20,
+            "moon_label": "MOON",
+            "moon": {"why": ["edge"]},
+            "safety": {
+                "mint_authority": None,
+                "freeze_authority": None,
+                "total_holders": 100,
+                "top_holders": [{"pct": 2.5}],
+            },
+            "market": {"liquidity": {"usd": 8_000}},
+        },
+    )
+    assert "LAB" in msg or "mint" in msg.lower()
+    assert "revoked" in msg.lower()
+
+
 def test_archive_store_list_freshness(tmp_path: Path):
     arch = ScanArchive(tmp_path / "arch.db")
     r1 = _sample_result()
