@@ -28,16 +28,32 @@ async def alerts_status():
     """Public-ish status (no secrets) — is Telegram wired?"""
     st = tg.status()
     inv = {}
+    desk = {}
     try:
-        from services.alert_invalidation import status as inv_status
+        from services.position_manager import status as pm_status
 
-        inv = inv_status()
+        inv = pm_status()
     except Exception:
         inv = {}
+    try:
+        from services.capital import desk_snapshot
+        from services.trade_journal import get_journal
+
+        desk = desk_snapshot(get_journal())
+    except Exception:
+        desk = {}
     return {
         "ok": True,
         **st,
-        "invalidation": inv,
+        "positions": inv,
+        "desk": {
+            "armed": desk.get("armed"),
+            "can_open": desk.get("can_open"),
+            "can_open_reason": desk.get("can_open_reason"),
+            "bankroll_usd": desk.get("bankroll_usd"),
+            "day_r": (desk.get("session") or {}).get("day_r"),
+            "open_count": (desk.get("session") or {}).get("open_count"),
+        },
         "auth": {
             "admin_key_configured": bool((ADMIN_API_KEY or "").strip()),
             "cron_secret_configured": bool((TELEGRAM_CRON_SECRET or "").strip()),

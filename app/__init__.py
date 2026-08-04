@@ -29,6 +29,7 @@ from routes.realtime import router as realtime_router
 from routes.snipes import router as snipes_router
 from routes.trenches import router as trenches_router
 from routes.journal import router as journal_router
+from routes.money import router as money_router
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -40,7 +41,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Moon Scanner",
         description="Identify safe early tokens on EVM & Solana with entry/exit signals",
-        version="1.8.0",
+        version="2.0.0",
         lifespan=lifespan,
         docs_url=None if IS_PRODUCTION else "/docs",
         redoc_url=None if IS_PRODUCTION else "/redoc",
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(graduated_router)
     app.include_router(alerts_router)
     app.include_router(journal_router)
+    app.include_router(money_router)
     app.include_router(realtime_router)
     app.include_router(analyze_router)
     app.include_router(trenches_router)

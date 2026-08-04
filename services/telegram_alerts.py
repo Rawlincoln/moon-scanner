@@ -31,6 +31,7 @@ from config import (
     TELEGRAM_MONEY_MODE,
 )
 from services.http_client import get_client
+from services.capital import can_open_trade, enrich_plan_with_size
 from services.money_plan import build_money_plan
 
 logger = logging.getLogger("moon-scanner.telegram")
@@ -212,19 +213,39 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
     else:
         why_line = ""
 
-    # Money plan block (always when money mode; still useful for snipe/moon otherwise)
-    plan = build_money_plan(kind, t)
+    # Money plan + size (complete system)
+    plan = t.get("_money_plan") if isinstance(t.get("_money_plan"), dict) else None
+    if not plan:
+        plan = (
+            enrich_plan_with_size(kind, t)
+            if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe")
+            else build_money_plan(kind, t)
+        )
     plan_lines = ""
     if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe"):
+        sizing = plan.get("sizing") or {}
+        size_line = ""
+        if sizing.get("size_usd"):
+            size_line = (
+                f"\n💰 SIZE ${sizing.get('size_usd')} "
+                f"(risk ${sizing.get('risk_usd')} · "
+                + (
+                    f"~{sizing.get('size_sol')} SOL · "
+                    if sizing.get("size_sol")
+                    else ""
+                )
+                + f"bankroll ${sizing.get('bankroll_usd')})"
+            )
         plan_lines = (
-            f"\n\n<b>PLAN</b> (mcap ref · risk ≤{plan.get('risk_pct_hint', 1)}% bankroll)\n"
+            f"\n\n<b>PLAN</b> (mcap ref · risk-sized)"
+            f"{size_line}\n"
             f"Entry ≈ {_fmt_usd(plan.get('entry_mcap'))}\n"
             f"🛑 STOP −{plan.get('stop_pct')}% → {_fmt_usd(plan.get('stop_mcap'))}\n"
-            f"🎯 TP1 +{plan.get('tp1_pct')}% → {_fmt_usd(plan.get('tp1_mcap'))} (50%)\n"
-            f"🚀 TP2 +{plan.get('tp2_pct')}% → {_fmt_usd(plan.get('tp2_mcap'))}\n"
+            f"🎯 TP1 +{plan.get('tp1_pct')}% → {_fmt_usd(plan.get('tp1_mcap'))} (sell 50%)\n"
+            f"🚀 TP2 +{plan.get('tp2_pct')}% → {_fmt_usd(plan.get('tp2_mcap'))} (close rest)\n"
             f"❌ INVALID if &lt; {_fmt_usd(plan.get('invalid_if_below_mcap'))} "
             f"or no +{plan.get('need_move_pct')}% in {plan.get('max_hold_min'):.0f}m\n"
-            f"<i>Late fill = worse R:R — skip if mcap already past TP1</i>"
+            f"<i>Skip if late (past TP1) · never average down · obey daily R stop</i>"
         )
 
     body = (
@@ -302,6 +323,20 @@ async def notify_new_picks(
             return 0
 
     allowed = _allowed_labels(kind if kind_l != "snipes" else "snipe")
+    feed_key = "snipe" if kind_l in ("snipe", "snipes") else kind_l
+
+    # Session risk gate (daily loss / max open / disarmed)
+    try:
+        from services.trade_journal import get_journal
+
+        ok_gate, gate_why = can_open_trade(get_journal(), kind=feed_key)
+        if not ok_gate:
+            logger.info("money gate blocked %s alerts: %s", feed_key, gate_why)
+            _last_cycle["gate"] = gate_why
+            return 0
+    except Exception as exc:
+        logger.debug("gate check failed: %s", exc)
+
     async with _lock:
         seen = _load_seen()
         now = time.time()
@@ -318,7 +353,6 @@ async def notify_new_picks(
             "RISKY": 2,
         }
         ranked: list[dict[str, Any]] = []
-        feed_key = "snipe" if kind_l in ("snipe", "snipes") else kind_l
         for t in tokens or []:
             if not isinstance(t, dict):
                 continue
@@ -337,18 +371,32 @@ async def notify_new_picks(
         for t in ranked:
             if sent >= TELEGRAM_ALERT_MAX_PER_CYCLE:
                 break
+            # Re-check gate each send (open count may fill)
+            try:
+                from services.trade_journal import get_journal
+
+                ok_gate, gate_why = can_open_trade(get_journal(), kind=feed_key)
+                if not ok_gate:
+                    _last_cycle["gate"] = gate_why
+                    break
+            except Exception:
+                pass
             mint = _mint_of(t)
             key = f"{feed_key}:{mint}"
+            plan = enrich_plan_with_size(feed_key, t)
+            t = dict(t)
+            t["_money_plan"] = plan
             msg = format_pick_message(feed_key, t)
             result = await send_telegram(msg)
             if result.get("ok"):
                 seen[key] = now
                 sent += 1
-                # Journal open trade (paper by default)
                 try:
                     from services.trade_journal import get_journal
 
-                    get_journal().open_from_alert(feed_key, t, alert_sent=True)
+                    get_journal().open_from_alert(
+                        feed_key, t, alert_sent=True, plan=plan
+                    )
                 except Exception as exc:
                     logger.debug("journal open failed: %s", exc)
                 await asyncio.sleep(0.35)
@@ -441,10 +489,18 @@ async def background_telegram_alert_loop() -> None:
 
     try:
         await _seed_seen_from_scans()
+        from services.capital import desk_snapshot
+        from services.trade_journal import get_journal
+
+        desk = desk_snapshot(get_journal())
         mode_line = (
-            "💰 <b>MONEY MODE</b> — MOON + SNIPE only\n"
-            "Each alert includes STOP / TP1 / TP2 / INVALID rules.\n"
-            "Auto-CANCEL if setup breaks.\n"
+            "💰 <b>COMPLETE MONEY SYSTEM</b>\n"
+            "MOON + SNIPE only · risk-sized · TP1/TP2/STOP managed\n"
+            f"Bankroll ${desk.get('bankroll_usd')} · "
+            f"risk {desk.get('risk_per_trade_pct')}%/trade "
+            f"(${desk.get('risk_per_trade_usd')})\n"
+            f"Max open {desk.get('max_open_trades')} · "
+            f"day stop −{desk.get('max_daily_loss_r')}R\n"
             if TELEGRAM_MONEY_MODE
             else "Multi-feed alerts (heat/grad enabled)\n"
         )
@@ -452,9 +508,8 @@ async def background_telegram_alert_loop() -> None:
             "✅ <b>Moon Scanner</b> Telegram alerts ON\n"
             f"{mode_line}"
             f"Feeds: {', '.join(TELEGRAM_ALERT_FEEDS)}\n"
-            f"Labels: moon={','.join(sorted(TELEGRAM_ALERT_MOON_LABELS))} · "
-            f"snipe={','.join(sorted(TELEGRAM_ALERT_SNIPE_LABELS))}\n"
-            f"Every ~{TELEGRAM_ALERT_INTERVAL_SEC:.0f}s"
+            f"Armed: {desk.get('armed')} · can open: {desk.get('can_open')}\n"
+            f"Every ~{TELEGRAM_ALERT_INTERVAL_SEC:.0f}s · desk /money"
         )
     except Exception as exc:
         logger.warning("telegram seed failed: %s", exc)

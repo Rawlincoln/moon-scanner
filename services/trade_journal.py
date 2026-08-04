@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from config import DATA_DIR, MONEY_PAPER_DEFAULT
+from services.capital import enrich_plan_with_size
 from services.money_plan import build_money_plan, check_invalidation, classify_exit
 
-# Share parent dir with other durable DBs
 _DEFAULT_DB = Path(DATA_DIR) / "trade_journal.db"
 
 _lock = threading.Lock()
@@ -58,10 +58,17 @@ class TradeJournal:
                         entry_mcap REAL,
                         exit_mcap REAL,
                         peak_mcap REAL,
+                        last_mcap REAL,
                         plan_json TEXT,
+                        mgmt_json TEXT,
                         outcome TEXT,
                         multiple REAL,
                         r_multiple REAL,
+                        pnl_usd REAL,
+                        size_usd REAL,
+                        risk_usd REAL,
+                        size_sol REAL,
+                        bankroll_usd REAL,
                         notes TEXT,
                         invalid_reason TEXT,
                         alert_sent INTEGER DEFAULT 0
@@ -71,6 +78,23 @@ class TradeJournal:
                     CREATE INDEX IF NOT EXISTS idx_trades_opened ON trades(opened_at);
                     """
                 )
+                cols = {
+                    r[1] for r in conn.execute("PRAGMA table_info(trades)").fetchall()
+                }
+                for col, typ in (
+                    ("last_mcap", "REAL"),
+                    ("mgmt_json", "TEXT"),
+                    ("pnl_usd", "REAL"),
+                    ("size_usd", "REAL"),
+                    ("risk_usd", "REAL"),
+                    ("size_sol", "REAL"),
+                    ("bankroll_usd", "REAL"),
+                ):
+                    if col not in cols:
+                        try:
+                            conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {typ}")
+                        except Exception:
+                            pass
                 conn.commit()
             finally:
                 conn.close()
@@ -85,12 +109,13 @@ class TradeJournal:
         *,
         paper: bool | None = None,
         alert_sent: bool = True,
+        plan: dict[str, Any] | None = None,
     ) -> int | None:
         """Record a new open trade when Telegram fires (dedupe 45m same feed+mint)."""
         mint = str(token.get("tokenAddress") or token.get("mint") or "").strip()
         if not mint:
             return None
-        plan = build_money_plan(kind, token)
+        plan = plan or enrich_plan_with_size(kind, token)
         entry = plan.get("entry_mcap") or 0
         if not entry:
             return None
@@ -103,13 +128,14 @@ class TradeJournal:
             or token.get("grad_label")
             or ""
         )
+        sizing = plan.get("sizing") or {}
         with _lock:
             conn = self._conn()
             try:
                 recent = conn.execute(
                     """
                     SELECT id FROM trades
-                    WHERE mint=? AND feed=? AND opened_at > ? AND status IN ('open','invalid')
+                    WHERE mint=? AND feed=? AND opened_at > ? AND status='open'
                     ORDER BY opened_at DESC LIMIT 1
                     """,
                     (mint, kind.lower(), now - 45 * 60),
@@ -120,8 +146,9 @@ class TradeJournal:
                     """
                     INSERT INTO trades (
                         mint, symbol, name, feed, label, paper, status,
-                        opened_at, entry_mcap, peak_mcap, plan_json, alert_sent
-                    ) VALUES (?,?,?,?,?,?, 'open', ?,?,?,?,?)
+                        opened_at, entry_mcap, peak_mcap, last_mcap, plan_json, mgmt_json,
+                        alert_sent, size_usd, risk_usd, size_sol, bankroll_usd
+                    ) VALUES (?,?,?,?,?,?, 'open', ?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         mint,
@@ -133,8 +160,16 @@ class TradeJournal:
                         now,
                         float(entry),
                         float(entry),
+                        float(entry),
                         json.dumps(plan),
+                        json.dumps({}),
                         1 if alert_sent else 0,
+                        float(sizing.get("size_usd") or plan.get("size_usd") or 0)
+                        or None,
+                        float(sizing.get("risk_usd") or plan.get("risk_usd") or 0)
+                        or None,
+                        float(sizing.get("size_sol") or 0) or None,
+                        float(sizing.get("bankroll_usd") or 0) or None,
                     ),
                 )
                 conn.commit()
@@ -164,6 +199,44 @@ class TradeJournal:
             finally:
                 conn.close()
 
+    def update_management(
+        self,
+        trade_id: int,
+        *,
+        peak_mcap: float | None = None,
+        last_mcap: float | None = None,
+        mgmt: dict[str, Any] | None = None,
+    ) -> None:
+        with _lock:
+            conn = self._conn()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM trades WHERE id=?", (int(trade_id),)
+                ).fetchone()
+                if not row or row["status"] != "open":
+                    return
+                peak = (
+                    max(float(row["peak_mcap"] or 0), float(peak_mcap))
+                    if peak_mcap is not None
+                    else row["peak_mcap"]
+                )
+                last = last_mcap if last_mcap is not None else row["last_mcap"]
+                mgmt_s = (
+                    json.dumps(mgmt)
+                    if mgmt is not None
+                    else row["mgmt_json"]
+                )
+                conn.execute(
+                    """
+                    UPDATE trades SET peak_mcap=?, last_mcap=?, mgmt_json=?
+                    WHERE id=?
+                    """,
+                    (peak, last, mgmt_s, int(trade_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
     def apply_mcap(self, trade_id: int, mcap: float) -> dict[str, Any] | None:
         """Update peak; if invalid rules hit → mark invalid. Returns trade or None."""
         if mcap is None or mcap <= 0:
@@ -189,28 +262,32 @@ class TradeJournal:
                 )
                 if invalid:
                     cls = classify_exit(plan, exit_mcap=float(mcap), peak_mcap=peak)
+                    pnl = self._pnl_usd(row, float(mcap), cls)
                     conn.execute(
                         """
                         UPDATE trades SET
-                            peak_mcap=?, exit_mcap=?, closed_at=?, status='invalid',
-                            outcome=?, multiple=?, r_multiple=?, invalid_reason=?
+                            peak_mcap=?, last_mcap=?, exit_mcap=?, closed_at=?,
+                            status='invalid', outcome=?, multiple=?, r_multiple=?,
+                            pnl_usd=?, invalid_reason=?
                         WHERE id=?
                         """,
                         (
                             peak,
                             float(mcap),
+                            float(mcap),
                             time.time(),
                             cls.get("outcome") or "invalid",
                             cls.get("multiple"),
                             cls.get("r_multiple"),
+                            pnl,
                             (reason or "")[:300],
                             int(trade_id),
                         ),
                     )
                 else:
                     conn.execute(
-                        "UPDATE trades SET peak_mcap=? WHERE id=?",
-                        (peak, int(trade_id)),
+                        "UPDATE trades SET peak_mcap=?, last_mcap=? WHERE id=?",
+                        (peak, float(mcap), int(trade_id)),
                     )
                 conn.commit()
                 row2 = conn.execute(
@@ -219,6 +296,23 @@ class TradeJournal:
                 return dict(row2) if row2 else None
             finally:
                 conn.close()
+
+    @staticmethod
+    def _pnl_usd(row: Any, exit_mcap: float, cls: dict[str, Any]) -> float | None:
+        try:
+            size = float(row["size_usd"] or 0)
+            entry = float(row["entry_mcap"] or 0)
+            if size <= 0 or entry <= 0:
+                # use R * risk
+                risk = float(row["risk_usd"] or 0)
+                r = cls.get("r_multiple")
+                if risk and r is not None:
+                    return round(risk * float(r), 2)
+                return None
+            mult = exit_mcap / entry
+            return round(size * (mult - 1.0), 2)
+        except Exception:
+            return None
 
     def close_trade(
         self,
@@ -248,20 +342,39 @@ class TradeJournal:
                     plan, exit_mcap=float(exit_mcap), peak_mcap=peak
                 )
                 outcome = force_outcome or cls.get("outcome")
+                # Adjust R for partial TP1 then exit
+                try:
+                    mgmt = json.loads(row["mgmt_json"] or "{}")
+                except Exception:
+                    mgmt = {}
+                r_mult = cls.get("r_multiple")
+                if mgmt.get("tp1_hit") and outcome in ("tp2", "be_stop", "stop"):
+                    # approximate: half at +50% (~+2.8R if 18% stop), half at final
+                    stop_pct = float(plan.get("stop_pct") or 18) / 100.0 or 0.18
+                    r_tp1 = 0.50 / stop_pct  # +50% on half
+                    r_rest = (
+                        (float(exit_mcap) / float(row["entry_mcap"] or 1) - 1.0)
+                        / stop_pct
+                    )
+                    r_mult = round(0.5 * r_tp1 + 0.5 * r_rest, 2)
+                pnl = self._pnl_usd(row, float(exit_mcap), {**cls, "r_multiple": r_mult})
                 conn.execute(
                     """
                     UPDATE trades SET
                         status='closed', closed_at=?, exit_mcap=?, peak_mcap=?,
-                        outcome=?, multiple=?, r_multiple=?, notes=?
+                        last_mcap=?, outcome=?, multiple=?, r_multiple=?,
+                        pnl_usd=?, notes=?
                     WHERE id=?
                     """,
                     (
                         time.time(),
                         float(exit_mcap),
                         peak,
+                        float(exit_mcap),
                         outcome,
                         cls.get("multiple"),
-                        cls.get("r_multiple"),
+                        r_mult,
+                        pnl,
                         (notes or "")[:500],
                         int(trade_id),
                     ),
@@ -310,7 +423,8 @@ class TradeJournal:
                 ).fetchone()["n"]
                 closed = conn.execute(
                     """
-                    SELECT outcome, COUNT(*) AS n, AVG(multiple) AS avg_m, AVG(r_multiple) AS avg_r
+                    SELECT outcome, COUNT(*) AS n, AVG(multiple) AS avg_m,
+                           AVG(r_multiple) AS avg_r, SUM(pnl_usd) AS sum_pnl
                     FROM trades
                     WHERE status IN ('closed','invalid') AND outcome IS NOT NULL
                     GROUP BY outcome
@@ -323,32 +437,46 @@ class TradeJournal:
                         "avg_r": round(float(r["avg_r"] or 0), 2)
                         if r["avg_r"] is not None
                         else None,
+                        "sum_pnl_usd": round(float(r["sum_pnl"] or 0), 2)
+                        if r["sum_pnl"] is not None
+                        else None,
                     }
                     for r in closed
                 }
                 done = conn.execute(
                     """
-                    SELECT multiple, r_multiple, outcome, feed, paper
+                    SELECT multiple, r_multiple, outcome, feed, paper, pnl_usd
                     FROM trades WHERE status IN ('closed','invalid') AND multiple IS NOT NULL
                     """
                 ).fetchall()
-                wins = 0
-                losses = 0
                 r_sum = 0.0
                 r_n = 0
+                pnl_sum = 0.0
                 mults: list[float] = []
                 for r in done:
-                    m = float(r["multiple"] or 0)
-                    mults.append(m)
-                    oc = str(r["outcome"] or "")
-                    if oc in ("tp1", "tp2", "win_small") or m >= 1.15:
-                        wins += 1
-                    elif oc in ("stop", "loss", "invalid") or m < 0.95:
-                        losses += 1
+                    mults.append(float(r["multiple"] or 0))
                     if r["r_multiple"] is not None:
                         r_sum += float(r["r_multiple"])
                         r_n += 1
+                    if r["pnl_usd"] is not None:
+                        pnl_sum += float(r["pnl_usd"])
                 n_done = len(done)
+                wins = sum(
+                    1
+                    for r in done
+                    if str(r["outcome"] or "") in ("tp1", "tp2", "win_small")
+                    or float(r["multiple"] or 0) >= 1.15
+                )
+                losses = sum(
+                    1
+                    for r in done
+                    if str(r["outcome"] or "") in ("stop", "loss", "invalid")
+                    or (
+                        float(r["multiple"] or 0) < 0.95
+                        and str(r["outcome"] or "")
+                        not in ("tp1", "tp2", "win_small")
+                    )
+                )
                 expect = (sum(mults) / n_done) if n_done else None
                 return {
                     "total": total,
@@ -360,12 +488,13 @@ class TradeJournal:
                     "win_rate_pct": round(100 * wins / n_done, 1) if n_done else None,
                     "avg_multiple": round(expect, 3) if expect else None,
                     "expectancy_r": round(r_sum / r_n, 2) if r_n else None,
+                    "total_pnl_usd": round(pnl_sum, 2) if n_done else None,
                     "sample_n": n_done,
                     "paper_default": MONEY_PAPER_DEFAULT,
                     "db_path": str(self.path),
                     "note": (
-                        "Paper until you close trades with real exit_mcap. "
-                        "Positive expectancy_r over ≥20 samples before sizing up."
+                        "Paper until expectancy_r > 0 over ≥20 samples. "
+                        "Then size real with BANKROLL_USD + RISK_PER_TRADE_PCT."
                     ),
                 }
             finally:

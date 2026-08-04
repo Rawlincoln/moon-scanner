@@ -22,7 +22,7 @@ from services import http_client as http_pool
 from services.scan_moon import get_moon_outcomes
 from services.snipe_outcomes import get_snipe_outcomes
 from services.telegram_alerts import background_telegram_alert_loop, configured as tg_configured
-from services.alert_invalidation import background_invalidation_loop
+from services.position_manager import background_position_manager_loop
 from config import TELEGRAM_MONEY_MODE
 from services.scan_trenches import (
     background_runner_alert_loop,
@@ -133,10 +133,10 @@ async def lifespan(app: FastAPI):
     tasks.append(asyncio.create_task(_background_moon_outcomes_loop()))
     tasks.append(asyncio.create_task(_background_snipe_outcomes_loop()))
     tasks.append(asyncio.create_task(background_telegram_alert_loop()))
-    tasks.append(asyncio.create_task(background_invalidation_loop()))
+    tasks.append(asyncio.create_task(background_position_manager_loop()))
     if tg_configured():
         logger.info(
-            "Telegram alerts enabled — money_mode=%s",
+            "Telegram + position manager enabled — money_mode=%s",
             TELEGRAM_MONEY_MODE,
         )
     if RUNNER_RADAR_INTERVAL_SEC > 0:

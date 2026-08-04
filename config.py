@@ -343,6 +343,40 @@ MONEY_PAPER_DEFAULT = (os.getenv("MONEY_PAPER_DEFAULT", "1") or "1").strip().low
     "off",
 )
 
+# --- Complete money system (bankroll / session / sizing) ---
+# Bankroll is the reference equity for risk % (paper or real). Update as you grow.
+BANKROLL_USD = float(os.getenv("BANKROLL_USD", "500") or "500")
+# Max risk per trade as % of bankroll (1.0 = 1%)
+RISK_PER_TRADE_PCT = float(os.getenv("RISK_PER_TRADE_PCT", "1.0") or "1.0")
+# Hard daily stop: halt new alerts after this much R lost today
+MAX_DAILY_LOSS_R = float(os.getenv("MAX_DAILY_LOSS_R", "3.0") or "3.0")
+# Optional profit lock: after +N R day, only SNIPE or pause (soft)
+MAX_DAILY_PROFIT_R = float(os.getenv("MAX_DAILY_PROFIT_R", "6.0") or "6.0")
+MAX_OPEN_TRADES = int(os.getenv("MAX_OPEN_TRADES", "2") or "2")
+MAX_TRADES_PER_DAY = int(os.getenv("MAX_TRADES_PER_DAY", "6") or "6")
+# SOL price for size display (override when you want accuracy)
+SOL_USD = float(os.getenv("SOL_USD", "150") or "150")
+# After TP1, trail stop to breakeven (entry) then optional trail %
+TRAIL_AFTER_TP1 = (os.getenv("TRAIL_AFTER_TP1", "1") or "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+# Position manager poll (seconds)
+POSITION_MANAGER_INTERVAL_SEC = float(
+    os.getenv("POSITION_MANAGER_INTERVAL_SEC", "45") or "45"
+)
+# Daily session report hour UTC (send once per day when hour matches)
+MONEY_DAILY_REPORT_UTC_HOUR = int(os.getenv("MONEY_DAILY_REPORT_UTC_HOUR", "0") or "0")
+# System armed — when 0, scan only, no new money alerts
+MONEY_SYSTEM_ARMED = (os.getenv("MONEY_SYSTEM_ARMED", "1") or "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+
 
 def _solana_rpc_http() -> str:
     explicit = (

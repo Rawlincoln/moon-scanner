@@ -18,6 +18,17 @@ services:
       # Money-mode: MOON+SNIPE only, stop/TP on alerts, auto-CANCEL, trade journal
       - key: TELEGRAM_MONEY_MODE
         value: "1"
+      - key: MONEY_SYSTEM_ARMED
+        value: "1"
+      # Bankroll for risk sizing (change in dashboard to your real paper/live equity)
+      - key: BANKROLL_USD
+        value: "500"
+      - key: RISK_PER_TRADE_PCT
+        value: "1.0"
+      - key: MAX_OPEN_TRADES
+        value: "2"
+      - key: MAX_DAILY_LOSS_R
+        value: "3.0"
       # Durable SQLite root — set DATA_DIR=/var/data and attach a disk on Starter+
       # Free tier is ephemeral; GHA outcomes sync restores moon_outcomes across redeploys.
       - key: DATA_DIR

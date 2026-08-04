@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Money Desk — Moon Scanner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/moon.css?v=8" />
+  <link rel="stylesheet" href="/static/css/money.css?v=1" />
+</head>
+<body>
+  <div class="bg"></div>
+
+  <nav class="nav">
+    <a href="/">◈ Moons</a>
+    <a href="/snipes">⚡ Snipes</a>
+    <a href="/heat">🔥 Heat</a>
+    <a href="/graduated">◆ Grad</a>
+    <a href="/money" class="active">💰 Money</a>
+  </nav>
+
+  <header class="top">
+    <div class="brand">
+      <span class="mark">💰</span>
+      <div>
+        <h1>Money Desk</h1>
+        <p>Bankroll · risk size · open positions · expectancy — complete system</p>
+      </div>
+    </div>
+    <div class="pills">
+      <span class="pill" id="pillArmed">—</span>
+      <span class="pill" id="pillGate">—</span>
+      <span class="pill muted" id="pillBankroll">bankroll —</span>
+    </div>
+  </header>
+
+  <section class="bar">
+    <button type="button" class="btn primary" id="refreshBtn">Refresh desk</button>
+    <span class="status" id="status">Loading…</span>
+  </section>
+
+  <section class="desk grid" id="desk">
+    <div class="card">
+      <h2>Session today</h2>
+      <div class="metrics" id="sessionMetrics"></div>
+    </div>
+    <div class="card">
+      <h2>Expectancy (all-time)</h2>
+      <div class="metrics" id="expectMetrics"></div>
+    </div>
+    <div class="card wide">
+      <h2>Open positions</h2>
+      <div id="openList" class="open-list"></div>
+    </div>
+    <div class="card wide">
+      <h2>Playbook</h2>
+      <ul id="playbook" class="playbook"></ul>
+    </div>
+    <div class="card wide">
+      <h2>Size calculator</h2>
+      <div class="size-form">
+        <label>Entry mcap $ <input type="number" id="sizeEntry" value="15000" /></label>
+        <label>Stop % <input type="number" id="sizeStop" value="18" /></label>
+        <label>Bankroll $ <input type="number" id="sizeBank" value="500" /></label>
+        <label>Risk % <input type="number" id="sizeRisk" value="1" step="0.1" /></label>
+        <button type="button" class="btn" id="sizeBtn">Calculate</button>
+      </div>
+      <pre class="size-out" id="sizeOut">—</pre>
+    </div>
+    <div class="card wide">
+      <h2>Recent trades</h2>
+      <div id="tradeList" class="trade-list"></div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    Paper by default. Set <code>BANKROLL_USD</code> + <code>RISK_PER_TRADE_PCT</code> on Render.
+    Telegram manages TP1/TP2/STOP automatically when money mode is on.
+  </footer>
+
+  <script src="/static/js/money.js?v=1"></script>
+</body>
+</html>

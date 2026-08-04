@@ -16,16 +16,38 @@ Browser desktop alerts only work when a tab is open. **Telegram alerts run on th
 
 Set `TELEGRAM_MONEY_MODE=0` to restore multi-feed heat/grad alerts.
 
-**Trade journal**
+## Complete money system (v2)
+
+| Piece | Behavior |
+|-------|----------|
+| **Risk size** | `BANKROLL_USD` × `RISK_PER_TRADE_PCT` / stop distance → USD (and SOL) size on every alert |
+| **Session gates** | Max open, max trades/day, daily −R stop, profit lock |
+| **Position manager** | TP1 (scale 50% + BE), TP2 close, STOP, INVALID via Telegram |
+| **Money desk** | `/money` UI + `GET /api/money` |
+| **Journal** | Paper P&amp;L + E[R] until you go live |
+
+| Env | Default | Meaning |
+|-----|---------|---------|
+| `BANKROLL_USD` | 500 | Your paper/live equity |
+| `RISK_PER_TRADE_PCT` | 1.0 | Risk 1% of bankroll to stop |
+| `MAX_OPEN_TRADES` | 2 | Concurrent positions |
+| `MAX_TRADES_PER_DAY` | 6 | Session cap |
+| `MAX_DAILY_LOSS_R` | 3.0 | Halt after −3R day |
+| `MONEY_SYSTEM_ARMED` | 1 | 0 = scan only, no new alerts |
+
+**Trade journal / desk**
 
 | Endpoint | Purpose |
 |----------|---------|
+| `GET /money` | Money desk UI |
+| `GET /api/money` | Full desk snapshot |
+| `GET /api/money/size` | Size calculator |
 | `GET /api/journal` | EV summary |
 | `GET /api/journal/trades` | List open/closed |
 | `POST /api/journal/trades/{id}/close` | Close with `{"exit_mcap": N}` (+ `X-Admin-Key`) |
-| `POST /api/journal/invalidate` | Force cancel scan |
+| `POST /api/money/manage` | Force position manager cycle |
 
-Paper by default (`MONEY_PAPER_DEFAULT=1`). Close trades with real exit mcap to measure expectancy.
+Paper by default (`MONEY_PAPER_DEFAULT=1`). Only go live when E[R] &gt; 0 over ≥20 closed trades.
 
 ## 24/7 when your PC is OFF
 
