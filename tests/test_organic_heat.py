@@ -52,9 +52,12 @@ def test_heat_requires_6k_min():
     assert r and ("6k" in r.lower() or "below" in r.lower() or "band" in r.lower())
 
 
-def test_heat_blocks_above_12k_entry():
-    r = heat_reject_reason(_base(mcap_usd=15_000, ath_mcap=16_000))
-    assert r and ("above" in r.lower() or "room" in r.lower() or "band" in r.lower())
+def test_heat_allows_breakout_15k():
+    """$12–55k is breakout heat (early mega), not blocked."""
+    t = _base(mcap_usd=15_000, ath_mcap=16_000)
+    assert heat_reject_reason(t) is None
+    ev = evaluate_heat(t)
+    assert ev["eligible"] is True
 
 
 def test_heat_allows_pullback_in_6k_band():

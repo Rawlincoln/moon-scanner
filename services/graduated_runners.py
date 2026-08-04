@@ -16,16 +16,18 @@ from services.bundle_sniper import analyze_bundle_and_snipers
 from services.runner_radar import extract_ath_mcap, extract_mcap_usd, is_crashed_runner
 from services.social_signals import analyze_social_narrative
 
-# Post early-entry universe
-GRAD_MCAP_MIN = 80_000.0  # above typical heat/snipe bands
+# Post early-entry / early-mega universe
+GRAD_MCAP_MIN = 50_000.0  # catch right after heat breakout / flash grad
 GRAD_MCAP_MAX = 150_000_000.0  # $150M cap
 # Prefer true graduates or near/post-grad structure
-MIN_AGE_MIN = 30.0  # not a fresh sniper chart
+MIN_AGE_MIN = 30.0  # default for older large charts
+FLASH_GRAD_MIN_AGE = 5.0  # just-graduated mega can appear earlier
+FLASH_GRAD_MAX_AGE = 12 * 60.0  # first 12h after launch treated as "early mega"
 MAX_AGE_MIN = 14 * 24 * 60.0  # 14 days
 ATH_DEAD = 0.18  # <18% ATH = dead dump
-ATH_DIP_LOW = 0.28
+ATH_DIP_LOW = 0.25  # allow deeper dip for early mega
 ATH_DIP_HIGH = 0.72
-ATH_RUNNER = 0.72  # ≥72% ATH = still "running" structure
+ATH_RUNNER = 0.70  # ≥70% ATH = still "running" structure
 
 LABEL_RUNNER = "RUNNER"  # near ATH graduated climber
 LABEL_DIP = "DIP"  # pullback with remaining structure
@@ -87,16 +89,20 @@ def graduated_reject_reason(token: dict[str, Any]) -> str | None:
     if mcap > GRAD_MCAP_MAX:
         return f"too large ${mcap:,.0f}"
 
-    if age < MIN_AGE_MIN:
+    graduated = _is_graduated(token)
+    early_mega = graduated and age <= FLASH_GRAD_MAX_AGE
+    min_age = FLASH_GRAD_MIN_AGE if early_mega else MIN_AGE_MIN
+    if age < min_age:
         return f"too fresh {age:.0f}m — use Heat/Snipes"
     if age > MAX_AGE_MIN:
         return f"too old {age / 1440:.1f}d for active runner lane"
 
-    if not _is_graduated(token) and mcap < GRADUATION_MCAP_USD:
+    if not graduated and mcap < GRADUATION_MCAP_USD:
         return "still on early curve — use Moons/Heat"
 
-    # Dead dumps from ATH
-    if ath >= GRAD_MCAP_MIN and mcap > 0 and mcap < ath * ATH_DEAD:
+    # Dead dumps from ATH (softer floor for early mega still forming highs)
+    dead = ATH_DEAD if not early_mega else 0.15
+    if ath >= GRAD_MCAP_MIN and mcap > 0 and mcap < ath * dead:
         return f"dead dump −{(1 - mcap / ath) * 100:.0f}% from ATH"
 
     hard, hard_why = is_hard_avoid(token)
@@ -128,27 +134,40 @@ def graduated_reject_reason(token: dict[str, Any]) -> str | None:
     if safety.get("error"):
         return "safety error / incomplete audit"
 
-    # Extreme one-way crash candles
+    # Extreme one-way crash candles (older charts only — early mega is volatile)
     pc = token.get("priceChange") or (token.get("market") or {}).get("priceChange") or {}
-    if _f(pc.get("h1")) <= -55 or _f(pc.get("h6")) <= -70:
-        return "violent dump candle"
+    age = _f(token.get("age_minutes"))
+    early_mega = _is_graduated(token) and age <= FLASH_GRAD_MAX_AGE
+    if not early_mega:
+        if _f(pc.get("h1")) <= -55 or _f(pc.get("h6")) <= -70:
+            return "violent dump candle"
+    else:
+        # Flash mega: only kill on extreme h1 collapse
+        if _f(pc.get("h1")) <= -65:
+            return "violent dump candle"
 
     crashed, why = is_crashed_runner(token)
     # For graduated, only honor hard crash if also dead from ATH
     if crashed and ath > 0 and mcap < ath * ATH_DIP_LOW:
         return why or "crashed runner"
 
-    # Bundle critical wall (weaker than snipes, stronger than none)
+    # Bundle wall: hard only when severe; early mega demotes in score instead
     bs = token.get("bundleSniper")
     if isinstance(bs, dict):
-        if bs.get("hard_reject") and str(bs.get("overall") or "").lower() in (
-            "critical",
-            "high",
-        ):
-            return bs.get("summary") or "bundle/sniper hard reject"
+        overall = str(bs.get("overall") or "").lower()
         sn = (bs.get("snipers") or {}) if isinstance(bs.get("snipers"), dict) else {}
-        if sn.get("risk_level") == "critical":
-            return "sniper critical"
+        bun = _f((bs.get("bundle") or {}).get("bundled_pct"))
+        if bun <= 0:
+            bun = _f(bs.get("bundled_pct"))
+        severe = overall == "critical" and (bun >= 15 or sn.get("risk_level") == "critical")
+        if severe and not early_mega:
+            return bs.get("summary") or "bundle/sniper hard reject"
+        if severe and early_mega and bun >= 25:
+            return bs.get("summary") or "extreme sniper bag on flash grad"
+        # else: allow — score demotion below
+        token["_grad_bundle_soft"] = bool(
+            bs.get("hard_reject") or overall in ("critical", "high")
+        )
 
     return None
 
@@ -282,6 +301,19 @@ def _score_graduated(token: dict[str, Any]) -> tuple[int, list[str], dict[str, A
     elif age > 7 * 24 * 60:
         score -= 4
         why.append("Aging chart")
+
+    # Early mega flash (just graduated, still young)
+    if graduated and age <= FLASH_GRAD_MAX_AGE:
+        score += 8
+        why.append(f"Early mega window ({age:.0f}m old)")
+        if age <= 90:
+            score += 4
+            why.append("Fresh post-grad — high velocity class")
+
+    if token.get("_grad_bundle_soft"):
+        score -= 14
+        why.append("Bundle/sniper risk — demoted (not auto-hidden)")
+        meta["bundle_soft"] = True
 
     score = max(0, min(99, score))
     return score, why, meta

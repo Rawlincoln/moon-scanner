@@ -9,6 +9,7 @@ from collections import Counter
 from typing import Any
 
 from services.graduated_runners import (
+    FLASH_GRAD_MIN_AGE,
     GRAD_MCAP_MAX,
     GRAD_MCAP_MIN,
     MAX_AGE_MIN,
@@ -140,7 +141,9 @@ async def scan_graduated_runners(
             seen.add(mint)
             scanned += 1
             age = PumpFunClient.coin_age_minutes(coin)
-            if age > age_cap or age < MIN_AGE_MIN * 0.5:
+            # Flash grads can be as young as FLASH_GRAD_MIN_AGE
+            min_age_pre = FLASH_GRAD_MIN_AGE * 0.8
+            if age > age_cap or age < min_age_pre:
                 rejected += 1
                 pre_reject["age"] += 1
                 continue

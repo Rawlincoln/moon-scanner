@@ -79,3 +79,24 @@ def test_cate_like_profile():
     ev = evaluate_graduated(t)
     assert ev["eligible"] is True
     assert ev["label"] in (LABEL_DIP, LABEL_WATCH, LABEL_RUNNER)
+
+
+def test_flash_tiktok_like_early_mega():
+    """Just-graduated mega ~$28M in <1h should be eligible RUNNER/DIP."""
+    t = _base(
+        mcap_usd=28_000_000,
+        ath_mcap=28_100_000,
+        age_minutes=30,
+        complete=True,
+        priceChange={"m5": 10, "h1": 80, "h6": 200, "h24": 500},
+        safety={
+            "passed": True,
+            "on_bonding_curve": False,
+            "top_holders": [{"pct": 2}],
+            "error": False,
+        },
+        enrich_ok=True,
+    )
+    assert graduated_reject_reason(t) is None
+    ev = evaluate_graduated(t)
+    assert ev["eligible"] is True

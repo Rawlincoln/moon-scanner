@@ -18,19 +18,25 @@ from services.bundle_sniper import analyze_bundle_and_snipers
 from services.runner_radar import extract_ath_mcap, extract_mcap_usd, is_crashed_runner
 from services.social_signals import analyze_social_narrative
 
-# Tight entry band: ≥$6k with path into $12–21k target zone
+# Early catch band: $6k floor through near-migration breakout
+# - $6–12k: path to $12–21k (2–3.5× from $6k)
+# - $12–55k: breakout / pre-grad heat (catch FOMO-class before mega)
 HEAT_MCAP_MIN = 6_000.0
-HEAT_MCAP_MAX = 12_000.0  # above this, little room left to 12–21k
+HEAT_MCAP_MAX = 55_000.0
 TARGET_TP_LOW = 12_000.0
 TARGET_TP_HIGH = 21_000.0
+BREAKOUT_MIN = 12_000.0  # above sweet 2× zone → breakout scoring
 # Prefer entries where 2× lands inside / near the target window
 SWEET_ENTRY_MIN = 6_000.0
 SWEET_ENTRY_MAX = 10_500.0  # 2× → $12k–$21k
-MIN_AGE_MIN = 1.0
-MAX_AGE_MIN = 180.0
+MIN_AGE_MIN = 0.8
+MAX_AGE_MIN = 240.0  # 4h — flash runners can graduate fast
 # Pullbacks allowed but tighter than loose heat
-ATH_HARD_DUMP = 0.55  # −45%
-ATH_SOFT_FLOOR = 0.70  # −30% still visible as RISKY
+ATH_HARD_DUMP = 0.50  # −50%
+ATH_SOFT_FLOOR = 0.65  # −35% still visible as RISKY for breakouts
+# Just-graduated flash still scannable on heat for a short window
+FLASH_GRAD_MAX_AGE_MIN = 120.0
+FLASH_GRAD_MAX_MCAP = 120_000.0
 
 # Soft packaging may demote score but packaging-only hard_avoid from status links
 # can still be demoted rather than hidden. True capital hard_avoid always blocks.
@@ -205,19 +211,23 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
     ath = extract_ath_mcap(token)
     age = _f(token.get("age_minutes"))
 
+    pf = token.get("pumpfun") or {}
+    complete = bool(pf.get("complete") or token.get("complete"))
+    # Just-graduated flash: allow complete coins briefly (catch post-curve early)
+    if complete:
+        if age > FLASH_GRAD_MAX_AGE_MIN:
+            return "graduated too long ago — use Graduated lane"
+        if mcap > FLASH_GRAD_MAX_MCAP:
+            return f"flash grad too large ${mcap:,.0f} — use Graduated lane"
     if mcap > 0 and mcap < HEAT_MCAP_MIN:
         return f"below $6k entry band (${mcap:,.0f})"
-    if mcap > HEAT_MCAP_MAX:
-        return (
-            f"above entry band ${mcap:,.0f} — little room left to "
-            f"${TARGET_TP_LOW:,.0f}–${TARGET_TP_HIGH:,.0f}"
-        )
-    # Must still have a path into the 12–21k target window
-    if mcap * 1.5 > TARGET_TP_HIGH and mcap >= TARGET_TP_LOW:
-        return f"already in/near target zone ${mcap:,.0f} — not a 12–21k setup entry"
+    if mcap > HEAT_MCAP_MAX and not (
+        complete and age <= FLASH_GRAD_MAX_AGE_MIN and mcap <= FLASH_GRAD_MAX_MCAP
+    ):
+        return f"above heat/breakout band ${mcap:,.0f}"
     if age < MIN_AGE_MIN:
         return f"too fresh {age:.1f}m"
-    if age > MAX_AGE_MIN:
+    if age > MAX_AGE_MIN and not (complete and age <= FLASH_GRAD_MAX_AGE_MIN):
         return f"too old {age:.0f}m"
 
     crashed, why = is_crashed_runner(token)
@@ -358,38 +368,51 @@ def _heat_signals(token: dict[str, Any]) -> tuple[int, list[str], dict[str, Any]
         score -= 4
         why.append("Thin replies")
 
-    # --- Structure / 12–21k path ---
+    # --- Structure / 12–21k path OR breakout $12–55k ---
     tp2x = mcap * 2.0 if mcap > 0 else 0.0
-    tp_hi = min(TARGET_TP_HIGH, mcap * 3.5) if mcap > 0 else TARGET_TP_HIGH
     meta["target_2x_usd"] = round(tp2x, 0) if tp2x else None
     meta["target_zone"] = [TARGET_TP_LOW, TARGET_TP_HIGH]
     meta["upside_to_21k"] = (
-        round(TARGET_TP_HIGH / mcap, 2) if mcap > 0 else None
+        round(TARGET_TP_HIGH / mcap, 2) if mcap > 0 and mcap < TARGET_TP_HIGH else None
     )
+    meta["breakout"] = mcap >= BREAKOUT_MIN
+    pf = token.get("pumpfun") or {}
+    if pf.get("complete") or token.get("complete"):
+        score += 6
+        why.append("Just graduated — early post-curve window")
 
     if SWEET_ENTRY_MIN <= mcap <= SWEET_ENTRY_MAX:
         score += 18
         why.append(
             f"Sweet $6–10.5k entry → 2× ~${tp2x:,.0f} (12–21k zone)"
         )
-    elif HEAT_MCAP_MIN <= mcap <= HEAT_MCAP_MAX:
+    elif HEAT_MCAP_MIN <= mcap < BREAKOUT_MIN:
         score += 12
         why.append(
-            f"Entry ${mcap:,.0f} · path to ${TARGET_TP_LOW:,.0f}–${TARGET_TP_HIGH:,.0f} "
-            f"(~{TARGET_TP_HIGH / mcap:.1f}× to top)"
+            f"Entry ${mcap:,.0f} · path to ${TARGET_TP_LOW:,.0f}–${TARGET_TP_HIGH:,.0f}"
         )
+    elif BREAKOUT_MIN <= mcap <= HEAT_MCAP_MAX:
+        score += 14
+        why.append(
+            f"Breakout ${mcap:,.0f} — early mega / near-grad heat"
+        )
+        # Still climbing structure
+        if mcap < 40_000:
+            score += 4
+            why.append("Room toward graduation ~$69k")
     else:
-        score -= 8
+        score += 4  # flash grad oversized still scorable
 
-    # Bonus if 2× lands inside 12–21k
-    if TARGET_TP_LOW <= tp2x <= TARGET_TP_HIGH:
-        score += 8
-        why.append(f"2× lands in target zone (${tp2x:,.0f})")
-    elif tp2x < TARGET_TP_LOW:
-        score += 2  # still climbing toward zone
-    elif mcap < TARGET_TP_LOW:
-        score += 4
-        why.append(f"Room to ${TARGET_TP_HIGH:,.0f}")
+    # Bonus if 2× lands inside 12–21k (early band only)
+    if mcap < BREAKOUT_MIN:
+        if TARGET_TP_LOW <= tp2x <= TARGET_TP_HIGH:
+            score += 8
+            why.append(f"2× lands in target zone (${tp2x:,.0f})")
+        elif tp2x < TARGET_TP_LOW:
+            score += 2
+        elif mcap < TARGET_TP_LOW:
+            score += 4
+            why.append(f"Room to ${TARGET_TP_HIGH:,.0f}")
 
     if bond >= 40:
         score += 8
@@ -729,16 +752,24 @@ def heat_card_from_coin(coin: dict, *, source: str = "pump.fun") -> dict[str, An
     mint = (coin.get("mint") or "").strip()
     if not mint or mint in BLOCKED_MINTS:
         return None
-    if coin.get("complete") or coin.get("is_banned"):
+    if coin.get("is_banned"):
         return None
     mcap = float(coin.get("usd_market_cap") or 0)
     ath = float(coin.get("ath_market_cap") or 0)
     bond = PumpFunClient.bonding_progress(coin)
     age = PumpFunClient.coin_age_minutes(coin)
-    if mcap < HEAT_MCAP_MIN * 0.95 or mcap > HEAT_MCAP_MAX * 1.05:
-        return None
-    if age < MIN_AGE_MIN * 0.8 or age > MAX_AGE_MIN + 15:
-        return None
+    complete = bool(coin.get("complete"))
+    # Allow just-graduated flash on heat (early mega catch)
+    if complete:
+        if age > FLASH_GRAD_MAX_AGE_MIN or mcap > FLASH_GRAD_MAX_MCAP:
+            return None
+        if mcap < HEAT_MCAP_MIN * 0.95:
+            return None
+    else:
+        if mcap < HEAT_MCAP_MIN * 0.95 or mcap > HEAT_MCAP_MAX * 1.05:
+            return None
+        if age < MIN_AGE_MIN * 0.7 or age > MAX_AGE_MIN + 20:
+            return None
     # Hard dump prefilter
     if ath >= 3_000 and mcap > 0 and mcap < ath * ATH_HARD_DUMP:
         return None

@@ -287,19 +287,21 @@ async def scan_organic_heat(
                 "target_tp_low": 12_000,
                 "target_tp_high": 21_000,
                 "sweet_entry": [6_000, 10_500],
-                "ath_soft_floor": 0.70,
-                "ath_hard_dump": 0.55,
+                "breakout": [12_000, 55_000],
+                "flash_grad_max_age_min": 120,
+                "ath_soft_floor": 0.65,
+                "ath_hard_dump": 0.50,
                 "min_age": MIN_AGE_MIN,
                 "max_age": MAX_AGE_MIN,
             },
             "rule": (
-                "ORGANIC HEAT (tighter) — entry $6k–$12k with path to $12–21k "
-                f"(~2–3.5× from $6k). Sweet entry $6–10.5k (2× lands in target). "
-                "Dev sold / serial farms blocked. Still not capital-safe moons — size small."
+                "ORGANIC HEAT (early catch) — $6–12k path to $12–21k, plus "
+                "$12–55k breakout / near-grad heat. Just-graduated flash ≤2h also allowed. "
+                "Dev sold / serial farms blocked. Size small."
             ),
             "warning": (
-                "Only ≥$6k entries with room into $12–21k. Many still dump — "
-                "check Dev line (launched / migrated / sold)."
+                "Early mega class is noisy. Prefer sweet $6–10.5k for 2× zone; "
+                "breakout $12–55k is higher risk. Check Dev line."
             ),
         }
         _cache["data"] = payload
