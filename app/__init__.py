@@ -28,6 +28,7 @@ from routes.moon import router as moon_router
 from routes.realtime import router as realtime_router
 from routes.snipes import router as snipes_router
 from routes.trenches import router as trenches_router
+from routes.journal import router as journal_router
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(heat_router)
     app.include_router(graduated_router)
     app.include_router(alerts_router)
+    app.include_router(journal_router)
     app.include_router(realtime_router)
     app.include_router(analyze_router)
     app.include_router(trenches_router)

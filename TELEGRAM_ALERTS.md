@@ -1,6 +1,31 @@
-# Telegram alerts — don’t miss Moons / Snipes / Heat
+# Telegram alerts — money mode (default)
 
 Browser desktop alerts only work when a tab is open. **Telegram alerts run on the server** every ~45s while the process is up.
+
+## Money mode (default — stop the bleed)
+
+`TELEGRAM_MONEY_MODE=1` (default on Render):
+
+| Setting | Value |
+|---------|--------|
+| Feeds | **moon, snipe only** (no heat/grad spam) |
+| Labels | **MOON** and **SNIPE** only (no WATCH/SETUP/WARM/DIP) |
+| Each alert | Entry · STOP · TP1 · TP2 · INVALID rules |
+| Auto-CANCEL | If mcap −15% from alert, hits stop, or no +8% in 45m |
+| Journal | `/api/journal` — open trades + win rate / expectancy R |
+
+Set `TELEGRAM_MONEY_MODE=0` to restore multi-feed heat/grad alerts.
+
+**Trade journal**
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/journal` | EV summary |
+| `GET /api/journal/trades` | List open/closed |
+| `POST /api/journal/trades/{id}/close` | Close with `{"exit_mcap": N}` (+ `X-Admin-Key`) |
+| `POST /api/journal/invalidate` | Force cancel scan |
+
+Paper by default (`MONEY_PAPER_DEFAULT=1`). Close trades with real exit mcap to measure expectancy.
 
 ## 24/7 when your PC is OFF
 

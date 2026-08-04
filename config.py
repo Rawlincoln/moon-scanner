@@ -260,10 +260,24 @@ elif _tg_en in ("1", "true", "yes", "on"):
 else:
     # Auto-on when both token + chat are set
     TELEGRAM_ALERTS_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
-_tg_feeds = os.getenv("TELEGRAM_ALERT_FEEDS", "moon,snipe,heat,grad").strip()
+# Money-mode: only highest-grade alerts + stop/TP + invalidation + trade journal.
+# Set TELEGRAM_MONEY_MODE=0 to restore full multi-feed (heat/grad/WATCH/SETUP) spam.
+_money_raw = (os.getenv("TELEGRAM_MONEY_MODE", "1") or "1").strip().lower()
+TELEGRAM_MONEY_MODE = _money_raw not in ("0", "false", "no", "off")
+
+if TELEGRAM_MONEY_MODE:
+    _default_feeds = "moon,snipe"
+    _default_moon_labels = "MOON"
+    _default_snipe_labels = "SNIPE"
+else:
+    _default_feeds = "moon,snipe,heat,grad"
+    _default_moon_labels = "MOON,WATCH"
+    _default_snipe_labels = "SNIPE,SETUP"
+
+_tg_feeds = os.getenv("TELEGRAM_ALERT_FEEDS", _default_feeds).strip()
 TELEGRAM_ALERT_FEEDS: list[str] = [
     f.strip().lower() for f in _tg_feeds.split(",") if f.strip()
-] or ["moon", "snipe", "heat", "grad"]
+] or (["moon", "snipe"] if TELEGRAM_MONEY_MODE else ["moon", "snipe", "heat", "grad"])
 TELEGRAM_ALERT_INTERVAL_SEC = float(
     os.getenv("TELEGRAM_ALERT_INTERVAL_SEC", "45") or "45"
 )
@@ -271,19 +285,22 @@ TELEGRAM_ALERT_DEDUPE_SEC = float(
     os.getenv("TELEGRAM_ALERT_DEDUPE_SEC", str(45 * 60)) or str(45 * 60)
 )
 TELEGRAM_ALERT_MAX_PER_CYCLE = int(
-    os.getenv("TELEGRAM_ALERT_MAX_PER_CYCLE", "6") or "6"
+    os.getenv("TELEGRAM_ALERT_MAX_PER_CYCLE", "4" if TELEGRAM_MONEY_MODE else "6")
+    or ("4" if TELEGRAM_MONEY_MODE else "6")
 )
 TELEGRAM_ALERT_MOON_LABELS = {
     x.strip().upper()
-    for x in (os.getenv("TELEGRAM_ALERT_MOON_LABELS", "MOON,WATCH") or "MOON,WATCH").split(
-        ","
-    )
+    for x in (
+        os.getenv("TELEGRAM_ALERT_MOON_LABELS", _default_moon_labels)
+        or _default_moon_labels
+    ).split(",")
     if x.strip()
 }
 TELEGRAM_ALERT_SNIPE_LABELS = {
     x.strip().upper()
     for x in (
-        os.getenv("TELEGRAM_ALERT_SNIPE_LABELS", "SNIPE,SETUP") or "SNIPE,SETUP"
+        os.getenv("TELEGRAM_ALERT_SNIPE_LABELS", _default_snipe_labels)
+        or _default_snipe_labels
     ).split(",")
     if x.strip()
 }
@@ -303,6 +320,28 @@ TELEGRAM_ALERT_GRAD_LABELS = {
 }
 # Optional shared secret for GET /api/alerts/telegram/tick (external cron 24/7)
 TELEGRAM_CRON_SECRET = os.getenv("TELEGRAM_CRON_SECRET", "").strip()
+
+# --- Money plan (entry / stop / TP / invalidation) ---
+MONEY_STOP_PCT = float(os.getenv("MONEY_STOP_PCT", "0.18") or "0.18")  # −18%
+MONEY_TP1_PCT = float(os.getenv("MONEY_TP1_PCT", "0.50") or "0.50")  # +50%
+MONEY_TP2_PCT = float(os.getenv("MONEY_TP2_PCT", "1.00") or "1.00")  # +100% (2×)
+MONEY_INVALID_DROP_PCT = float(
+    os.getenv("MONEY_INVALID_DROP_PCT", "0.15") or "0.15"
+)  # −15% from alert entry → CANCEL
+MONEY_MAX_HOLD_MIN = float(os.getenv("MONEY_MAX_HOLD_MIN", "45") or "45")
+MONEY_INVALID_NO_MOVE_PCT = float(
+    os.getenv("MONEY_INVALID_NO_MOVE_PCT", "0.08") or "0.08"
+)  # need +8% within hold window or time-stop
+MONEY_RISK_PCT_HINT = float(os.getenv("MONEY_RISK_PCT_HINT", "1.0") or "1.0")  # bankroll %
+MONEY_INVALIDATE_INTERVAL_SEC = float(
+    os.getenv("MONEY_INVALIDATE_INTERVAL_SEC", "60") or "60"
+)
+MONEY_PAPER_DEFAULT = (os.getenv("MONEY_PAPER_DEFAULT", "1") or "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
 
 
 def _solana_rpc_http() -> str:

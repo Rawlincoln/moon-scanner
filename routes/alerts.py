@@ -27,9 +27,17 @@ def _bot_wired() -> bool:
 async def alerts_status():
     """Public-ish status (no secrets) — is Telegram wired?"""
     st = tg.status()
+    inv = {}
+    try:
+        from services.alert_invalidation import status as inv_status
+
+        inv = inv_status()
+    except Exception:
+        inv = {}
     return {
         "ok": True,
         **st,
+        "invalidation": inv,
         "auth": {
             "admin_key_configured": bool((ADMIN_API_KEY or "").strip()),
             "cron_secret_configured": bool((TELEGRAM_CRON_SECRET or "").strip()),

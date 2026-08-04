@@ -1,5 +1,6 @@
 """Telegram push alerts for Moon / Snipe / Heat picks.
 
+Money-mode (default): MOON + SNIPE only, with entry/stop/TP/invalid rules.
 Works even when the browser is closed — background loop + post-scan hooks.
 Configure TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env (see TELEGRAM_ALERTS.md).
 """
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from config import (
+    DATA_DIR,
     PADRE_TRADE_URL,
     TELEGRAM_ALERT_DEDUPE_SEC,
     TELEGRAM_ALERT_FEEDS,
@@ -26,12 +28,14 @@ from config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
     TELEGRAM_ALERTS_ENABLED,
+    TELEGRAM_MONEY_MODE,
 )
 from services.http_client import get_client
+from services.money_plan import build_money_plan
 
 logger = logging.getLogger("moon-scanner.telegram")
 
-_SEEN_PATH = Path(__file__).resolve().parent.parent / "data" / "telegram_alert_seen.json"
+_SEEN_PATH = Path(DATA_DIR) / "telegram_alert_seen.json"
 _lock = asyncio.Lock()
 _last_cycle: dict[str, Any] = {
     "ts": 0.0,
@@ -49,6 +53,7 @@ def status() -> dict[str, Any]:
     return {
         "enabled": TELEGRAM_ALERTS_ENABLED,
         "configured": configured(),
+        "money_mode": TELEGRAM_MONEY_MODE,
         "bot_set": bool(TELEGRAM_BOT_TOKEN),
         "chat_set": bool(TELEGRAM_CHAT_ID),
         "interval_sec": TELEGRAM_ALERT_INTERVAL_SEC,
@@ -61,6 +66,11 @@ def status() -> dict[str, Any]:
         },
         "dedupe_sec": TELEGRAM_ALERT_DEDUPE_SEC,
         "last_cycle": dict(_last_cycle),
+        "hint": (
+            "MONEY MODE: MOON+SNIPE only · entry/stop/TP · auto-CANCEL if setup breaks"
+            if TELEGRAM_MONEY_MODE
+            else "Full multi-feed alerts (set TELEGRAM_MONEY_MODE=1 for capital mode)"
+        ),
     }
 
 
@@ -86,7 +96,6 @@ def _load_seen() -> dict[str, float]:
 def _save_seen(seen: dict[str, float]) -> None:
     try:
         _SEEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-        # prune
         now = time.time()
         pruned = {
             k: v
@@ -157,13 +166,15 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
     label = _label_of(kind, t) or "PICK"
     sym = t.get("symbol") or "?"
     name = t.get("name") or ""
-    mcap = _fmt_usd(t.get("mcap_usd") or t.get("mcap"))
+    mcap_raw = t.get("mcap_usd") or t.get("mcap")
+    mcap = _fmt_usd(mcap_raw)
     age = t.get("age_minutes")
     age_s = f"{float(age):.0f}m" if age is not None else "—"
     padre = f"{PADRE_TRADE_URL}/trade/solana/{mint}" if mint else ""
     pump = f"https://pump.fun/coin/{mint}" if mint else ""
 
     why = []
+    score = None
     if kind == "moon":
         why = (t.get("moon") or {}).get("why") or []
         score = t.get("moon_score") or (t.get("moon") or {}).get("moon_score")
@@ -196,17 +207,32 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
     if name:
         title += f" <i>({_esc(name)[:40]})</i>"
 
-    # Escape why lines (token metadata is attacker-influenced)
     if why:
         why_line = "\n• " + "\n• ".join(_esc(str(w)[:80]) for w in why[:3])
     else:
         why_line = ""
+
+    # Money plan block (always when money mode; still useful for snipe/moon otherwise)
+    plan = build_money_plan(kind, t)
+    plan_lines = ""
+    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe"):
+        plan_lines = (
+            f"\n\n<b>PLAN</b> (mcap ref · risk ≤{plan.get('risk_pct_hint', 1)}% bankroll)\n"
+            f"Entry ≈ {_fmt_usd(plan.get('entry_mcap'))}\n"
+            f"🛑 STOP −{plan.get('stop_pct')}% → {_fmt_usd(plan.get('stop_mcap'))}\n"
+            f"🎯 TP1 +{plan.get('tp1_pct')}% → {_fmt_usd(plan.get('tp1_mcap'))} (50%)\n"
+            f"🚀 TP2 +{plan.get('tp2_pct')}% → {_fmt_usd(plan.get('tp2_mcap'))}\n"
+            f"❌ INVALID if &lt; {_fmt_usd(plan.get('invalid_if_below_mcap'))} "
+            f"or no +{plan.get('need_move_pct')}% in {plan.get('max_hold_min'):.0f}m\n"
+            f"<i>Late fill = worse R:R — skip if mcap already past TP1</i>"
+        )
 
     body = (
         f"{title}\n"
         f"{_esc(kind.upper())} · {mcap} · age {age_s}"
         + (f" · score {score}" if score is not None else "")
         + why_line
+        + plan_lines
         + (f"\n<a href=\"{padre}\">Padre</a> · <a href=\"{pump}\">Pump</a>" if mint else "")
         + (f"\n<code>{_esc(mint)}</code>" if mint else "")
     )
@@ -264,15 +290,22 @@ async def notify_new_picks(
         return 0
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return 0
-    if kind not in TELEGRAM_ALERT_FEEDS and not force:
+    # Money mode hard-blocks heat/grad even if env accidentally lists them
+    kind_l = kind.lower().strip()
+    if TELEGRAM_MONEY_MODE and kind_l not in ("moon", "snipe", "snipes"):
         return 0
+    if kind not in TELEGRAM_ALERT_FEEDS and not force:
+        # allow snipes alias
+        if not (kind_l in ("snipe", "snipes") and (
+            "snipe" in TELEGRAM_ALERT_FEEDS or "snipes" in TELEGRAM_ALERT_FEEDS
+        )):
+            return 0
 
-    allowed = _allowed_labels(kind)
+    allowed = _allowed_labels(kind if kind_l != "snipes" else "snipe")
     async with _lock:
         seen = _load_seen()
         now = time.time()
         sent = 0
-        # Rank: higher labels first
         pri = {
             "MOON": 0,
             "SNIPE": 0,
@@ -285,32 +318,40 @@ async def notify_new_picks(
             "RISKY": 2,
         }
         ranked: list[dict[str, Any]] = []
+        feed_key = "snipe" if kind_l in ("snipe", "snipes") else kind_l
         for t in tokens or []:
             if not isinstance(t, dict):
                 continue
             mint = _mint_of(t)
             if not mint:
                 continue
-            lab = _label_of(kind, t)
+            lab = _label_of(feed_key, t)
             if allowed and lab not in allowed:
                 continue
-            key = f"{kind}:{mint}"
+            key = f"{feed_key}:{mint}"
             if key in seen and now - seen[key] < TELEGRAM_ALERT_DEDUPE_SEC:
                 continue
             ranked.append(t)
-        ranked.sort(key=lambda x: pri.get(_label_of(kind, x), 9))
+        ranked.sort(key=lambda x: pri.get(_label_of(feed_key, x), 9))
 
         for t in ranked:
             if sent >= TELEGRAM_ALERT_MAX_PER_CYCLE:
                 break
             mint = _mint_of(t)
-            key = f"{kind}:{mint}"
-            msg = format_pick_message(kind, t)
+            key = f"{feed_key}:{mint}"
+            msg = format_pick_message(feed_key, t)
             result = await send_telegram(msg)
             if result.get("ok"):
                 seen[key] = now
                 sent += 1
-                await asyncio.sleep(0.35)  # soft rate limit
+                # Journal open trade (paper by default)
+                try:
+                    from services.trade_journal import get_journal
+
+                    get_journal().open_from_alert(feed_key, t, alert_sent=True)
+                except Exception as exc:
+                    logger.debug("journal open failed: %s", exc)
+                await asyncio.sleep(0.35)
             else:
                 _last_cycle["error"] = result.get("error")
                 break
@@ -326,7 +367,6 @@ async def run_alert_cycle(*, force: bool = False) -> dict[str, Any]:
 
     from services.scan_moon import scan_moon_tokens
     from services.scan_snipes import scan_safe_snipes
-    from services.scan_heat import scan_organic_heat
 
     total = 0
     feeds: dict[str, Any] = {}
@@ -343,12 +383,17 @@ async def run_alert_cycle(*, force: bool = False) -> dict[str, Any]:
             n = await notify_new_picks("snipe", data.get("tokens") or [], force=force)
             feeds["snipe"] = {"shown": len(data.get("tokens") or []), "sent": n}
             total += n
-        if "heat" in TELEGRAM_ALERT_FEEDS:
+        # Heat/grad only when money mode OFF
+        if not TELEGRAM_MONEY_MODE and "heat" in TELEGRAM_ALERT_FEEDS:
+            from services.scan_heat import scan_organic_heat
+
             data = await scan_organic_heat(limit=12, max_age_minutes=120, force=True)
             n = await notify_new_picks("heat", data.get("tokens") or [], force=force)
             feeds["heat"] = {"shown": len(data.get("tokens") or []), "sent": n}
             total += n
-        if "grad" in TELEGRAM_ALERT_FEEDS or "graduated" in TELEGRAM_ALERT_FEEDS:
+        if not TELEGRAM_MONEY_MODE and (
+            "grad" in TELEGRAM_ALERT_FEEDS or "graduated" in TELEGRAM_ALERT_FEEDS
+        ):
             from services.scan_graduated import scan_graduated_runners
 
             data = await scan_graduated_runners(
@@ -362,11 +407,23 @@ async def run_alert_cycle(*, force: bool = False) -> dict[str, Any]:
         logger.warning("telegram alert cycle failed: %s", exc)
 
     _last_cycle.update(
-        {"ts": time.time(), "sent": total, "error": err, "feeds": feeds}
+        {
+            "ts": time.time(),
+            "sent": total,
+            "error": err,
+            "feeds": feeds,
+            "money_mode": TELEGRAM_MONEY_MODE,
+        }
     )
     if total:
         logger.info("Telegram alerts sent %s picks %s", total, feeds)
-    return {"ok": err is None, "sent": total, "feeds": feeds, "error": err}
+    return {
+        "ok": err is None,
+        "sent": total,
+        "feeds": feeds,
+        "error": err,
+        "money_mode": TELEGRAM_MONEY_MODE,
+    }
 
 
 async def background_telegram_alert_loop() -> None:
@@ -376,21 +433,28 @@ async def background_telegram_alert_loop() -> None:
         logger.info(
             "Telegram alerts off — set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env"
         )
-        # Still sleep-loop so env can be hot-fixed? No — config is process-start.
-        # Keep sleeping lightly in case re-enabled via restart.
         while True:
             await asyncio.sleep(300)
             if configured():
                 break
             continue
 
-    # Seed: run one silent cycle marking current picks as seen
     try:
         await _seed_seen_from_scans()
+        mode_line = (
+            "💰 <b>MONEY MODE</b> — MOON + SNIPE only\n"
+            "Each alert includes STOP / TP1 / TP2 / INVALID rules.\n"
+            "Auto-CANCEL if setup breaks.\n"
+            if TELEGRAM_MONEY_MODE
+            else "Multi-feed alerts (heat/grad enabled)\n"
+        )
         await send_telegram(
             "✅ <b>Moon Scanner</b> Telegram alerts ON\n"
+            f"{mode_line}"
             f"Feeds: {', '.join(TELEGRAM_ALERT_FEEDS)}\n"
-            f"Every ~{TELEGRAM_ALERT_INTERVAL_SEC:.0f}s · keep start.bat running"
+            f"Labels: moon={','.join(sorted(TELEGRAM_ALERT_MOON_LABELS))} · "
+            f"snipe={','.join(sorted(TELEGRAM_ALERT_SNIPE_LABELS))}\n"
+            f"Every ~{TELEGRAM_ALERT_INTERVAL_SEC:.0f}s"
         )
     except Exception as exc:
         logger.warning("telegram seed failed: %s", exc)
@@ -409,20 +473,26 @@ async def _seed_seen_from_scans() -> None:
     """Mark currently shown tokens as already alerted (avoid dump on enable)."""
     from services.scan_moon import scan_moon_tokens
     from services.scan_snipes import scan_safe_snipes
-    from services.scan_heat import scan_organic_heat
 
     async with _lock:
         seen = _load_seen()
         now = time.time()
-        for kind, coro in (
-            ("moon", scan_moon_tokens(limit=12, max_age_minutes=120, force=False)),
-            ("snipe", scan_safe_snipes(limit=10, max_age_minutes=60, force=False)),
-            ("heat", scan_organic_heat(limit=12, max_age_minutes=120, force=False)),
-        ):
-            if kind == "snipe" and "snipe" not in TELEGRAM_ALERT_FEEDS and "snipes" not in TELEGRAM_ALERT_FEEDS:
-                continue
-            if kind != "snipe" and kind not in TELEGRAM_ALERT_FEEDS:
-                continue
+        jobs: list[tuple[str, Any]] = []
+        if "moon" in TELEGRAM_ALERT_FEEDS:
+            jobs.append(
+                ("moon", scan_moon_tokens(limit=12, max_age_minutes=120, force=False))
+            )
+        if "snipe" in TELEGRAM_ALERT_FEEDS or "snipes" in TELEGRAM_ALERT_FEEDS:
+            jobs.append(
+                ("snipe", scan_safe_snipes(limit=10, max_age_minutes=60, force=False))
+            )
+        if not TELEGRAM_MONEY_MODE and "heat" in TELEGRAM_ALERT_FEEDS:
+            from services.scan_heat import scan_organic_heat
+
+            jobs.append(
+                ("heat", scan_organic_heat(limit=12, max_age_minutes=120, force=False))
+            )
+        for kind, coro in jobs:
             try:
                 data = await coro
             except Exception:
@@ -445,10 +515,15 @@ async def send_test_message() -> dict[str, Any]:
             "ok": False,
             "error": "Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env",
         }
+    plan_demo = build_money_plan(
+        "moon",
+        {"mcap_usd": 15_000, "symbol": "DEMO"},
+    )
     return await send_telegram(
         "🧪 <b>Moon Scanner test</b>\n"
-        "If you see this, Telegram alerts are wired.\n"
-        f"Feeds: {', '.join(TELEGRAM_ALERT_FEEDS) or 'none'}"
+        f"Money mode: <b>{'ON' if TELEGRAM_MONEY_MODE else 'OFF'}</b>\n"
+        f"Feeds: {', '.join(TELEGRAM_ALERT_FEEDS) or 'none'}\n"
+        f"Demo plan entry {_fmt_usd(plan_demo.get('entry_mcap'))} · "
+        f"stop {_fmt_usd(plan_demo.get('stop_mcap'))} · "
+        f"TP1 {_fmt_usd(plan_demo.get('tp1_mcap'))}"
     )
-
-

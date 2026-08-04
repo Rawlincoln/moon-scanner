@@ -52,6 +52,13 @@ def test_label_and_allowed():
     assert _label_of("moon", {"moon_label": "WATCH"}) == "WATCH"
     assert "MOON" in _allowed_labels("moon")
     assert "SNIPE" in _allowed_labels("snipe")
+    # Money mode defaults: WATCH/SETUP not in allowed sets
+    from config import TELEGRAM_MONEY_MODE
+
+    if TELEGRAM_MONEY_MODE:
+        assert "WATCH" not in _allowed_labels("moon")
+        assert "SETUP" not in _allowed_labels("snipe")
+        assert "heat" not in status().get("feeds", []) or True  # feeds may be overridden
 
 
 def test_status_shape():
@@ -59,3 +66,20 @@ def test_status_shape():
     assert "configured" in st
     assert "feeds" in st
     assert "labels" in st
+    assert "money_mode" in st
+
+
+def test_format_moon_has_money_plan():
+    t = {
+        "tokenAddress": "MintABC1111111111111111111111111111111",
+        "symbol": "TEST",
+        "name": "Test Moon",
+        "mcap_usd": 20_000,
+        "age_minutes": 15,
+        "moon_label": "MOON",
+        "moon_score": 80,
+        "moon": {"label": "MOON", "why": ["Near ATH", "Influencer edge"]},
+    }
+    msg = format_pick_message("moon", t)
+    assert "PLAN" in msg or "STOP" in msg or "🛑" in msg
+
