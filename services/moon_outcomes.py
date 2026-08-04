@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from services.http_client import get as http_get
-from config import PUMPFUN_API_URL, REQUEST_TIMEOUT
+from config import MOON_OUTCOMES_DB, PUMPFUN_API_URL, REQUEST_TIMEOUT
 
 # Snapshot ages (seconds)
 HORIZONS = {
@@ -490,14 +490,25 @@ class MoonOutcomes:
         by_label: dict[str, Any],
         by_influencer: dict[str, Any],
         by_bundled: dict[str, Any],
+        base_score: int | None = None,
+        base_conf: int | None = None,
     ) -> dict[str, Any]:
         """Data-driven gate suggestion with conservative floors/ceilings.
 
-        Defaults (no data): score≥55, conf≥52, max_bundled 12%.
+        Defaults (no data): score/conf from moon mode (balanced 52/50, strict 55/52).
         Tightens when dump_rate is high; slight relax only with solid win sample.
         """
-        base_score = 55
-        base_conf = 52
+        try:
+            from services.moon_picks import default_rank_gates
+
+            dg = default_rank_gates()
+            if base_score is None:
+                base_score = int(dg.get("min_score") or 55)
+            if base_conf is None:
+                base_conf = int(dg.get("min_confidence") or 52)
+        except Exception:
+            base_score = 55 if base_score is None else base_score
+            base_conf = 52 if base_conf is None else base_conf
         max_bundled = 12.0  # hard skip zone starts at 12% in bundle_sniper
         min_samples = 8
         reasons: list[str] = []
@@ -506,7 +517,7 @@ class MoonOutcomes:
         dump = overall.get("dump_rate_pct")
         win = overall.get("win_rate_pct")
 
-        score, conf = base_score, base_conf
+        score, conf = int(base_score), int(base_conf)
 
         if n < min_samples:
             reasons.append(
@@ -620,15 +631,147 @@ class MoonOutcomes:
             by_bundled=stats["by_bundled_band"],
         )
 
+    def db_path(self) -> str:
+        return str(self.path)
 
-# Default store next to learning.db
+    def export_rows(self, *, limit: int = 8000) -> list[dict[str, Any]]:
+        """Full-row export for GHA / disk backup (newest first)."""
+        with self._lock:
+            conn = self._conn()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT mint, symbol, name, shown_at, entry_mcap, entry_ath,
+                           entry_label, entry_score, entry_confidence, entry_bundled_pct,
+                           influencer_tweet, narrative, features,
+                           mcap_15m, mcap_1h, mcap_6h, peak_mcap, low_mcap,
+                           outcome, outcome_ts, multiple, active, cohort
+                    FROM moon_recs
+                    ORDER BY shown_at DESC
+                    LIMIT ?
+                    """,
+                    (int(limit),),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def import_rows(self, rows: list[dict[str, Any]], *, merge: bool = True) -> dict[str, Any]:
+        """Merge exported rows back (durable restore across free-tier deploys).
+
+        Dedupes on (mint, shown_at, cohort). Never overwrites existing rows when merge=True.
+        """
+        if not rows:
+            return {"ok": True, "inserted": 0, "skipped": 0}
+        inserted = 0
+        skipped = 0
+        with self._lock:
+            conn = self._conn()
+            try:
+                for r in rows:
+                    if not isinstance(r, dict):
+                        skipped += 1
+                        continue
+                    mint = str(r.get("mint") or "").strip()
+                    if not mint:
+                        skipped += 1
+                        continue
+                    try:
+                        shown_at = float(r.get("shown_at") or 0)
+                    except (TypeError, ValueError):
+                        skipped += 1
+                        continue
+                    cohort = str(r.get("cohort") or "shown")
+                    if merge:
+                        exists = conn.execute(
+                            """
+                            SELECT id FROM moon_recs
+                            WHERE mint=? AND ABS(shown_at - ?) < 1.0
+                              AND COALESCE(cohort,'shown')=?
+                            LIMIT 1
+                            """,
+                            (mint, shown_at, cohort),
+                        ).fetchone()
+                        if exists:
+                            skipped += 1
+                            continue
+                    feats = r.get("features")
+                    if isinstance(feats, dict):
+                        feats = json.dumps(feats)
+                    elif feats is None:
+                        feats = "{}"
+                    conn.execute(
+                        """
+                        INSERT INTO moon_recs (
+                            mint, symbol, name, shown_at, entry_mcap, entry_ath,
+                            entry_label, entry_score, entry_confidence, entry_bundled_pct,
+                            influencer_tweet, narrative, features,
+                            mcap_15m, mcap_1h, mcap_6h, peak_mcap, low_mcap,
+                            outcome, outcome_ts, multiple, active, cohort
+                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            mint,
+                            r.get("symbol") or "",
+                            r.get("name") or "",
+                            shown_at,
+                            float(r.get("entry_mcap") or 0) or None,
+                            float(r.get("entry_ath") or 0) or None,
+                            r.get("entry_label") or "",
+                            int(r.get("entry_score") or 0),
+                            int(r.get("entry_confidence") or 0),
+                            float(r["entry_bundled_pct"])
+                            if r.get("entry_bundled_pct") is not None
+                            else None,
+                            int(r.get("influencer_tweet") or 0),
+                            (r.get("narrative") or "")[:200],
+                            feats,
+                            r.get("mcap_15m"),
+                            r.get("mcap_1h"),
+                            r.get("mcap_6h"),
+                            r.get("peak_mcap") or r.get("entry_mcap"),
+                            r.get("low_mcap") or r.get("entry_mcap"),
+                            r.get("outcome"),
+                            r.get("outcome_ts"),
+                            r.get("multiple"),
+                            int(r.get("active") if r.get("active") is not None else 1),
+                            cohort,
+                        ),
+                    )
+                    inserted += 1
+                conn.commit()
+            finally:
+                conn.close()
+        return {"ok": True, "inserted": inserted, "skipped": skipped}
+
+
+# Default store under DATA_DIR (durable disk when DATA_DIR / mount set)
 _default: MoonOutcomes | None = None
 
 
+def reset_outcomes_singleton() -> None:
+    """Test helper — clear cached store."""
+    global _default
+    _default = None
+
+
 def get_outcomes(base_dir: Path | None = None) -> MoonOutcomes:
+    """Return process-wide MoonOutcomes store.
+
+    Path resolution:
+      1. MOON_OUTCOMES_DB env (via config)
+      2. DATA_DIR / moon_outcomes.db (disk mount friendly)
+      3. base_dir/data/moon_outcomes.db when explicitly passed and no env override
+    """
+    import os
+
     global _default
     if _default is None:
-        root = base_dir or Path(__file__).resolve().parent.parent
-        _default = MoonOutcomes(root / "data" / "moon_outcomes.db")
+        if base_dir is not None and not (os.getenv("MOON_OUTCOMES_DB") or "").strip():
+            path = Path(base_dir) / "data" / "moon_outcomes.db"
+        else:
+            path = Path(MOON_OUTCOMES_DB)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _default = MoonOutcomes(path)
     return _default
 

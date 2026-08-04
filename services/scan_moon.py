@@ -17,7 +17,14 @@ from services.bundle_sniper import analyze_bundle_and_snipers
 from services.dexscreener import DexScreenerClient
 from services.moon_outcomes import MoonOutcomes, get_outcomes
 from services.accuracy import merge_ath_into_token
-from services.moon_picks import evaluate, filter_and_rank, reject_reason
+from services.moon_picks import (
+    MIN_MCAP,
+    default_rank_gates,
+    evaluate,
+    filter_and_rank,
+    moon_mode,
+    reject_reason,
+)
 from services.padre_feed import PadreFeedClient
 from services.pumpfun import PumpFunClient
 from services.realtime_bus import realtime_bus
@@ -421,7 +428,8 @@ async def scan_moon_tokens(
                 pre_reject["age"] = pre_reject.get("age", 0) + 1
                 continue
             mcap = float(coin.get("usd_market_cap") or 0)
-            if mcap < 3_000 or mcap > MIGRATION_MCAP_MAX_USD:
+            # Align pre-filter with moon MIN_MCAP (was $3k vs reject $4k)
+            if mcap < MIN_MCAP or mcap > MIGRATION_MCAP_MAX_USD:
                 rejected += 1
                 pre_reject["mcap"] = pre_reject.get("mcap", 0) + 1
                 continue
@@ -544,37 +552,47 @@ async def scan_moon_tokens(
             post_reject["not_enriched_overflow"] = len(rest)
 
         # Phase 3: adaptive gates from historical dump/win rates
+        base_gates = default_rank_gates()
         gates = {
-            "min_score": 55,
-            "min_confidence": 52,
-            "max_bundled_pct": 12.0,
+            **base_gates,
             "require_influencer": False,
             "adapted": False,
             "sample_n": 0,
-            "reasons": ["defaults"],
+            "reasons": [f"defaults ({moon_mode()})"],
+            "mode": moon_mode(),
         }
         try:
             gates = get_moon_outcomes().suggested_gates()
+            gates["mode"] = moon_mode()
             # Slight relax when empty feed + small sample (avoid permanent zero-show)
+            floor_score = int(base_gates["min_score"])
+            floor_conf = int(base_gates["min_confidence"])
             if (
                 not accurate
                 and int(gates.get("sample_n") or 0) < 8
                 and not gates.get("adapted")
             ):
+                soft = 3 if moon_mode() == "balanced" else 2
                 gates = {
                     **gates,
-                    "min_score": max(52, int(gates.get("min_score") or 55) - 2),
-                    "min_confidence": max(50, int(gates.get("min_confidence") or 52) - 2),
+                    "min_score": max(
+                        floor_score - soft, int(gates.get("min_score") or floor_score) - soft
+                    ),
+                    "min_confidence": max(
+                        floor_conf - soft,
+                        int(gates.get("min_confidence") or floor_conf) - soft,
+                    ),
                     "reasons": list(gates.get("reasons") or [])
                     + ["empty-wave soft floor"],
+                    "mode": moon_mode(),
                 }
         except Exception as exc:
             logger.debug("suggested_gates failed: %s", exc)
 
         display = filter_and_rank(
             accurate,
-            min_score=int(gates.get("min_score") or 55),
-            min_confidence=int(gates.get("min_confidence") or 52),
+            min_score=int(gates.get("min_score") or base_gates["min_score"]),
+            min_confidence=int(gates.get("min_confidence") or base_gates["min_confidence"]),
             max_bundled_pct=float(gates.get("max_bundled_pct") or 12.0),
             require_influencer=bool(gates.get("require_influencer")),
             require_holders=True,
@@ -627,13 +645,39 @@ async def scan_moon_tokens(
         except Exception:
             outcome_sum = {"gates": gates}
 
+        empty_info = None
+        if not display:
+            top_rb = sorted(
+                {**{f"pre_{k}": v for k, v in pre_reject.items()},
+                 **{f"post_{k}": v for k, v in post_reject.items()}}.items(),
+                key=lambda kv: -int(kv[1] or 0),
+            )[:5]
+            empty_info = {
+                "intentional": True,
+                "mode": moon_mode(),
+                "hint": (
+                    "Empty Moons is OK — capital protection. "
+                    "Use Organic Heat for high-recall risk. "
+                    + (
+                        "Balanced mode: −15% ATH + organic community path when holders clean."
+                        if moon_mode() == "balanced"
+                        else "Strict mode: −12% ATH + influencer/community edge only."
+                    )
+                ),
+                "top_rejects": [{"key": k, "n": v} for k, v in top_rb],
+                "near_miss_n": len(near_misses),
+                "accurate_n": len(accurate),
+            }
+
         payload = {
             "ok": True,
-            "mode": "moon_v3_narrative",
+            "mode": f"moon_v3_{moon_mode()}",
+            "moon_mode": moon_mode(),
             "scanned_at": time.time(),
             "cached": False,
             "tokens": display,
             "near_misses": near_misses,
+            "empty": empty_info,
             "counts": {
                 "shown": len(display),
                 "moon": sum(1 for t in display if t.get("moon_label") == "MOON"),
@@ -649,6 +693,7 @@ async def scan_moon_tokens(
                 "enriched": enrich_n,
                 "analyzed": scanned,
                 "rejected": rejected,
+                "accurate": len(accurate),
             },
             "reject_breakdown": {
                 **{f"pre_{k}": v for k, v in pre_reject.items()},
@@ -657,7 +702,7 @@ async def scan_moon_tokens(
             "outcomes": outcome_sum,
             "gates": gates,
             "rule": (
-                "v3 capital protection + Phase 3 adaptive gates from past rec outcomes. "
+                f"v3 {moon_mode()} capital protection + Phase 3 adaptive gates. "
                 f"Gates: score≥{gates.get('min_score')} conf≥{gates.get('min_confidence')} "
                 f"bundled≤{gates.get('max_bundled_pct')}%"
                 + (
@@ -665,7 +710,11 @@ async def scan_moon_tokens(
                     if gates.get("require_influencer")
                     else ""
                 )
-                + ". Near-ATH + narrative edge required; dumps/bundles/ghosts hidden."
+                + (
+                    ". Balanced: near-ATH (−15/−18%) + organic community when holders clean."
+                    if moon_mode() == "balanced"
+                    else ". Strict: near-ATH (−12/−15%) + narrative edge; dumps/ghosts hidden."
+                )
             ),
         }
         _moon_cache["data"] = payload

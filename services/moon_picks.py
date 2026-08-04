@@ -6,6 +6,10 @@ After user losses: almost never recommend. Show only when:
   3. Real narrative edge: influencer tweet OR trending meta + community
   4. Multi-pillar score + confidence agree
 
+Modes (MOON_MODE env):
+  strict   — ultra-tight post-loss gates (−12% ATH, hard community bar)
+  balanced — default; slight ATH/organic relax when holders clean (still not Heat)
+
 Random near-ATH charts without story = REJECT (they dump ~always).
 """
 
@@ -18,6 +22,7 @@ from config import (
     GRADUATION_MCAP_USD,
     MIGRATION_MCAP_MAX_USD,
     MIGRATION_NEAR_MIN_PCT,
+    MOON_MODE,
 )
 from services.accuracy import holders_known, learning_soft_adjust, merge_ath_into_token
 from services.avoid_filters import BLOCKED_MINTS, is_hard_avoid
@@ -29,15 +34,33 @@ from services.tx_activity import score_tx_activity
 # Stricter band — early dust rarely moons
 MIN_MCAP = 4_000
 MAX_MCAP = MIGRATION_MCAP_MAX_USD
-# Must be close to ATH; allow small healthy pullback when book is known (see reject)
-NEAR_ATH_FRAC = 0.88  # within −12% of ATH (strict default)
-NEAR_ATH_FRAC_STRONG = 0.85  # −15% ok only with holders + edge
-FADE_ATH_FRAC = 0.93
+
+# ATH floors depend on mode (balanced recovers slight-dip organic climbers)
+if MOON_MODE == "strict":
+    NEAR_ATH_FRAC = 0.88  # within −12% of ATH
+    NEAR_ATH_FRAC_STRONG = 0.85  # −15% with holders + edge
+    FADE_ATH_FRAC = 0.93
+else:
+    # balanced: −15% default; −18% with holders + edge (still near peak)
+    NEAR_ATH_FRAC = 0.85
+    NEAR_ATH_FRAC_STRONG = 0.82
+    FADE_ATH_FRAC = 0.90
 
 LABEL_MOON = "MOON"
 LABEL_WATCH = "WATCH"
 LABEL_WEAK = "WEAK"
 LABEL_REJECT = "REJECT"
+
+
+def moon_mode() -> str:
+    return MOON_MODE if MOON_MODE in ("balanced", "strict") else "balanced"
+
+
+def default_rank_gates() -> dict[str, Any]:
+    """Base score/conf floors before adaptive outcomes layer."""
+    if moon_mode() == "strict":
+        return {"min_score": 55, "min_confidence": 52, "max_bundled_pct": 12.0}
+    return {"min_score": 52, "min_confidence": 50, "max_bundled_pct": 12.0}
 
 
 def _f(val: Any, default: float = 0.0) -> float:
@@ -132,21 +155,34 @@ def reject_reason(token: dict[str, Any]) -> str | None:
         return why or "dumped"
 
     high = max(ath, peak)
-    if high >= 2_500 and mcap > 0 and mcap < high * max(DUMP_HIDE_FRAC, 0.85):
+    # Dump wall sits below near-ATH floors so balanced −15/−18% can still score
+    dump_floor = max(DUMP_HIDE_FRAC, 0.80 if moon_mode() == "balanced" else 0.85)
+    if high >= 2_500 and mcap > 0 and mcap < high * dump_floor:
         return f"dumped −{(1 - mcap / high) * 100:.0f}% from ${high:,.0f}"
 
-    # Near-ATH gate: default −12%; strong book (holders + edge) may pull back to −15%
+    # Near-ATH gate — balanced allows a slightly deeper healthy pullback
     social_early = _ensure_social(token)
     strong_book = holders_known(token) and (
         social_early.get("influencer_tweet") or social_early.get("has_edge")
     )
+    # Balanced: known holders alone can use the strong (slightly looser) floor
+    if moon_mode() == "balanced" and holders_known(token) and not social_early.get(
+        "namejack_risk"
+    ):
+        strong_book = True
     ath_floor = NEAR_ATH_FRAC_STRONG if strong_book else NEAR_ATH_FRAC
     if ath >= 3_500 and mcap > 0 and mcap < ath * ath_floor:
         return f"faded from ATH ${ath:,.0f} → ${mcap:,.0f}"
 
     mkt = token.get("market") or {}
     pc = mkt.get("priceChange") or token.get("priceChange") or {}
-    for key, thr in (("m5", -12), ("h1", -18), ("h6", -25), ("h24", -35)):
+    # Balanced: slightly more room on short candles (still blocks violence)
+    thr_map = (
+        (("m5", -12), ("h1", -18), ("h6", -25), ("h24", -35))
+        if moon_mode() == "strict"
+        else (("m5", -15), ("h1", -22), ("h6", -28), ("h24", -38))
+    )
+    for key, thr in thr_map:
         ch = _f(pc.get(key))
         if ch <= thr:
             return f"price {key} {ch:.0f}%"
@@ -170,8 +206,9 @@ def reject_reason(token: dict[str, Any]) -> str | None:
         return "junk ticker: " + ", ".join(tq.get("issues") or ["bad"])
 
     # Name-jack ELON/TRUMP with no real tweet + no community = rug packaging
+    namejack_min_replies = 10 if moon_mode() == "balanced" else 12
     if social.get("namejack_risk") and not social.get("influencer_tweet"):
-        if _i(social.get("replies")) < 12:
+        if _i(social.get("replies")) < namejack_min_replies:
             return "name-jack narrative without real influencer tweet / community"
 
     # Require a real edge — random green charts dump
@@ -182,23 +219,64 @@ def reject_reason(token: dict[str, Any]) -> str | None:
     if claim_only and not has_real_edge:
         return "unverified influencer link claim — spoof risk"
     if not has_real_edge and not has_verified_inf:
-        # Allow pure organic near-mig only if strong community
         bond = _bond(token, mcap)
         replies = _i(social.get("replies"))
-        organic_ok = (
-            bond >= 42
-            and mcap >= 18_000
-            and replies >= 20
-            and social.get("real_x")
-            and ath > 0
-            and mcap >= ath * 0.92
-        )
+        hk = holders_known(token)
+        # Clean bundle helper for organic path
+        bun_ok = True
+        bs = token.get("bundleSniper") or {}
+        if isinstance(bs, dict):
+            overall = str(bs.get("overall") or "").lower()
+            if bs.get("hard_reject") or overall in ("critical", "high"):
+                bun_ok = False
+            bun_pct = _f((bs.get("bundle") or {}).get("bundled_pct") or bs.get("bundled_pct"))
+            if bun_pct > (12.0 if moon_mode() == "balanced" else 10.0):
+                bun_ok = False
+
+        if moon_mode() == "strict":
+            organic_ok = (
+                bond >= 42
+                and mcap >= 18_000
+                and replies >= 20
+                and social.get("real_x")
+                and ath > 0
+                and mcap >= ath * 0.92
+            )
+        else:
+            # balanced organic: known book + real community near ATH
+            # (catches BAKI-class climbers that lack influencer tags)
+            near_ath_ok = ath > 0 and mcap >= ath * 0.85
+            organic_ok = bun_ok and near_ath_ok and (
+                (
+                    bond >= 35
+                    and mcap >= 12_000
+                    and replies >= 12
+                    and social.get("real_x")
+                )
+                or (
+                    hk
+                    and mcap >= 8_000
+                    and replies >= 15
+                    and (social.get("real_x") or social.get("has_tiktok"))
+                    and not social.get("namejack_risk")
+                )
+                or (
+                    hk
+                    and bond >= 28
+                    and mcap >= 10_000
+                    and replies >= 18
+                    and not social.get("namejack_risk")
+                    and not social.get("status_only")
+                )
+            )
         if not organic_ok:
             return "no narrative / influencer edge — random chart"
 
     # Ghost / spoof
     if social.get("status_only") and not has_verified_inf:
-        return "status-link social spoof (not influencer)"
+        # Balanced: allow status-link only if real community replies exist
+        if moon_mode() == "strict" or _i(social.get("replies")) < 20:
+            return "status-link social spoof (not influencer)"
     if (
         _i(social.get("replies")) == 0
         and not social.get("real_x")
@@ -486,19 +564,37 @@ def moon_label(
     holders_known: bool = True,
 ) -> str:
     social = social or {}
+    bal = moon_mode() == "balanced"
     # MOON only with real edge + near ATH + known holder book
+    moon_score_floor = 72 if bal else 75
+    moon_mom = 78 if bal else 80
+    moon_narr = 50 if bal else 55
     if (
-        score >= 75
-        and momentum >= 80
-        and narrative >= 55
+        score >= moon_score_floor
+        and momentum >= moon_mom
+        and narrative >= moon_narr
         and holders_known
         and (social.get("influencer_tweet") or social.get("has_edge"))
     ):
         return LABEL_MOON
     # WATCH also needs holder book truth — unknown book is not a recommendation grade
-    if holders_known and score >= 58 and momentum >= 70 and narrative >= 40:
+    watch_score = 55 if bal else 58
+    watch_mom = 66 if bal else 70
+    watch_narr = 36 if bal else 40
+    if holders_known and score >= watch_score and momentum >= watch_mom and narrative >= watch_narr:
         return LABEL_WATCH
-    if holders_known and score >= 50 and social.get("influencer_tweet") and momentum >= 75:
+    if holders_known and score >= 50 and social.get("influencer_tweet") and momentum >= 72:
+        return LABEL_WATCH
+    # Balanced: organic community climb can be WATCH without influencer tag
+    if (
+        bal
+        and holders_known
+        and score >= 56
+        and momentum >= 70
+        and narrative >= 32
+        and (social.get("real_x") or _i(social.get("replies")) >= 15)
+        and not social.get("namejack_risk")
+    ):
         return LABEL_WATCH
     return LABEL_WEAK
 

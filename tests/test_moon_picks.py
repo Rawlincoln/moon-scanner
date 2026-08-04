@@ -153,3 +153,58 @@ def test_filter_require_influencer():
             require_influencer=True,
         )
         assert out == []
+
+
+def test_balanced_organic_community_near_ath():
+    """Balanced mode: clean holders + real X community can pass without influencer."""
+    from services.moon_picks import moon_mode
+
+    if moon_mode() != "balanced":
+        return  # env override
+    t = _base_token(
+        tokenAddress="OrgMint11111111111111111111111111111111",
+        mcap_usd=14_000,
+        ath_mcap=15_000,  # ~93% ATH
+        bonding_progress=38,
+        name="Community Dog",
+        symbol="CDOG",
+        pumpfun={
+            "twitter": "https://x.com/communitydog",
+            "reply_count": 22,
+            "description": "community run dog coin",
+            "website": "https://example.com",
+            "name": "Community Dog",
+            "symbol": "CDOG",
+            "usd_market_cap": 14_000,
+            "ath_market_cap": 15_000,
+        },
+        # no elon status link — pure organic
+    )
+    r = reject_reason(t)
+    assert r is None, r
+    ev = evaluate(t)
+    assert ev["eligible"] is True
+
+
+def test_balanced_ath_pullback_with_holders():
+    """Balanced: −16% ATH ok when holders known (strict would fade at −12%)."""
+    from services.moon_picks import moon_mode
+
+    if moon_mode() != "balanced":
+        return
+    t = _base_token(
+        mcap_usd=16_800,
+        ath_mcap=20_000,  # 84% ATH
+        bonding_progress=45,
+        pumpfun={
+            "twitter": "https://x.com/elonmusk/status/1",
+            "reply_count": 30,
+            "description": "doge forever",
+            "name": "Mars Dog",
+            "symbol": "MARS",
+            "usd_market_cap": 16_800,
+            "ath_market_cap": 20_000,
+        },
+    )
+    r = reject_reason(t)
+    assert r is None, r

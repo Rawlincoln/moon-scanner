@@ -267,10 +267,16 @@ function render(tokens, counts = {}, nearMisses = [], extra = {}) {
   if (!list) return;
   if (!tokens.length) {
     const band = counts.band_hits != null ? counts.band_hits : "—";
+    const empty = extra.empty || {};
+    const mode = empty.mode || extra.moon_mode || "balanced";
+    const hint = empty.hint
+      ? `<p class="muted">${escapeHtml(empty.hint)}</p>`
+      : "";
     list.innerHTML = `<div class="empty">
-      <strong>No narrative-backed climbers right now</strong>
-      <p>We only show near-ATH tokens with real edge: influencer tweets (Elon/CZ/Trump…), trending tickers, or strong community. Random green charts are hidden — they almost always dump.</p>
-      <p class="muted">Scanned ${counts.candidates_raw ?? "—"} · band hits ${band} · rejected ${counts.rejected ?? "—"}</p>
+      <strong>No Moons right now — empty is intentional</strong>
+      <p>Capital protection (${escapeHtml(mode)}): near-ATH + real edge (influencer / trending / clean organic community). Random green charts stay hidden. For high-recall risk use <em>Organic Heat</em>.</p>
+      ${hint}
+      <p class="muted">Scanned ${counts.candidates_raw ?? "—"} · band hits ${band} · accurate ${counts.accurate ?? "—"} · rejected ${counts.rejected ?? "—"}</p>
       ${rejectBreakdownHtml(extra.reject_breakdown, extra.gates)}
       ${nearMissHtml(nearMisses)}
     </div>`;
@@ -325,6 +331,8 @@ async function scan(force = false) {
     render(lastTokens, data.counts || {}, data.near_misses || [], {
       reject_breakdown: data.reject_breakdown,
       gates: data.gates || (data.outcomes || {}).gates,
+      empty: data.empty,
+      moon_mode: data.moon_mode,
     });
     try {
       if (window.MoonAlerts) {

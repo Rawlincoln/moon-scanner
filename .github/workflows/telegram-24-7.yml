@@ -16,13 +16,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Restore alert dedupe cache
+      - name: Restore alert + outcomes cache
         uses: actions/cache@v4
         with:
-          path: data/gha_telegram_seen.json
-          key: gha-telegram-seen-v1
+          path: |
+            data/gha_telegram_seen.json
+            data/gha_moon_outcomes.json
+          key: gha-telegram-outcomes-v2
           restore-keys: |
+            gha-telegram-outcomes-
             gha-telegram-seen-
+
+      - name: Sync moon outcomes (durable across redeploys)
+        env:
+          TELEGRAM_CRON_SECRET: ${{ secrets.TELEGRAM_CRON_SECRET }}
+          BASE_URL: https://moon-scanner-9tlz.onrender.com
+          OUTCOMES_CACHE: data/gha_moon_outcomes.json
+        run: python scripts/gha_moon_outcomes_sync.py
+        continue-on-error: true
 
       - name: Run alert worker
         env:
@@ -33,9 +44,11 @@ jobs:
           SEEN_PATH: data/gha_telegram_seen.json
         run: python scripts/gha_telegram_alerts.py
 
-      - name: Save alert dedupe cache
+      - name: Save alert + outcomes cache
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: data/gha_telegram_seen.json
-          key: gha-telegram-seen-v1-${{ github.run_id }}
+          path: |
+            data/gha_telegram_seen.json
+            data/gha_moon_outcomes.json
+          key: gha-telegram-outcomes-v2-${{ github.run_id }}

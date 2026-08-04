@@ -22,11 +22,41 @@ def test_suggested_gates_defaults_small_sample():
         by_label={},
         by_influencer={},
         by_bundled={},
+        base_score=55,
+        base_conf=52,
     )
     assert g["adapted"] is False
     assert g["min_score"] == 55
     assert g["min_confidence"] == 52
     assert g["max_bundled_pct"] == 12.0
+
+
+def test_export_import_roundtrip(tmp_path: Path):
+    a = MoonOutcomes(tmp_path / "a.db")
+    a.record_shown(
+        [
+            {
+                "tokenAddress": "ExportMint111111111111111111111111111",
+                "symbol": "EX",
+                "mcap_usd": 12_000,
+                "ath_mcap": 12_500,
+                "moon_label": "WATCH",
+                "moon_score": 60,
+                "confidence": 55,
+                "moon": {"label": "WATCH", "narrative": "n"},
+            }
+        ]
+    )
+    rows = a.export_rows()
+    assert len(rows) == 1
+    b = MoonOutcomes(tmp_path / "b.db")
+    r = b.import_rows(rows)
+    assert r["inserted"] == 1
+    # merge dedupe
+    r2 = b.import_rows(rows)
+    assert r2["inserted"] == 0
+    assert r2["skipped"] == 1
+    assert b.summary()["total_recs"] == 1
 
 
 def test_suggested_gates_tighten_on_high_dump():

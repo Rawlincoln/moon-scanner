@@ -28,7 +28,14 @@ Live URL example: **https://moon-scanner-9tlz.onrender.com**
 
 To upgrade: set `plan: starter` in `render.yaml`.
 
-SQLite under `data/` is **ephemeral** on free tier (lost on redeploy). Use a persistent disk if you need learning history across deploys.
+SQLite under `DATA_DIR` (default `data/`) is **ephemeral** on free tier (lost on redeploy).
+
+**Durable moon outcomes (free tier):** GitHub Actions (`telegram-24-7`) exports/imports
+`/api/moon/outcomes` into Actions cache every 5 minutes so adaptive gates survive redeploys.
+
+**Paid / Starter:** attach a Render disk, set `DATA_DIR=/var/data` (see `render.yaml` comments).
+
+**Moons mode:** `MOON_MODE=balanced` (default) or `strict`.
 
 ## 4. Required / recommended env vars (Render dashboard)
 

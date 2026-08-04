@@ -13,5 +13,16 @@ services:
         value: render
       - key: PYTHON_VERSION
         value: "3.12.0"
+      - key: MOON_MODE
+        value: balanced
+      # Durable SQLite root — set DATA_DIR=/var/data and attach a disk on Starter+
+      # Free tier is ephemeral; GHA outcomes sync restores moon_outcomes across redeploys.
+      - key: DATA_DIR
+        value: data
       # Set real values in Render dashboard (do not commit secrets):
-      # HELIUS_API_KEY, ADMIN_API_KEY, CORS_ORIGINS
+      # HELIUS_API_KEY, ADMIN_API_KEY, CORS_ORIGINS, TELEGRAM_*, TELEGRAM_CRON_SECRET
+    # Persistent disk (requires paid plan). Uncomment when on Starter+:
+    # disk:
+    #   name: moon-scanner-data
+    #   mountPath: /var/data
+    #   sizeGB: 1

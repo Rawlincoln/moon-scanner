@@ -104,6 +104,45 @@ NEAR_MIG_BUY_MIN_SCORE = 72
 NEAR_MIG_BUY_MIN_BOND = 45.0
 NEAR_MIG_MIN_MCAP = 18_000
 NEAR_ATH_BUY_FRAC = 0.80  # must be ≥80% of ATH to recommend buy
+
+# --- Moons mode + durable data ---
+# balanced: slight ATH/organic relax, still capital-protection (not Heat)
+# strict: original post-loss ultra-tight gates
+_moon_mode = (os.getenv("MOON_MODE", "balanced") or "balanced").strip().lower()
+MOON_MODE = _moon_mode if _moon_mode in ("balanced", "strict") else "balanced"
+# Persistent data root (Render disk mount, e.g. /var/data). Falls back to ./data.
+_BASE_DIR = Path(__file__).resolve().parent
+
+
+def _resolve_data_dir() -> Path:
+    raw = (os.getenv("DATA_DIR") or os.getenv("RENDER_DISK_PATH") or "").strip()
+    candidates: list[Path] = []
+    if raw:
+        candidates.append(Path(raw))
+    candidates.append(_BASE_DIR / "data")
+    for p in candidates:
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+            # Write probe so we don't pick a read-only mount
+            probe = p / ".writable"
+            probe.write_text("ok", encoding="utf-8")
+            try:
+                probe.unlink()
+            except OSError:
+                pass
+            return p
+        except OSError:
+            continue
+    fallback = _BASE_DIR / "data"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
+DATA_DIR = _resolve_data_dir()
+MOON_OUTCOMES_DB = Path(
+    os.getenv("MOON_OUTCOMES_DB") or (DATA_DIR / "moon_outcomes.db")
+)
+LEARNING_DB = Path(os.getenv("LEARNING_DB") or (DATA_DIR / "learning.db"))
 # Skip DexScreener smart-money order fetch during bulk trenches (saves ~0.5–1s/token)
 FAST_SCAN_SKIP_DEX_ORDERS = True
 
