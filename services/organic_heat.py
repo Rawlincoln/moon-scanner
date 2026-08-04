@@ -32,26 +32,22 @@ MAX_AGE_MIN = 180.0
 ATH_HARD_DUMP = 0.55  # −45%
 ATH_SOFT_FLOOR = 0.70  # −30% still visible as RISKY
 
-# Only capital-true hard blocks in heat mode (social packaging is score demotion)
-HEAT_BLOCK_FLAGS = frozenset(
+# Soft packaging may demote score but packaging-only hard_avoid from status links
+# can still be demoted rather than hidden. True capital hard_avoid always blocks.
+HEAT_SOFT_PACKAGING_FLAGS = frozenset(
     {
-        "blocklist",
-        "banned",
-        "rugged",
-        "honeypot",
-        "drained_curve",
-        "lp_unlocked",
-        "lp_not_locked",
-        "freeze_authority",
-        "mint_authority",
-        "flash_pump_dump",
-        "post_ath_crash",
-        "adult_bait",
-        "extreme_wash",
-        "spam_deploy_tool",
-        "serial_creator",
-        "ghost_launch",
-        "dev_out_green_chart",
+        "fake_twitter",
+        "fake_website",
+        "entry_trap_social",
+        "social_spoof_scam",
+        "parabolic_no_community",
+        "wash_buys",
+        "dead_book",
+        "low_holders",
+        "empty_distribution",
+        "suspicious_metadata",
+        "zero_sellers",
+        "bot_holder_cluster",
     }
 )
 
@@ -232,7 +228,7 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
     if ath >= 3_000 and mcap > 0 and mcap < ath * ATH_HARD_DUMP:
         return f"hard dump −{(1 - mcap / ath) * 100:.0f}% from ATH"
 
-    # Capital threats only — status-link / soft social spoof is demoted, not hidden
+    # P0: full is_hard_avoid parity with Moons/Snipes except pure soft-packaging sets
     avoid = (
         token.get("avoid")
         or (token.get("safetyReport") or {}).get("avoid")
@@ -242,12 +238,11 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
     flags = set(avoid.get("flags") or []) if isinstance(avoid, dict) else set()
     hard, hard_why = is_hard_avoid(token)
     if hard:
-        if flags & HEAT_BLOCK_FLAGS:
+        # Only allow through if ALL flags are soft packaging (status-link style)
+        if flags and flags <= HEAT_SOFT_PACKAGING_FLAGS:
+            pass  # demote in scoring later
+        else:
             return hard_why or "hard avoid"
-        if not flags:
-            # blocklist / hard_avoid bit with no flag detail
-            return hard_why or "hard avoid"
-        # Soft packaging only (fake_twitter / entry_trap_social) → allow + score demote
 
     safety = token.get("safety") or {}
     if safety.get("is_honeypot") or safety.get("rugged") or safety.get("honeypot"):
@@ -273,6 +268,9 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
         return "dev out / creator dumped"
     if "serial_creator" in flags:
         return f"serial creator ({launched or 'many'} tokens)"
+    # Bundle / sniper capital flags always fatal on heat
+    if flags & {"bundled", "snipers", "insiders", "ai_pitch_no_socials"}:
+        return hard_why or f"risk: {', '.join(sorted(flags & {'bundled', 'snipers', 'insiders', 'ai_pitch_no_socials'}))}"
 
     # After enrich pipeline: allow incomplete as RISKY later, but reject pure fail
     if "enrich_ok" in token and token.get("enrich_ok") is not True:
@@ -755,11 +753,12 @@ def heat_card_from_coin(coin: dict, *, source: str = "pump.fun") -> dict[str, An
         pump=coin,
         mint=mint,
     )
-    # Pre-card: only true capital threats (not status-link soft hard_avoid)
+    # Pre-card: drop capital hard_avoid; soft packaging alone may continue
     flags = set(avoid.get("flags") or [])
-    if flags & HEAT_BLOCK_FLAGS or mint in BLOCKED_MINTS:
+    hard, _ = is_hard_avoid({"avoid": avoid})
+    if mint in BLOCKED_MINTS:
         return None
-    if avoid.get("hard_avoid") and not flags:
+    if hard and (not flags or not flags <= HEAT_SOFT_PACKAGING_FLAGS):
         return None
 
     social = analyze_social_narrative(

@@ -174,28 +174,61 @@ async def scan_graduated_runners(
         post_reject: Counter[str] = Counter()
         near_misses: list[dict] = []
 
-        for c in enriched:
-            mint = (c.get("tokenAddress") or c.get("mint") or "").strip()
-            reason = graduated_reject_reason(c)
-            if reason:
-                rejected += 1
-                key = _short_reject(reason)
-                post_reject[key] += 1
-                if len(near_misses) < 10:
-                    near_misses.append(
-                        {
-                            "symbol": c.get("symbol") or "?",
-                            "name": c.get("name") or "",
-                            "tokenAddress": mint,
-                            "mcap_usd": c.get("mcap_usd"),
-                            "ath_mcap": c.get("ath_mcap"),
-                            "age_minutes": c.get("age_minutes"),
-                            "reject": reason,
-                            "reject_key": key,
-                        }
-                    )
-                continue
-            accurate.append(c)
+        def _consume(batch: list) -> None:
+            nonlocal rejected
+            for c in batch:
+                mint = (c.get("tokenAddress") or c.get("mint") or "").strip()
+                if c.get("enrich_ok") is not True:
+                    rejected += 1
+                    post_reject["enrich"] += 1
+                    if len(near_misses) < 10:
+                        errs = c.get("enrich_errors") or ["incomplete"]
+                        near_misses.append(
+                            {
+                                "symbol": c.get("symbol") or "?",
+                                "name": c.get("name") or "",
+                                "tokenAddress": mint,
+                                "mcap_usd": c.get("mcap_usd"),
+                                "ath_mcap": c.get("ath_mcap"),
+                                "age_minutes": c.get("age_minutes"),
+                                "reject": "safety unknown — "
+                                + ", ".join(str(e) for e in errs[:2]),
+                                "reject_key": "enrich",
+                            }
+                        )
+                    continue
+                reason = graduated_reject_reason(c)
+                if reason:
+                    rejected += 1
+                    key = _short_reject(reason)
+                    post_reject[key] += 1
+                    if len(near_misses) < 10:
+                        near_misses.append(
+                            {
+                                "symbol": c.get("symbol") or "?",
+                                "name": c.get("name") or "",
+                                "tokenAddress": mint,
+                                "mcap_usd": c.get("mcap_usd"),
+                                "ath_mcap": c.get("ath_mcap"),
+                                "age_minutes": c.get("age_minutes"),
+                                "reject": reason,
+                                "reject_key": key,
+                            }
+                        )
+                    continue
+                accurate.append(c)
+
+        _consume(enriched)
+
+        # Second-wave enrich when first pass empty (P1 from audit, small cost)
+        if not accurate and rest:
+            wave2_n = min(len(rest), max(limit * 2, 12))
+            wave2 = rest[:wave2_n]
+            rest = rest[wave2_n:]
+            enriched2 = list(await asyncio.gather(*[_one(c) for c in wave2]))
+            enrich_n += wave2_n
+            post_reject["second_wave_enrich"] += wave2_n
+            _consume(enriched2)
 
         if rest:
             post_reject["not_enriched_overflow"] += len(rest)

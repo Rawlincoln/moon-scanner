@@ -422,14 +422,23 @@ def _pillar_safety(token: dict[str, Any]) -> tuple[int, list[str]]:
         or {}
     )
     flags = set(avoid.get("flags") or [])
+    # Must match flag names emitted by avoid_filters (P0 audit fix)
     soft = {
         "fake_twitter",
         "fake_website",
         "suspicious_metadata",
-        "ghost_book",
+        "ghost_book",  # legacy alias
+        "dead_book",
         "low_holders",
+        "empty_distribution",
         "sell_pressure",
-        "entry_trap",
+        "entry_trap",  # legacy alias
+        "entry_trap_social",
+        "social_spoof_scam",
+        "wash_buys",
+        "zero_sellers",
+        "bot_holder_cluster",
+        "parabolic_no_community",
     }
     soft_hit = flags & soft
     if soft_hit:

@@ -70,6 +70,13 @@ def graduated_reject_reason(token: dict[str, Any]) -> str | None:
     if token.get("skipped"):
         return token.get("skipReason") or "skipped"
 
+    # P0: never rank without successful enrich (parity with moons/snipes)
+    if "enrich_ok" in token and token.get("enrich_ok") is not True:
+        errs = token.get("enrich_errors") or []
+        return "safety unknown — " + (
+            ", ".join(str(e) for e in errs[:2]) if errs else "enrich incomplete"
+        )
+
     merge_ath_into_token(token)
     mcap = extract_mcap_usd(token)
     ath = extract_ath_mcap(token)
@@ -118,6 +125,8 @@ def graduated_reject_reason(token: dict[str, Any]) -> str | None:
     safety = token.get("safety") or {}
     if safety.get("is_honeypot") or safety.get("rugged") or safety.get("honeypot"):
         return "honeypot / rugged"
+    if safety.get("error"):
+        return "safety error / incomplete audit"
 
     # Extreme one-way crash candles
     pc = token.get("priceChange") or (token.get("market") or {}).get("priceChange") or {}
@@ -128,6 +137,18 @@ def graduated_reject_reason(token: dict[str, Any]) -> str | None:
     # For graduated, only honor hard crash if also dead from ATH
     if crashed and ath > 0 and mcap < ath * ATH_DIP_LOW:
         return why or "crashed runner"
+
+    # Bundle critical wall (weaker than snipes, stronger than none)
+    bs = token.get("bundleSniper")
+    if isinstance(bs, dict):
+        if bs.get("hard_reject") and str(bs.get("overall") or "").lower() in (
+            "critical",
+            "high",
+        ):
+            return bs.get("summary") or "bundle/sniper hard reject"
+        sn = (bs.get("snipers") or {}) if isinstance(bs.get("snipers"), dict) else {}
+        if sn.get("risk_level") == "critical":
+            return "sniper critical"
 
     return None
 
@@ -289,7 +310,13 @@ def evaluate_graduated(token: dict[str, Any]) -> dict[str, Any]:
     graduated = bool(meta.get("graduated"))
     conf = score
 
-    if score >= 68 and ath_ret is not None and ath_ret >= ATH_RUNNER * 100:
+    hk = holders_known(token)
+    if (
+        score >= 68
+        and ath_ret is not None
+        and ath_ret >= ATH_RUNNER * 100
+        and hk
+    ):
         label = LABEL_RUNNER
         conf = max(conf, 62)
         risk = "elevated"
@@ -298,11 +325,16 @@ def evaluate_graduated(token: dict[str, Any]) -> dict[str, Any]:
         conf = min(conf, 58)
         risk = "high"
         why = why + ["Dip-buy structure — not a bottom call"]
+        if not hk:
+            conf = min(conf, 50)
+            why = why + ["Holders unknown — not RUNNER grade"]
     elif score >= 48:
         label = LABEL_WATCH
         conf = min(conf, 52)
         risk = "very_high"
         why = why + ["Large runner watch — mixed signals"]
+        if not hk:
+            conf = min(conf, 48)
     else:
         return {
             "eligible": False,

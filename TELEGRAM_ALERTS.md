@@ -46,7 +46,12 @@ TELEGRAM_CRON_SECRET=another-long-random-string
    - **Schedule:** every **2–3 minutes**
    - Method: GET
 
-Each tick wakes the app, scans moons/snipes/heat, and Telegrams new picks. Expect cold starts (~30–60s) after sleep — not as fast as Starter, but works with the PC off.
+**Auth rules (P0):**
+- Query `?key=` accepts **only** `TELEGRAM_CRON_SECRET` (never `ADMIN_API_KEY`).
+- Prefer header `X-Cron-Secret` or `X-Admin-Key` when the cron tool supports headers.
+- Production / bot wired: force endpoints **fail closed** without a valid secret.
+
+Each tick wakes the app, scans moons/snipes/heat/grad, and Telegrams new picks. Expect cold starts (~30–60s) after sleep — not as fast as Starter, but works with the PC off.
 
 **Never** put tokens in GitHub. Only Render dashboard / cron URL (cron URL should not be public).
 

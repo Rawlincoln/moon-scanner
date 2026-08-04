@@ -192,21 +192,23 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
                 + (" · SOLD" if dev.get("creator_sold") else "")
             ]
 
-    why_line = ""
-    if why:
-        why_line = "\n• " + "\n• ".join(str(w)[:80] for w in why[:3])
-
-    title = f"{_emoji(kind, label)} <b>{label}</b> ${sym}"
+    title = f"{_emoji(kind, label)} <b>{_esc(label)}</b> ${_esc(sym)}"
     if name:
         title += f" <i>({_esc(name)[:40]})</i>"
 
+    # Escape why lines (token metadata is attacker-influenced)
+    if why:
+        why_line = "\n• " + "\n• ".join(_esc(str(w)[:80]) for w in why[:3])
+    else:
+        why_line = ""
+
     body = (
         f"{title}\n"
-        f"{kind.upper()} · {mcap} · age {age_s}"
+        f"{_esc(kind.upper())} · {mcap} · age {age_s}"
         + (f" · score {score}" if score is not None else "")
         + why_line
         + (f"\n<a href=\"{padre}\">Padre</a> · <a href=\"{pump}\">Pump</a>" if mint else "")
-        + (f"\n<code>{mint}</code>" if mint else "")
+        + (f"\n<code>{_esc(mint)}</code>" if mint else "")
     )
     return body
 
