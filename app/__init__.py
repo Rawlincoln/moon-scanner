@@ -30,6 +30,7 @@ from routes.snipes import router as snipes_router
 from routes.trenches import router as trenches_router
 from routes.journal import router as journal_router
 from routes.money import router as money_router
+from routes.lab import router as lab_router
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -56,7 +57,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*", "X-Admin-Key"],
     )
 
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(alerts_router)
     app.include_router(journal_router)
     app.include_router(money_router)
+    app.include_router(lab_router)
     app.include_router(realtime_router)
     app.include_router(analyze_router)
     app.include_router(trenches_router)
