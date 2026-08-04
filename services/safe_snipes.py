@@ -257,6 +257,25 @@ def evaluate_snipe(token: dict[str, Any]) -> dict[str, Any]:
         score += 10
         why.append(social.get("summary") or "Narrative edge bonus")
 
+    # Unique ticker = mild snipe signal; reused copycat = demote
+    try:
+        from services.ticker_registry import attach_ticker_uniqueness
+
+        tu = token.get("tickerUniqueness")
+        if not isinstance(tu, dict):
+            tu = attach_ticker_uniqueness(token, record=True)
+        if tu.get("unique"):
+            score += 8
+            why.append(tu.get("summary") or "Unique ticker")
+        elif int(tu.get("prior_mints") or 0) >= 2:
+            score -= 8
+            why.append(tu.get("summary") or "Reused ticker")
+        elif tu.get("is_hot_meta") and int(tu.get("prior_mints") or 0) >= 1:
+            score -= 6
+            why.append("Hot ticker reuse — copycat risk")
+    except Exception:
+        pass
+
     pc = token.get("priceChange") or (token.get("market") or {}).get("priceChange") or {}
     m5 = _f(pc.get("m5"))
     if 2 <= m5 <= 40:

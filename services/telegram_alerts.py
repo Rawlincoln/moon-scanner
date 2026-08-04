@@ -282,6 +282,35 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
     if isinstance(dev, dict) and (TELEGRAM_MONEY_MODE or kind in ("moon", "snipe")):
         dev_lines = format_dev_telegram(dev)
 
+    ticker_lines = ""
+    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe"):
+        try:
+            from services.ticker_registry import attach_ticker_uniqueness
+
+            tu = t.get("tickerUniqueness")
+            if not isinstance(tu, dict):
+                tu = attach_ticker_uniqueness(t, record=True)
+            st = tu.get("status") or ""
+            tsym = _esc(tu.get("symbol") or sym)
+            if tu.get("unique"):
+                ticker_lines = (
+                    f"\n🏷 <b>TICKER</b> unique ${tsym} — fresh brand signal"
+                )
+            elif st in ("reused", "heavily_reused") or (
+                tu.get("is_hot_meta") and int(tu.get("prior_mints") or 0) >= 1
+            ):
+                ticker_lines = (
+                    f"\n🏷 <b>TICKER</b> reused ${tsym} "
+                    f"×{int(tu.get('prior_mints') or 0)}+ mints — copycat risk"
+                )
+            elif tu.get("is_hot_meta"):
+                ticker_lines = (
+                    f"\n🏷 <b>TICKER</b> hot meta ${tsym} "
+                    "— not unique (need real edge)"
+                )
+        except Exception:
+            ticker_lines = ""
+
     body = (
         f"{title}\n"
         f"{_esc(kind.upper())} · {mcap} · age {age_s}"
@@ -290,6 +319,7 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
         + plan_lines
         + lab_lines
         + dev_lines
+        + ticker_lines
         + (f"\n<a href=\"{padre}\">Padre</a> · <a href=\"{pump}\">Pump</a>" if mint else "")
         + (
             f" · <a href=\"https://moon-scanner-9tlz.onrender.com/lab\">Lab</a>"
@@ -421,13 +451,23 @@ async def notify_new_picks(
                 mig = -int(d.get("tokens_migrated") or 0)
             except Exception:
                 proven, moons, mig = 1, 0, 0
+            try:
+                from services.ticker_registry import attach_ticker_uniqueness
+
+                tu = x.get("tickerUniqueness")
+                if not isinstance(tu, dict):
+                    tu = attach_ticker_uniqueness(x, record=False)
+                uniq = 0 if tu.get("unique") else 1
+                reused_n = int(tu.get("prior_mints") or 0)
+            except Exception:
+                uniq, reused_n = 1, 0
             score = -int(
                 x.get("moon_score")
                 or x.get("snipe_score")
                 or (x.get("moon") or {}).get("moon_score")
                 or 0
             )
-            return (lab_p, proven, moons, mig, score)
+            return (lab_p, proven, moons, mig, uniq, reused_n, score)
 
         ranked.sort(key=_rank_key)
 

@@ -544,6 +544,24 @@ def _pillar_safety(token: dict[str, Any]) -> tuple[int, list[str]]:
             notes.append(f"{dev.get('prior_moons')} prior moon-class run(s)")
     except Exception:
         pass
+    # Unique ticker = mild positive; reused copycat = demote
+    try:
+        from services.ticker_registry import attach_ticker_uniqueness
+
+        tu = token.get("tickerUniqueness")
+        if not isinstance(tu, dict):
+            tu = attach_ticker_uniqueness(token, record=False)
+        if tu.get("unique"):
+            score = min(100, score + 8)
+            notes.append(tu.get("summary") or "Unique ticker")
+        elif tu.get("status") in ("reused", "heavily_reused", "reused_hot"):
+            score = max(0, score - 10)
+            notes.append(tu.get("summary") or "Reused ticker")
+        elif tu.get("is_hot_meta") and int(tu.get("prior_mints") or 0) >= 1:
+            score = max(0, score - 8)
+            notes.append(tu.get("summary") or "Hot ticker reuse")
+    except Exception:
+        pass
     return max(0, min(100, score)), notes
 
 
@@ -574,6 +592,15 @@ def moon_score(token: dict[str, Any]) -> int:
         db = dev_score_boost(token)
         if db:
             composite = min(100, composite + db)
+    except Exception:
+        pass
+    # Unique brand ticker mild boost; reused demote
+    try:
+        from services.ticker_registry import ticker_score_boost
+
+        tb = ticker_score_boost(token)
+        if tb:
+            composite = max(0, min(100, composite + tb))
     except Exception:
         pass
     return max(0, min(100, int(round(composite))))

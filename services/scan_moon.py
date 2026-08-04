@@ -126,6 +126,12 @@ def moon_card_from_coin(coin: dict, *, source: str = "pump.fun") -> dict[str, An
         "padre_url": f"{PADRE_TRADE_URL}/trade/solana/{mint}",
         "source": source,
     }
+    try:
+        from services.ticker_registry import attach_ticker_uniqueness
+
+        attach_ticker_uniqueness(card, record=True)
+    except Exception:
+        pass
     # Structural only here — full reject_reason (narrative/edge) after enrich
     # so near-misses and multi-source discovery can surface filtered charts.
     if avoid.get("hard") or avoid.get("hard_avoid"):
@@ -313,6 +319,15 @@ def rough_priority(card: dict[str, Any]) -> float:
             if not isinstance(card.get("devRisk"), dict):
                 attach_dev_risk(card)
             boost += dev_priority_boost(card)
+    except Exception:
+        pass
+    # Prefer unique tickers; deprioritize heavily reused symbols
+    try:
+        from services.ticker_registry import attach_ticker_uniqueness, ticker_priority_boost
+
+        if not isinstance(card.get("tickerUniqueness"), dict):
+            attach_ticker_uniqueness(card, record=True)
+        boost += ticker_priority_boost(card)
     except Exception:
         pass
     return (
