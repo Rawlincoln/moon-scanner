@@ -154,7 +154,7 @@ function render(tokens, counts = {}, nearMisses = [], extra = {}) {
   if (!tokens.length) {
     list.innerHTML = `<div class="empty">
       <strong>No graduated runners right now</strong>
-      <p>Looking for ≥~$80k post-migration / large structure. Empty is normal on quiet days.</p>
+      <p>Looking for post-curve $50k–$900k with organic books. Multi-million and sniper farms are hidden.</p>
       <p class="muted">Scanned ${counts.candidates_raw ?? "—"} · band ${counts.band_hits ?? "—"} · rejected ${counts.rejected ?? "—"}</p>
       ${rejectBreakdownHtml(extra.reject_breakdown)}
       ${nearMissHtml(nearMisses)}

@@ -1,8 +1,7 @@
-"""Graduated / large runners — post-migration multi-million charts.
+"""Graduated early runners — post-curve, under $1M, organic books only.
 
-Moons / Heat / Snipes intentionally skip graduated coins. This lane is for
-tokens that already left the curve (or sit well above graduation mcap) and
-may still have tradeable structure: runners near ATH or dips with life.
+Not multi-million mega charts. Focus: just-graduated / early post-mig
+with cleaner distribution (low bundle, non-critical snipers, holders known).
 """
 
 from __future__ import annotations
@@ -16,22 +15,22 @@ from services.bundle_sniper import analyze_bundle_and_snipers
 from services.runner_radar import extract_ath_mcap, extract_mcap_usd, is_crashed_runner
 from services.social_signals import analyze_social_narrative
 
-# Post early-entry / early-mega universe
-GRAD_MCAP_MIN = 50_000.0  # catch right after heat breakout / flash grad
-GRAD_MCAP_MAX = 150_000_000.0  # $150M cap
-# Prefer true graduates or near/post-grad structure
-MIN_AGE_MIN = 30.0  # default for older large charts
-FLASH_GRAD_MIN_AGE = 5.0  # just-graduated mega can appear earlier
-FLASH_GRAD_MAX_AGE = 12 * 60.0  # first 12h after launch treated as "early mega"
-MAX_AGE_MIN = 14 * 24 * 60.0  # 14 days
-ATH_DEAD = 0.18  # <18% ATH = dead dump
-ATH_DIP_LOW = 0.25  # allow deeper dip for early mega
-ATH_DIP_HIGH = 0.72
-ATH_RUNNER = 0.70  # ≥70% ATH = still "running" structure
+# Under $1M only — no multi-million graduated spam
+GRAD_MCAP_MIN = 50_000.0
+GRAD_MCAP_MAX = 900_000.0  # hard cap under $1M
+MAX_BUNDLED_PCT = 8.0  # organic book
+MAX_BUNDLED_PCT_EARLY = 10.0  # slightly looser first hours
+MIN_AGE_MIN = 20.0
+FLASH_GRAD_MIN_AGE = 5.0
+FLASH_GRAD_MAX_AGE = 12 * 60.0
+MAX_AGE_MIN = 7 * 24 * 60.0  # 7 days
+ATH_DEAD = 0.20
+ATH_DIP_LOW = 0.28
+ATH_RUNNER = 0.72
 
-LABEL_RUNNER = "RUNNER"  # near ATH graduated climber
-LABEL_DIP = "DIP"  # pullback with remaining structure
-LABEL_WATCH = "WATCH"  # large but mixed signals
+LABEL_RUNNER = "RUNNER"
+LABEL_DIP = "DIP"
+LABEL_WATCH = "WATCH"
 LABEL_SKIP = "SKIP"
 
 
@@ -86,8 +85,10 @@ def graduated_reject_reason(token: dict[str, Any]) -> str | None:
 
     if mcap > 0 and mcap < GRAD_MCAP_MIN:
         return f"too small ${mcap:,.0f} for graduated lane (need ≥${GRAD_MCAP_MIN:,.0f})"
+    if mcap >= 1_000_000:
+        return f"multi-million ${mcap:,.0f} — not organic early-grad lane"
     if mcap > GRAD_MCAP_MAX:
-        return f"too large ${mcap:,.0f}"
+        return f"too large ${mcap:,.0f} (cap under $1M)"
 
     graduated = _is_graduated(token)
     early_mega = graduated and age <= FLASH_GRAD_MAX_AGE
@@ -100,8 +101,7 @@ def graduated_reject_reason(token: dict[str, Any]) -> str | None:
     if not graduated and mcap < GRADUATION_MCAP_USD:
         return "still on early curve — use Moons/Heat"
 
-    # Dead dumps from ATH (softer floor for early mega still forming highs)
-    dead = ATH_DEAD if not early_mega else 0.15
+    dead = ATH_DEAD if not early_mega else 0.18
     if ath >= GRAD_MCAP_MIN and mcap > 0 and mcap < ath * dead:
         return f"dead dump −{(1 - mcap / ath) * 100:.0f}% from ATH"
 
@@ -114,7 +114,6 @@ def graduated_reject_reason(token: dict[str, Any]) -> str | None:
             or {}
         )
         flags = set(avoid.get("flags") or [])
-        # Hard capital threats only
         block = {
             "blocklist",
             "banned",
@@ -124,6 +123,11 @@ def graduated_reject_reason(token: dict[str, Any]) -> str | None:
             "freeze_authority",
             "adult_bait",
             "spam_deploy_tool",
+            "bundled",
+            "snipers",
+            "insiders",
+            "serial_creator",
+            "dev_out_green_chart",
         }
         if flags & block or not flags:
             return hard_why or "hard avoid"
@@ -134,40 +138,55 @@ def graduated_reject_reason(token: dict[str, Any]) -> str | None:
     if safety.get("error"):
         return "safety error / incomplete audit"
 
-    # Extreme one-way crash candles (older charts only — early mega is volatile)
+    # Organic graph: holders required after enrich
+    if "enrich_ok" in token and token.get("enrich_ok") is True and not holders_known(token):
+        return "holders unknown — not organic book"
+
     pc = token.get("priceChange") or (token.get("market") or {}).get("priceChange") or {}
     age = _f(token.get("age_minutes"))
     early_mega = _is_graduated(token) and age <= FLASH_GRAD_MAX_AGE
-    if not early_mega:
-        if _f(pc.get("h1")) <= -55 or _f(pc.get("h6")) <= -70:
-            return "violent dump candle"
-    else:
-        # Flash mega: only kill on extreme h1 collapse
-        if _f(pc.get("h1")) <= -65:
-            return "violent dump candle"
+    if _f(pc.get("h1")) <= -55 or (_f(pc.get("h6")) <= -65 and not early_mega):
+        return "violent dump candle"
 
     crashed, why = is_crashed_runner(token)
-    # For graduated, only honor hard crash if also dead from ATH
     if crashed and ath > 0 and mcap < ath * ATH_DIP_LOW:
         return why or "crashed runner"
 
-    # Bundle wall: hard only when severe; early mega demotes in score instead
+    # Organic book wall — no sniper/bundle farms
     bs = token.get("bundleSniper")
+    if not isinstance(bs, dict) and (safety.get("top_holders") or token.get("enrich_ok")):
+        try:
+            bs = analyze_bundle_and_snipers(
+                safety,
+                token.get("pumpfun") or {},
+                token.get("market") or {},
+                age_minutes=age or None,
+                mcap_usd=mcap or None,
+            )
+            token["bundleSniper"] = bs
+        except Exception:
+            bs = {}
     if isinstance(bs, dict):
         overall = str(bs.get("overall") or "").lower()
         sn = (bs.get("snipers") or {}) if isinstance(bs.get("snipers"), dict) else {}
+        sn_lv = str(sn.get("risk_level") or "").lower()
         bun = _f((bs.get("bundle") or {}).get("bundled_pct"))
         if bun <= 0:
             bun = _f(bs.get("bundled_pct"))
-        severe = overall == "critical" and (bun >= 15 or sn.get("risk_level") == "critical")
-        if severe and not early_mega:
-            return bs.get("summary") or "bundle/sniper hard reject"
-        if severe and early_mega and bun >= 25:
-            return bs.get("summary") or "extreme sniper bag on flash grad"
-        # else: allow — score demotion below
-        token["_grad_bundle_soft"] = bool(
-            bs.get("hard_reject") or overall in ("critical", "high")
-        )
+        bun_cap = MAX_BUNDLED_PCT_EARLY if early_mega else MAX_BUNDLED_PCT
+        if bs.get("hard_reject") or overall in ("critical", "high"):
+            return bs.get("summary") or "bundle/sniper farm — not organic"
+        if sn_lv in ("critical", "high"):
+            return f"sniper {sn_lv} — not organic graph"
+        if bun > bun_cap:
+            return f"bundled {bun:.0f}% > {bun_cap:.0f}% — not organic"
+
+    # One-way wash / dead tx not organic
+    tx = token.get("txActivity") or {}
+    if tx.get("zone") in ("wash", "one_way") and _i(tx.get("total_m5") or tx.get("total")) >= 12:
+        return "one-way wash flow — not organic"
+    if tx.get("tilt") == "DOWN" and _i(tx.get("total_m5") or tx.get("total")) >= 15:
+        return "tx tilt DOWN — sellers in control"
 
     return None
 
@@ -212,18 +231,18 @@ def _score_graduated(token: dict[str, Any]) -> tuple[int, list[str], dict[str, A
         score += 4
         why.append("Large mcap near graduation size")
 
-    # Size bands
-    if 100_000 <= mcap <= 5_000_000:
-        score += 12
-        why.append(f"Large-runner band ${mcap:,.0f}")
-    elif 5_000_000 < mcap <= 50_000_000:
+    # Size bands (under $1M only)
+    if 50_000 <= mcap <= 200_000:
+        score += 14
+        why.append(f"Early-grad band ${mcap:,.0f}")
+    elif 200_000 < mcap <= 500_000:
         score += 10
-        why.append(f"Mega size ${mcap:,.0f}")
-    elif mcap > 50_000_000:
+        why.append(f"Mid early-grad ${mcap:,.0f}")
+    elif 500_000 < mcap < 1_000_000:
         score += 6
-        why.append(f"Blue-chip size ${mcap:,.0f}")
+        why.append(f"Upper early-grad ${mcap:,.0f}")
     else:
-        score += 4
+        score += 2
 
     # ATH structure
     if ath_ret is not None:
@@ -305,15 +324,21 @@ def _score_graduated(token: dict[str, Any]) -> tuple[int, list[str], dict[str, A
     # Early mega flash (just graduated, still young)
     if graduated and age <= FLASH_GRAD_MAX_AGE:
         score += 8
-        why.append(f"Early mega window ({age:.0f}m old)")
+        why.append(f"Early post-grad window ({age:.0f}m old)")
         if age <= 90:
             score += 4
-            why.append("Fresh post-grad — high velocity class")
+            why.append("Fresh post-grad")
 
-    if token.get("_grad_bundle_soft"):
-        score -= 14
-        why.append("Bundle/sniper risk — demoted (not auto-hidden)")
-        meta["bundle_soft"] = True
+    # Organic graph bonuses
+    bs = token.get("bundleSniper") or {}
+    bun = _f((bs.get("bundle") or {}).get("bundled_pct") or bs.get("bundled_pct"))
+    sn_lv = str(((bs.get("snipers") or {}) if isinstance(bs, dict) else {}).get("risk_level") or "").lower()
+    if bun > 0 and bun <= 5 and sn_lv in ("", "low", "clean", "unknown", "medium"):
+        score += 8
+        why.append(f"Organic book · bundled {bun:.0f}%")
+    if tx.get("tilt") == "UP" and tx.get("zone") not in ("wash", "one_way"):
+        score += 4
+        why.append("Two-way/up flow")
 
     score = max(0, min(99, score))
     return score, why, meta
@@ -385,10 +410,10 @@ def evaluate_graduated(token: dict[str, Any]) -> dict[str, Any]:
         "invalidation_usd": round(mcap * 0.75, 0) if mcap else None,
         "ath_usd": round(ath, 0) if ath else None,
         "size_advice": (
-            "GRADUATED / LARGE lane — not early heat. Size smaller than moons. "
-            "Prefer RUNNER near ATH or DIP with rising h1/tx. Cut if new local low."
+            "EARLY GRAD ≤$900k, organic book only (low bundle / non-high snipers). "
+            "No multi-million charts. Prefer RUNNER near ATH or DIP with up-flow."
         ),
-        "rule": "Post-migration / large mcap only. Different game than $6k snipes.",
+        "rule": "Post-curve under $1M + organic distribution. Not CATE/TikTok mega.",
     }
 
     return {

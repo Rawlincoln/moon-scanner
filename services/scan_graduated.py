@@ -279,13 +279,13 @@ async def scan_graduated_runners(
                 "ath_dip_frac": [0.28, 0.72],
             },
             "rule": (
-                "GRADUATED / LARGE RUNNERS — post-migration or ≥~$80k mcap. "
-                "RUNNER = near ATH structure; DIP = pullback with life; "
-                "WATCH = large but mixed. Not early Heat/Snipes. Size carefully."
+                "EARLY GRAD — post-curve $50k–$900k only (no multi-million). "
+                "Organic book required: holders known, bundled ≤8–10%, snipers not high/critical. "
+                "RUNNER near ATH · DIP pullback · not farm graphs."
             ),
             "warning": (
-                "These already ran hard. Different risk than $6k entries. "
-                "Many continue dumping after graduation."
+                "Under $1M graduated only. Bundle/sniper farms filtered. "
+                "Still not Moons-safe — size carefully."
             ),
         }
         _cache["data"] = payload

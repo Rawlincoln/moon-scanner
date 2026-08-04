@@ -85,13 +85,23 @@ def test_graduated_missing_enrich_ok_blocks():
 def test_graduated_safety_error_blocks():
     t = {
         "tokenAddress": "GradErrMint11111111111111111111111111",
-        "mcap_usd": 2_000_000,
-        "ath_mcap": 2_200_000,
-        "age_minutes": 400,
+        "mcap_usd": 180_000,
+        "ath_mcap": 200_000,
+        "age_minutes": 90,
         "complete": True,
         "enrich_ok": True,
-        "safety": {"error": True, "passed": False},
+        "safety": {
+            "error": True,
+            "passed": False,
+            "top_holders": [{"pct": 2}, {"pct": 1.5}],
+        },
         "pumpfun": {"complete": True},
+        "bundleSniper": {
+            "hard_reject": False,
+            "overall": "low",
+            "bundle": {"bundled_pct": 3.0},
+            "snipers": {"risk_level": "low"},
+        },
     }
     r = graduated_reject_reason(t)
     assert r and ("safety" in r.lower() or "error" in r.lower())

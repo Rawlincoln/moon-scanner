@@ -1,4 +1,4 @@
-"""Graduated / large runner filters."""
+"""Graduated early runners — under $1M, organic books."""
 
 from services.graduated_runners import (
     LABEL_DIP,
@@ -12,9 +12,9 @@ from services.graduated_runners import (
 def _base(**kw):
     t = {
         "tokenAddress": "GradMint1111111111111111111111111111111",
-        "mcap_usd": 2_500_000,
-        "ath_mcap": 3_000_000,
-        "age_minutes": 400,
+        "mcap_usd": 180_000,
+        "ath_mcap": 200_000,
+        "age_minutes": 90,
         "bonding_progress": 100,
         "complete": True,
         "enrich_ok": True,
@@ -22,14 +22,21 @@ def _base(**kw):
         "pumpfun": {
             "complete": True,
             "reply_count": 40,
-            "usd_market_cap": 2_500_000,
-            "ath_market_cap": 3_000_000,
+            "usd_market_cap": 180_000,
+            "ath_market_cap": 200_000,
             "twitter": "https://x.com/proj",
         },
         "safety": {
             "passed": True,
             "on_bonding_curve": False,
             "top_holders": [{"pct": 2}, {"pct": 1.5}],
+        },
+        "bundleSniper": {
+            "hard_reject": False,
+            "overall": "low",
+            "holders_known": True,
+            "bundle": {"bundled_pct": 3.0, "risk_level": "low"},
+            "snipers": {"risk_level": "low", "max_wallet_pct": 4},
         },
         "avoid": {"avoid": False},
     }
@@ -42,61 +49,71 @@ def test_early_small_rejected():
     assert r
 
 
-def test_runner_near_ath():
-    t = _base(mcap_usd=2_800_000, ath_mcap=3_000_000)
+def test_millions_rejected():
+    r = graduated_reject_reason(
+        _base(mcap_usd=5_000_000, ath_mcap=6_000_000, age_minutes=400)
+    )
+    assert r and ("million" in r.lower() or "large" in r.lower() or "1m" in r.lower())
+
+
+def test_runner_near_ath_under_1m():
+    t = _base(mcap_usd=250_000, ath_mcap=280_000)
     assert graduated_reject_reason(t) is None
     ev = evaluate_graduated(t)
     assert ev["eligible"]
     assert ev["label"] in (LABEL_RUNNER, LABEL_DIP, LABEL_WATCH)
 
 
-def test_dip_zone():
-    t = _base(mcap_usd=1_200_000, ath_mcap=3_000_000)  # 40% ATH
+def test_dip_zone_under_1m():
+    t = _base(mcap_usd=120_000, ath_mcap=300_000)  # 40% ATH
     assert graduated_reject_reason(t) is None
     ev = evaluate_graduated(t)
     assert ev["eligible"]
-    # typically DIP
     assert ev["label"] in (LABEL_DIP, LABEL_WATCH, LABEL_RUNNER)
 
 
 def test_dead_dump_blocked():
-    t = _base(mcap_usd=200_000, ath_mcap=3_000_000)  # ~6.7% ATH
+    t = _base(mcap_usd=55_000, ath_mcap=400_000)  # ~14% ATH
     r = graduated_reject_reason(t)
     assert r and "dump" in r.lower()
 
 
-def test_cate_like_profile():
-    """CATE-like: multi-M graduated, ~36% ATH — should be DIP/WATCH not skip."""
+def test_sniper_farm_blocked():
     t = _base(
-        tokenAddress="Ai66LHZG9MCzg1WKdawwqduVAXpNDUuV8M3uyq5ppump",
-        mcap_usd=31_000_000,
-        ath_mcap=87_000_000,
-        age_minutes=12_000,
-        complete=True,
-        priceChange={"m5": -7, "h1": -15, "h6": 11, "h24": -33},
+        bundleSniper={
+            "hard_reject": True,
+            "overall": "critical",
+            "summary": "sniper critical",
+            "bundle": {"bundled_pct": 18.0},
+            "snipers": {"risk_level": "critical"},
+        }
+    )
+    r = graduated_reject_reason(t)
+    assert r and ("sniper" in r.lower() or "bundle" in r.lower() or "organic" in r.lower())
+
+
+def test_organic_low_bundle_ok():
+    t = _base(
+        mcap_usd=150_000,
+        ath_mcap=160_000,
+        bundleSniper={
+            "hard_reject": False,
+            "overall": "low",
+            "bundle": {"bundled_pct": 4.0},
+            "snipers": {"risk_level": "low"},
+        },
     )
     assert graduated_reject_reason(t) is None
     ev = evaluate_graduated(t)
     assert ev["eligible"] is True
-    assert ev["label"] in (LABEL_DIP, LABEL_WATCH, LABEL_RUNNER)
 
 
-def test_flash_tiktok_like_early_mega():
-    """Just-graduated mega ~$28M in <1h should be eligible RUNNER/DIP."""
+def test_tiktok_millions_blocked():
     t = _base(
         mcap_usd=28_000_000,
         ath_mcap=28_100_000,
         age_minutes=30,
         complete=True,
-        priceChange={"m5": 10, "h1": 80, "h6": 200, "h24": 500},
-        safety={
-            "passed": True,
-            "on_bonding_curve": False,
-            "top_holders": [{"pct": 2}],
-            "error": False,
-        },
-        enrich_ok=True,
     )
-    assert graduated_reject_reason(t) is None
-    ev = evaluate_graduated(t)
-    assert ev["eligible"] is True
+    r = graduated_reject_reason(t)
+    assert r is not None

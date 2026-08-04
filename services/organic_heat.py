@@ -36,7 +36,7 @@ ATH_HARD_DUMP = 0.50  # −50%
 ATH_SOFT_FLOOR = 0.65  # −35% still visible as RISKY for breakouts
 # Just-graduated flash still scannable on heat for a short window
 FLASH_GRAD_MAX_AGE_MIN = 120.0
-FLASH_GRAD_MAX_MCAP = 120_000.0
+FLASH_GRAD_MAX_MCAP = 200_000.0  # under $1M — no multi-million flash on Heat
 
 # Soft packaging may demote score but packaging-only hard_avoid from status links
 # can still be demoted rather than hidden. True capital hard_avoid always blocks.
