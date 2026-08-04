@@ -311,6 +311,18 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
         except Exception:
             ticker_lines = ""
 
+    flow_lines = ""
+    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe"):
+        try:
+            from services.fee_flow import attach_fee_flow, format_fee_telegram
+
+            ff = t.get("feeFlow")
+            if not isinstance(ff, dict):
+                ff = attach_fee_flow(t)
+            flow_lines = format_fee_telegram(ff)
+        except Exception:
+            flow_lines = ""
+
     body = (
         f"{title}\n"
         f"{_esc(kind.upper())} · {mcap} · age {age_s}"
@@ -320,6 +332,7 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
         + lab_lines
         + dev_lines
         + ticker_lines
+        + flow_lines
         + (f"\n<a href=\"{padre}\">Padre</a> · <a href=\"{pump}\">Pump</a>" if mint else "")
         + (
             f" · <a href=\"https://moon-scanner-9tlz.onrender.com/lab\">Lab</a>"
@@ -524,6 +537,21 @@ async def notify_new_picks(
                         continue
             except Exception as exc:
                 logger.debug("dev risk failed: %s", exc)
+
+            # Flash fee / wash volume gate
+            try:
+                from services.fee_flow import attach_fee_flow, fee_flow_gate
+
+                ff = attach_fee_flow(t)
+                t["feeFlow"] = ff
+                if TELEGRAM_MONEY_MODE:
+                    ok_f, why_f = fee_flow_gate(ff)
+                    if not ok_f:
+                        logger.info("skip %s fee flow: %s", mint[:8], why_f)
+                        _last_cycle["fee_skip"] = why_f
+                        continue
+            except Exception as exc:
+                logger.debug("fee flow failed: %s", exc)
 
             # Archive snapshot into Lab (non-blocking best-effort)
             if MONEY_AUTO_LAB and cockpit:

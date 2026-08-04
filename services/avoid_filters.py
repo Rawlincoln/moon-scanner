@@ -80,6 +80,8 @@ HARD_AVOID_FLAGS: frozenset[str] = frozenset(
         "insiders",
         "flash_holders",  # e.g. 245 holders @ 2m — concealed sniper/bundle book
         "holder_velocity",
+        "flash_fees",  # huge volume/fees too young — sniper war not organic
+        "wash_fees",
     }
 )
 
@@ -352,6 +354,37 @@ def analyze_avoid_flags(
         flags.append("flash_holders")
         flags.append("holder_velocity")
         reasons.append(flash_why)
+
+    # --- 3c. Flash fees / volume quality (sniper wars pay more than quiet winners) ---
+    try:
+        from services.fee_flow import analyze_fee_flow
+
+        ff = analyze_fee_flow(
+            {
+                "mcap_usd": _safe_float(
+                    pump.get("usd_market_cap")
+                    or (pair.get("marketCap") if pair else 0)
+                ),
+                "age_minutes": age_min,
+                "market": pair
+                or {
+                    "volume": pump.get("volume"),
+                    "txns": pump.get("txns"),
+                    "marketCap": pump.get("usd_market_cap"),
+                },
+                "pumpfun": {**pump, "age_minutes": age_min},
+                "txActivity": safety.get("txActivity"),
+            }
+        )
+        if ff.get("hard_reject") or "flash_fees" in (ff.get("flags") or []):
+            flags.append("flash_fees")
+            reasons.append(ff.get("summary") or "Flash fee/volume war")
+        if "wash_fees" in (ff.get("flags") or []) and int(ff.get("buys_m5") or 0) >= 40:
+            flags.append("wash_fees")
+            if ff.get("summary") and ff["summary"] not in reasons:
+                reasons.append(ff["summary"])
+    except Exception:
+        pass
 
     ghost_holders = len(meaningful) == 0 and holders < 80
     ghost_community = replies == 0 and not has_real_social and len(desc) < 8

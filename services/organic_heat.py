@@ -244,6 +244,17 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
     except Exception:
         pass
 
+    # Flash fee/volume wars — snipers paying, not organic heat
+    try:
+        from services.fee_flow import attach_fee_flow, fee_flow_gate
+
+        ff = attach_fee_flow(token)
+        ok_f, why_f = fee_flow_gate(ff)
+        if not ok_f:
+            return why_f or "flash fee/volume war"
+    except Exception:
+        pass
+
     crashed, why = is_crashed_runner(token)
     if crashed:
         return why or "crashed"

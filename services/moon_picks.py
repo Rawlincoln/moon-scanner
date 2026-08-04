@@ -306,6 +306,19 @@ def reject_reason(token: dict[str, Any]) -> str | None:
     if tx.get("tilt") == "DOWN" and _i(tx.get("total_m5") or tx.get("total")) >= 10:
         return "tx tilt DOWN — sellers in control"
 
+    # Flash fee/volume wars (snipers pay fees; not organic moons)
+    try:
+        from services.fee_flow import attach_fee_flow, fee_flow_gate
+
+        ff = token.get("feeFlow")
+        if not isinstance(ff, dict):
+            ff = attach_fee_flow(token)
+        ok_f, why_f = fee_flow_gate(ff)
+        if not ok_f:
+            return why_f or "flash fee/volume war"
+    except Exception:
+        pass
+
     # Bundle / sniper hard reject (RugCheck holders when present)
     bs = token.get("bundleSniper") or token.get("bundle_sniper")
     if not isinstance(bs, dict):
@@ -601,6 +614,15 @@ def moon_score(token: dict[str, Any]) -> int:
         tb = ticker_score_boost(token)
         if tb:
             composite = max(0, min(100, composite + tb))
+    except Exception:
+        pass
+    # Organic fee/volume trail boost; flash/wash demote
+    try:
+        from services.fee_flow import fee_score_boost
+
+        fb = fee_score_boost(token)
+        if fb:
+            composite = max(0, min(100, composite + fb))
     except Exception:
         pass
     return max(0, min(100, int(round(composite))))

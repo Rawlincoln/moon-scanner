@@ -276,6 +276,26 @@ def evaluate_snipe(token: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         pass
 
+    # Organic fee trail mild boost; flash/wash demote
+    try:
+        from services.fee_flow import attach_fee_flow, fee_flow_gate
+
+        ff = token.get("feeFlow")
+        if not isinstance(ff, dict):
+            ff = attach_fee_flow(token)
+        ok_f, why_f = fee_flow_gate(ff)
+        if not ok_f:
+            score -= 20
+            why.append(why_f or "Flash fee war")
+        elif ff.get("quality") == "organic":
+            score += 8
+            why.append(ff.get("summary") or "Organic fee/volume trail")
+        elif ff.get("quality") == "wash":
+            score -= 10
+            why.append("Wash fee trail")
+    except Exception:
+        pass
+
     pc = token.get("priceChange") or (token.get("market") or {}).get("priceChange") or {}
     m5 = _f(pc.get("m5"))
     if 2 <= m5 <= 40:
