@@ -407,7 +407,29 @@ async def notify_new_picks(
             if key in seen and now - seen[key] < TELEGRAM_ALERT_DEDUPE_SEC:
                 continue
             ranked.append(t)
-        ranked.sort(key=lambda x: pri.get(_label_of(feed_key, x), 9))
+        def _rank_key(x: dict[str, Any]) -> tuple:
+            lab_p = pri.get(_label_of(feed_key, x), 9)
+            # Prefer proven migrator / prior-moon devs first
+            try:
+                from services.dev_risk import attach_dev_risk
+
+                d = x.get("devRisk")
+                if not isinstance(d, dict):
+                    d = attach_dev_risk(x)
+                proven = 0 if d.get("proven_dev") else 1
+                moons = -int(d.get("prior_moons") or 0)
+                mig = -int(d.get("tokens_migrated") or 0)
+            except Exception:
+                proven, moons, mig = 1, 0, 0
+            score = -int(
+                x.get("moon_score")
+                or x.get("snipe_score")
+                or (x.get("moon") or {}).get("moon_score")
+                or 0
+            )
+            return (lab_p, proven, moons, mig, score)
+
+        ranked.sort(key=_rank_key)
 
         for t in ranked:
             if sent >= TELEGRAM_ALERT_MAX_PER_CYCLE:

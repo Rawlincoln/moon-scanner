@@ -529,6 +529,21 @@ def _pillar_safety(token: dict[str, Any]) -> tuple[int, list[str]]:
     if not soft_hit and not avoid.get("avoid") and not social.get("namejack_risk"):
         score += 12
         notes.append("Clean packaging")
+    # Proven deployer track record (migrations / prior moons)
+    try:
+        from services.dev_risk import attach_dev_risk
+
+        dev = token.get("devRisk") if isinstance(token.get("devRisk"), dict) else None
+        if not dev:
+            dev = attach_dev_risk(token)
+        if dev.get("proven_dev") and not dev.get("hard_reject"):
+            score = min(100, score + 12)
+            notes.append(dev.get("summary") or "Proven migrator/moon dev")
+        elif int(dev.get("prior_moons") or 0) >= 1 and not dev.get("hard_reject"):
+            score = min(100, score + 8)
+            notes.append(f"{dev.get('prior_moons')} prior moon-class run(s)")
+    except Exception:
+        pass
     return max(0, min(100, score)), notes
 
 
@@ -552,6 +567,15 @@ def moon_score(token: dict[str, Any]) -> int:
     social = _ensure_social(token)
     if social.get("influencer_tweet"):
         composite = min(100, composite + 8)
+    # Proven migrators / prior moons — soft boost (look for good dev records)
+    try:
+        from services.dev_risk import dev_score_boost
+
+        db = dev_score_boost(token)
+        if db:
+            composite = min(100, composite + db)
+    except Exception:
+        pass
     return max(0, min(100, int(round(composite))))
 
 

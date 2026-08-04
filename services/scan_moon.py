@@ -287,7 +287,7 @@ async def enrich_moon_card(
 
 
 def rough_priority(card: dict[str, Any]) -> float:
-    """Pre-rank before expensive dex enrich — prefer near-ATH + social + realtime."""
+    """Pre-rank before expensive dex enrich — prefer near-ATH + social + proven devs."""
     mcap = float(card.get("mcap_usd") or 0)
     ath = float(card.get("ath_mcap") or 0)
     bond = float(card.get("bonding_progress") or 0)
@@ -304,6 +304,16 @@ def rough_priority(card: dict[str, Any]) -> float:
         boost += 10
     elif edge >= 30:
         boost += 5
+    # Prefer creators with migrate/moon track records for enrich budget
+    try:
+        from services.dev_risk import attach_dev_risk, dev_priority_boost
+
+        if card.get("safety") or (card.get("pumpfun") or {}).get("creator"):
+            if not isinstance(card.get("devRisk"), dict):
+                attach_dev_risk(card)
+            boost += dev_priority_boost(card)
+    except Exception:
+        pass
     return (
         ret * 50
         + min(bond, 80) * 0.4

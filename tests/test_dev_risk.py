@@ -86,3 +86,42 @@ def test_format_dev_telegram():
     s = format_dev_telegram(d)
     assert "DEV" in s
     assert "launched" in s
+
+
+def test_proven_migrator_and_prior_moons():
+    rows = [
+        {
+            "mint": "moon1",
+            "migrated": True,
+            "ath_market_cap": 250_000,
+            "marketCap": 80_000,
+        },
+        {
+            "mint": "moon2",
+            "complete": True,
+            "ath_market_cap": 120_000,
+            "marketCap": 40_000,
+        },
+        {
+            "mint": "ok3",
+            "migrated": True,
+            "marketCap": 55_000,
+            "ath_market_cap": 70_000,
+        },
+    ]
+    d = analyze_creator_history(
+        {
+            "creator": "GoodDev1111111111111111111111111111111",
+            "creator_token_count": 3,
+            "creator_tokens": rows,
+            "creator_sold": False,
+        }
+    )
+    assert d["hard_reject"] is False
+    assert d["prior_moons"] >= 2
+    assert d["tokens_migrated"] >= 2
+    assert d["proven_dev"] is True
+    assert d["score_boost"] > 0
+    assert d["priority_boost"] > 0
+    s = format_dev_telegram(d)
+    assert "PROVEN" in s or "ELITE" in s or "prior_moons" in s
