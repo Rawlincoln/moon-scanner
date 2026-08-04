@@ -178,6 +178,23 @@ def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
 
     unresolved = covered < 5 or (mint_s == "n/a" and freeze_s == "n/a" and top1 is None)
 
+    # Flash holder velocity (facts for Lab)
+    age_m = result.get("age_minutes")
+    if age_m is None:
+        age_m = (result.get("pumpfun") or pf or {}).get("age_minutes")
+    try:
+        age_f = float(age_m) if age_m is not None else None
+    except (TypeError, ValueError):
+        age_f = None
+    holders_per_min = None
+    flash_holders = False
+    if holders and age_f is not None and age_f > 0:
+        holders_per_min = round(holders / max(age_f, 0.15), 1)
+        if (age_f <= 3 and holders >= 80) or (age_f <= 5 and holders >= 120):
+            flash_holders = True
+        elif age_f <= 12 and holders_per_min >= 35 and holders >= 50:
+            flash_holders = True
+
     return {
         "philosophy": "facts_with_evidence_no_verdict",
         "symbol": result.get("symbol") or pf.get("symbol") or market.get("symbol") or "?",
@@ -200,6 +217,9 @@ def extract_cockpit(result: dict[str, Any]) -> dict[str, Any]:
         "top10_pct": top10,
         "wallets_gt_1pct": wallets_gt_1pct,
         "holders_known": bool(top),
+        "age_minutes": round(age_f, 2) if age_f is not None else None,
+        "holders_per_min": holders_per_min,
+        "flash_holders": flash_holders,
         # Book (our extra, still facts)
         "bundled_pct": round(bun, 2) if bun is not None else None,
         "sniper_risk": sn_lv or "n/a",
@@ -332,11 +352,21 @@ def format_cockpit_telegram(cockpit: dict[str, Any]) -> str:
     bun_s = f"{bun}%" if bun is not None else "n/a"
     cov = cockpit.get("coverage_pct")
     cov_s = f"{cov}%" if cov is not None else "n/a"
+    flash = ""
+    if cockpit.get("flash_holders"):
+        hpm = cockpit.get("holders_per_min")
+        age = cockpit.get("age_minutes")
+        flash = (
+            f"\n⚠ <b>FLASH HOLDERS</b> {hold_s} in {age}m"
+            + (f" (~{hpm}/min)" if hpm is not None else "")
+            + " — snipers/bundle concealment"
+        )
     return (
         f"\n\n🔬 <b>LAB</b> (facts · not a buy call)\n"
         f"mint <b>{mint_s}</b> · freeze <b>{freeze_s}</b> · LP {lp}\n"
         f"liq {liq} · top1 {top1_s} · holders {hold_s}\n"
         f"bundled {bun_s} · coverage {cov_s}"
+        f"{flash}"
     )
 
 

@@ -22,6 +22,9 @@ Learned from real rugs:
     * ATH ~$25.6k in ~4m then −90% to ~$2.2k
     * status-link Twitter only, EMPTY description, 0 replies
     * polished website but no community — entry packaging
+  Bd1Y…pump — 2 minutes old + ~245 holders:
+    * impossible organic book that fast
+    * snipers hiding / bundled distribution concealed as "community"
 """
 
 from __future__ import annotations
@@ -75,8 +78,83 @@ HARD_AVOID_FLAGS: frozenset[str] = frozenset(
         "bundled",
         "snipers",
         "insiders",
+        "flash_holders",  # e.g. 245 holders @ 2m — concealed sniper/bundle book
+        "holder_velocity",
     }
 )
+
+
+def _coin_age_minutes(pump: dict[str, Any], safety: dict[str, Any] | None = None) -> float | None:
+    """Best-effort age in minutes from pump/safety card fields."""
+    for src in (pump, safety or {}):
+        if not isinstance(src, dict):
+            continue
+        for key in ("age_minutes", "age_min", "_age_minutes"):
+            if src.get(key) is not None:
+                try:
+                    a = float(src[key])
+                    if a >= 0:
+                        return a
+                except (TypeError, ValueError):
+                    pass
+        created = src.get("created_timestamp") or src.get("createdAt") or src.get("created_at")
+        if created is not None:
+            try:
+                ts = float(created)
+                if ts > 1e12:  # ms
+                    ts /= 1000.0
+                import time as _time
+
+                age = (_time.time() - ts) / 60.0
+                if age >= 0:
+                    return age
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
+def flash_holders_reason(
+    holders: int,
+    age_min: float | None,
+) -> str | None:
+    """Impossible organic holder count for age → snipers/bundle concealment.
+
+    Example: ~245 holders at ~2 minutes old.
+    """
+    if holders <= 0 or age_min is None or age_min < 0:
+        return None
+    # Cap age for velocity so very new coins use full strictness
+    age = max(float(age_min), 0.15)  # avoid div-by-zero; treat dust age as 9s
+    hpm = holders / age  # holders per minute
+
+    # Absolute age bands (user signal: 2m / 245 holders)
+    if age_min <= 3.0 and holders >= 80:
+        return (
+            f"Flash holders: {holders} wallets in {age_min:.1f}m "
+            f"(~{hpm:.0f}/min) — snipers/bundle concealment, not organic"
+        )
+    if age_min <= 5.0 and holders >= 120:
+        return (
+            f"Flash holders: {holders} in {age_min:.1f}m "
+            f"(~{hpm:.0f}/min) — impossible organic community"
+        )
+    if age_min <= 10.0 and holders >= 250:
+        return (
+            f"Flash holders: {holders} in {age_min:.1f}m "
+            f"(~{hpm:.0f}/min) — bot/sniper farm book"
+        )
+    if age_min <= 15.0 and holders >= 400:
+        return (
+            f"Flash holders: {holders} in {age_min:.1f}m "
+            f"(~{hpm:.0f}/min) — mass airdrop/sniper fill"
+        )
+    # Velocity even if absolute counts lower (e.g. 90 holders @ 1m)
+    if age_min <= 12.0 and hpm >= 35 and holders >= 50:
+        return (
+            f"Holder velocity ~{hpm:.0f}/min ({holders} in {age_min:.1f}m) "
+            "— concealed snipers/bots, not organic growth"
+        )
+    return None
 
 
 def is_hard_avoid(token_or_avoid: dict[str, Any] | None) -> tuple[bool, str | None]:
@@ -266,6 +344,14 @@ def analyze_avoid_flags(
         safety.get("on_bonding_curve")
         or (pump and not pump.get("complete", True))
     )
+
+    # --- 3b. Flash holders / impossible velocity (Bd1Y-class) ---
+    age_min = _coin_age_minutes(pump, safety)
+    flash_why = flash_holders_reason(holders, age_min)
+    if flash_why:
+        flags.append("flash_holders")
+        flags.append("holder_velocity")
+        reasons.append(flash_why)
 
     ghost_holders = len(meaningful) == 0 and holders < 80
     ghost_community = replies == 0 and not has_real_social and len(desc) < 8

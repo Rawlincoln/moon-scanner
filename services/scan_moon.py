@@ -87,7 +87,7 @@ def moon_card_from_coin(coin: dict, *, source: str = "pump.fun") -> dict[str, An
             "symbol": coin.get("symbol"),
             "description": coin.get("description"),
         },
-        pump=coin,
+        pump={**coin, "age_minutes": age},
         mint=mint,
     )
     social = analyze_social_narrative(
@@ -110,6 +110,7 @@ def moon_card_from_coin(coin: dict, *, source: str = "pump.fun") -> dict[str, An
             "usd_market_cap": mcap,
             "ath_market_cap": ath or None,
             "bonding_progress": bond,
+            "age_minutes": round(age, 1),
             "twitter": coin.get("twitter"),
             "telegram": coin.get("telegram"),
             "website": coin.get("website"),

@@ -230,6 +230,20 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
     if age > MAX_AGE_MIN and not (complete and age <= FLASH_GRAD_MAX_AGE_MIN):
         return f"too old {age:.0f}m"
 
+    # Flash holders: 245 @ 2m-class books are not organic heat
+    try:
+        from services.avoid_filters import flash_holders_reason
+
+        holders = _i(
+            (token.get("safety") or {}).get("total_holders")
+            or token.get("total_holders")
+        )
+        fh = flash_holders_reason(holders, age)
+        if fh:
+            return fh
+    except Exception:
+        pass
+
     crashed, why = is_crashed_runner(token)
     if crashed:
         return why or "crashed"

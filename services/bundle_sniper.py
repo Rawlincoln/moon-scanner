@@ -525,6 +525,8 @@ def analyze_bundle_and_snipers(
 
     # Flash launch: create + buys in first moments
     age = age_minutes if age_minutes is not None else _f(pump.get("_age_minutes"))
+    if age is None or age <= 0:
+        age = _f(pump.get("age_minutes"))
     mcap = mcap_usd if mcap_usd is not None else _f(
         pump.get("usd_market_cap") or pair.get("marketCap")
     )
@@ -539,6 +541,25 @@ def analyze_bundle_and_snipers(
             f"Block-0 style: ${mcap:,.0f} in {age:.1f}m with ~{estimated_bundle_pct:.0f}% early bags"
         )
         patterns.append("classic_same_block")
+
+    # Impossible holder count for age (245 @ 2m) — snipers/bundle looking "organic"
+    flash_holders_hit = False
+    flash_holders_note = ""
+    if age is not None and age > 0 and total_holders > 0:
+        hpm = total_holders / max(age, 0.15)
+        if (age <= 3 and total_holders >= 80) or (
+            age <= 5 and total_holders >= 120
+        ) or (age <= 12 and hpm >= 35 and total_holders >= 50):
+            flash_holders_hit = True
+            flash_holders_note = (
+                f"{total_holders} holders @ {age:.1f}m (velocity ~{hpm:.0f}/min)"
+            )
+            bundle_score += 28
+            bundle_flags.append(
+                f"Flash holders: {total_holders} in {age:.1f}m (~{hpm:.0f}/min) "
+                "— concealed sniper/bot book, not organic"
+            )
+            patterns.append("flash_holders")
 
     # --- Combined red-flag score (2+ of these = high risk) ---
     red_flags: list[str] = []
@@ -597,6 +618,9 @@ def analyze_bundle_and_snipers(
     # --- Sniper score (single/multi large bags, flash) ---
     sniper_flags: list[str] = []
     sniper_score = 0
+    if flash_holders_hit:
+        sniper_score += 35
+        sniper_flags.append(flash_holders_note or "flash holder velocity")
 
     if max_wallet_pct >= MAX_SNIPER_WALLET_PCT:
         sniper_score += 40
