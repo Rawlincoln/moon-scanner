@@ -108,6 +108,12 @@ def main() -> int:
         ("moon", f"{BASE}/api/moon?limit=12&force=true", "MOON", "WATCH"),
         ("snipe", f"{BASE}/api/snipes?limit=10&force=true", "SNIPE", "SETUP"),
         ("heat", f"{BASE}/api/heat?limit=12&force=true", "HEAT", "WARM"),
+        (
+            "grad",
+            f"{BASE}/api/graduated?limit=12&force=true&max_age_minutes=10080",
+            "RUNNER",
+            "DIP",
+        ),
     ]
     for kind, url, *labels in feeds:
         try:

@@ -17,6 +17,7 @@ from config import (
     PADRE_TRADE_URL,
     TELEGRAM_ALERT_DEDUPE_SEC,
     TELEGRAM_ALERT_FEEDS,
+    TELEGRAM_ALERT_GRAD_LABELS,
     TELEGRAM_ALERT_HEAT_LABELS,
     TELEGRAM_ALERT_INTERVAL_SEC,
     TELEGRAM_ALERT_MAX_PER_CYCLE,
@@ -56,6 +57,7 @@ def status() -> dict[str, Any]:
             "moon": list(TELEGRAM_ALERT_MOON_LABELS),
             "snipe": list(TELEGRAM_ALERT_SNIPE_LABELS),
             "heat": list(TELEGRAM_ALERT_HEAT_LABELS),
+            "grad": list(TELEGRAM_ALERT_GRAD_LABELS),
         },
         "dedupe_sec": TELEGRAM_ALERT_DEDUPE_SEC,
         "last_cycle": dict(_last_cycle),
@@ -121,6 +123,8 @@ def _label_of(kind: str, t: dict[str, Any]) -> str:
         ).upper()
     if kind == "heat":
         return str(t.get("heat_label") or (t.get("heat") or {}).get("label") or "").upper()
+    if kind in ("grad", "graduated"):
+        return str(t.get("grad_label") or (t.get("grad") or {}).get("label") or "").upper()
     return ""
 
 
@@ -131,6 +135,8 @@ def _allowed_labels(kind: str) -> set[str]:
         return set(TELEGRAM_ALERT_SNIPE_LABELS)
     if kind == "heat":
         return set(TELEGRAM_ALERT_HEAT_LABELS)
+    if kind in ("grad", "graduated"):
+        return set(TELEGRAM_ALERT_GRAD_LABELS)
     return set()
 
 
@@ -141,6 +147,8 @@ def _emoji(kind: str, label: str) -> str:
         return "⚡" if label == "SNIPE" else "🟡"
     if kind == "heat":
         return "🔥" if label == "HEAT" else "🟠"
+    if kind in ("grad", "graduated"):
+        return "◆" if label == "RUNNER" else "📉" if label == "DIP" else "◆"
     return "•"
 
 
@@ -165,6 +173,14 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
         tp = t.get("target_2x_usd") or (t.get("snipe") or {}).get("target_2x_usd")
         if tp:
             why = list(why) + [f"2× TP {_fmt_usd(tp)}"]
+    elif kind in ("grad", "graduated"):
+        why = (t.get("grad") or {}).get("why") or []
+        score = t.get("grad_score") or (t.get("grad") or {}).get("grad_score")
+        ath_ret = t.get("ath_retention_pct") or (t.get("grad") or {}).get(
+            "ath_retention_pct"
+        )
+        if ath_ret is not None:
+            why = list(why) + [f"ATH retention {ath_ret}%"]
     else:
         why = (t.get("heat") or {}).get("why") or []
         score = t.get("heat_score") or (t.get("heat") or {}).get("heat_score")
@@ -259,9 +275,11 @@ async def notify_new_picks(
             "MOON": 0,
             "SNIPE": 0,
             "HEAT": 0,
+            "RUNNER": 0,
             "WATCH": 1,
             "SETUP": 1,
             "WARM": 1,
+            "DIP": 1,
             "RISKY": 2,
         }
         ranked: list[dict[str, Any]] = []
@@ -327,6 +345,15 @@ async def run_alert_cycle(*, force: bool = False) -> dict[str, Any]:
             data = await scan_organic_heat(limit=12, max_age_minutes=120, force=True)
             n = await notify_new_picks("heat", data.get("tokens") or [], force=force)
             feeds["heat"] = {"shown": len(data.get("tokens") or []), "sent": n}
+            total += n
+        if "grad" in TELEGRAM_ALERT_FEEDS or "graduated" in TELEGRAM_ALERT_FEEDS:
+            from services.scan_graduated import scan_graduated_runners
+
+            data = await scan_graduated_runners(
+                limit=12, max_age_minutes=7 * 24 * 60, force=True
+            )
+            n = await notify_new_picks("grad", data.get("tokens") or [], force=force)
+            feeds["grad"] = {"shown": len(data.get("tokens") or []), "sent": n}
             total += n
     except Exception as exc:
         err = str(exc)[:200]

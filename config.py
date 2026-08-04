@@ -221,10 +221,10 @@ elif _tg_en in ("1", "true", "yes", "on"):
 else:
     # Auto-on when both token + chat are set
     TELEGRAM_ALERTS_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
-_tg_feeds = os.getenv("TELEGRAM_ALERT_FEEDS", "moon,snipe,heat").strip()
+_tg_feeds = os.getenv("TELEGRAM_ALERT_FEEDS", "moon,snipe,heat,grad").strip()
 TELEGRAM_ALERT_FEEDS: list[str] = [
     f.strip().lower() for f in _tg_feeds.split(",") if f.strip()
-] or ["moon", "snipe", "heat"]
+] or ["moon", "snipe", "heat", "grad"]
 TELEGRAM_ALERT_INTERVAL_SEC = float(
     os.getenv("TELEGRAM_ALERT_INTERVAL_SEC", "45") or "45"
 )
@@ -252,6 +252,13 @@ TELEGRAM_ALERT_HEAT_LABELS = {
     x.strip().upper()
     for x in (
         os.getenv("TELEGRAM_ALERT_HEAT_LABELS", "HEAT,WARM") or "HEAT,WARM"
+    ).split(",")
+    if x.strip()
+}
+TELEGRAM_ALERT_GRAD_LABELS = {
+    x.strip().upper()
+    for x in (
+        os.getenv("TELEGRAM_ALERT_GRAD_LABELS", "RUNNER,DIP") or "RUNNER,DIP"
     ).split(",")
     if x.strip()
 }

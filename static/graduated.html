@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Graduated Runners — Large / post-migration · Moon Scanner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/moon.css?v=7" />
+  <link rel="stylesheet" href="/static/css/snipes.css?v=2" />
+  <link rel="stylesheet" href="/static/css/graduated.css?v=1" />
+</head>
+<body class="page-grad">
+  <div class="bg"></div>
+
+  <nav class="nav">
+    <a href="/">◈ Moons</a>
+    <a href="/snipes">⚡ Safe Snipes 2×</a>
+    <a href="/heat">🔥 Organic Heat</a>
+    <a href="/graduated" class="active">◆ Graduated</a>
+  </nav>
+
+  <header class="top">
+    <div class="brand">
+      <span class="mark grad-mark">◆</span>
+      <div>
+        <h1>Graduated Runners</h1>
+        <p>Post-migration / large mcap — the charts Moons & Heat skip</p>
+      </div>
+    </div>
+    <div class="pills">
+      <span class="pill" id="statShown">—</span>
+      <span class="pill" id="statGrad">0 runner</span>
+      <span class="pill muted" id="statBackend">local</span>
+    </div>
+  </header>
+
+  <section class="bar">
+    <button type="button" class="btn primary" id="scanBtn">Scan graduated</button>
+    <label class="chk">
+      <input type="checkbox" id="autoRefresh" checked /> Auto 20s
+    </label>
+    <label class="chk" title="Desktop alerts for RUNNER / DIP">
+      <input type="checkbox" id="alertToggle" /> 🔔 Alerts
+    </label>
+    <span class="pill muted" id="alertStatus" style="font-size:0.78rem">Alerts off</span>
+    <label class="field">
+      Max age
+      <select id="maxAge">
+        <option value="2880">2d</option>
+        <option value="7200">5d</option>
+        <option value="10080" selected>7d</option>
+        <option value="20160">14d</option>
+      </select>
+    </label>
+    <label class="field">
+      Show
+      <select id="limit">
+        <option value="12">12</option>
+        <option value="16" selected>16</option>
+        <option value="24">24</option>
+      </select>
+    </label>
+  </section>
+
+  <div class="plan-banner grad-banner" id="planBanner">
+    <strong>Different game.</strong>
+    ≥~$80k mcap · graduated or near-grad. <em>RUNNER</em> = near ATH · <em>DIP</em> = pullback with life ·
+    not early $6k heat. Size carefully.
+  </div>
+
+  <p class="status" id="status">Ready — large / post-migration structure</p>
+  <p class="rule" id="rule"></p>
+  <main id="list" class="list"></main>
+
+  <footer class="foot">
+    Not financial advice. DYOR. API:
+    <a href="/api/graduated" style="color:inherit">/api/graduated</a>
+  </footer>
+
+  <script src="/static/js/alerts.js?v=4"></script>
+  <script src="/static/js/graduated.js?v=1"></script>
+</body>
+</html>

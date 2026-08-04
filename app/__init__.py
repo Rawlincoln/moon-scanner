@@ -22,6 +22,7 @@ from routes.health import router as health_router
 from routes.learning import router as learning_router
 from routes.legacy_scan import router as legacy_scan_router
 from routes.alerts import router as alerts_router
+from routes.graduated import router as graduated_router
 from routes.heat import router as heat_router
 from routes.moon import router as moon_router
 from routes.realtime import router as realtime_router
@@ -38,7 +39,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Moon Scanner",
         description="Identify safe early tokens on EVM & Solana with entry/exit signals",
-        version="1.7.0",
+        version="1.8.0",
         lifespan=lifespan,
         docs_url=None if IS_PRODUCTION else "/docs",
         redoc_url=None if IS_PRODUCTION else "/redoc",
@@ -60,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(moon_router)
     app.include_router(snipes_router)
     app.include_router(heat_router)
+    app.include_router(graduated_router)
     app.include_router(alerts_router)
     app.include_router(realtime_router)
     app.include_router(analyze_router)
