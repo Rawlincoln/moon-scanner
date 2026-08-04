@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lab — on-chain facts archive</title>
+  <title>Lab — fast multi-source Solana facts</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/moon.css?v=8" />
-  <link rel="stylesheet" href="/static/css/lab.css?v=1" />
+  <link rel="stylesheet" href="/static/css/lab.css?v=2" />
 </head>
 <body>
   <div class="bg"></div>
@@ -26,22 +26,23 @@
       <span class="mark">🔬</span>
       <div>
         <h1>Lab</h1>
-        <p>Paste a mint. Read the chain. Facts with evidence — no buy/sell verdicts.</p>
+        <p>Fast multi-source facts (pump + Dex + RugCheck) — not a 3‑minute Germanus wait.</p>
       </div>
     </div>
   </header>
 
   <section class="bar lab-bar">
     <input type="text" id="mintInput" class="mint-input" placeholder="Paste Solana mint address…" spellcheck="false" />
-    <button type="button" class="btn primary" id="analyzeBtn">Analyze</button>
-    <button type="button" class="btn" id="forceBtn" title="Ignore freshness cache">Force rescan</button>
-    <span class="status" id="status">Ready</span>
+    <button type="button" class="btn primary" id="analyzeBtn">Fast analyze</button>
+    <button type="button" class="btn" id="deepBtn" title="Full RugCheck report">Deep</button>
+    <button type="button" class="btn" id="forceBtn" title="Ignore cache">Force</button>
+    <span class="status" id="status">Ready · target &lt;3s</span>
   </section>
 
   <p class="rule lab-rule">
-    Inspired by <a href="https://germanus.app/" target="_blank" rel="noopener">germanus.app</a>:
-    public archive of snapshots · mint/freeze/LP · liquidity · top holders · change vs last scan.
-    <strong>n/a means unknown</strong> — never invented. Money signals stay on Moons/Snipes.
+    <strong>Fast</strong> = parallel sources ~1–3s · <strong>Deep</strong> = +full holders/report ~4–6s ·
+    Archive hit if liquidity stable · <strong>n/a</strong> = unknown, never invented ·
+    Money signals stay on Moons/Snipes.
   </p>
 
   <section class="cockpit" id="cockpit" hidden></section>
@@ -76,9 +77,9 @@
   </section>
 
   <footer class="foot">
-    Lab archives scans on this server. Free Render disk is ephemeral — export later if needed.
-    Deep Germanus PnL/funder graphs need Helius+Birdeye (not free).
+    Built to be faster/more reliable than Germanus open beta: multi-source merge, timeouts, cache, partial n/a.
+    Priority fees / full funder graphs still need paid RPC.
   </footer>
-  <script src="/static/js/lab.js?v=1"></script>
+  <script src="/static/js/lab.js?v=2"></script>
 </body>
 </html>

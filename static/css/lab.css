@@ -74,3 +74,11 @@
   position: relative; z-index: 1; max-width: 1200px; margin: 0 auto;
   padding: 0 20px 40px; color: var(--muted); font-size: 0.82rem;
 }
+.src-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+.src-badge {
+  font-family: var(--mono); font-size: 0.72rem;
+  padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line);
+  color: var(--muted);
+}
+.src-badge.ok { border-color: rgba(0,229,160,0.45); color: var(--green); }
+.src-badge.bad { border-color: rgba(255,77,106,0.5); color: var(--bad); }
