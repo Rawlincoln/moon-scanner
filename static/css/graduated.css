@@ -1,52 +1,47 @@
-.page-grad .bg {
+/* Graduated — violet aurora accents */
+
+.page-grad .bg::before {
   background:
-    radial-gradient(ellipse 55% 42% at 50% 0%, rgba(140, 100, 255, 0.14), transparent),
-    radial-gradient(ellipse 40% 30% at 90% 80%, rgba(80, 160, 255, 0.08), transparent);
+    radial-gradient(ellipse 50% 30% at 50% 18%, rgba(167, 139, 250, 0.28), transparent 55%),
+    radial-gradient(ellipse 40% 25% at 85% 55%, rgba(96, 165, 250, 0.16), transparent 50%);
 }
 
 .grad-mark {
-  color: #a78bfa !important;
-  text-shadow: 0 0 24px rgba(167, 139, 250, 0.5) !important;
+  color: #c4b5fd !important;
+  filter: drop-shadow(0 0 18px rgba(167, 139, 250, 0.6)) !important;
 }
 
 .page-grad .nav a.active {
-  color: #0a0b10;
-  background: linear-gradient(135deg, #a78bfa, #60a5fa);
-  border-color: transparent;
+  background: linear-gradient(180deg, #ddd6fe 0%, #a78bfa 40%, #5b21b6 100%) !important;
+  color: #12081f !important;
+  border-color: rgba(200, 180, 255, 0.55) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 0 24px rgba(167, 139, 250, 0.45) !important;
 }
 
 .grad-banner {
-  border-color: rgba(167, 139, 250, 0.4) !important;
-  background: rgba(167, 139, 250, 0.1) !important;
+  border-color: rgba(167, 139, 250, 0.45) !important;
+  background: linear-gradient(100deg, rgba(167, 139, 250, 0.2), rgba(96, 165, 250, 0.08)) !important;
+  box-shadow: var(--shadow-out) !important;
 }
-
-.grad-banner strong { color: #c4b5fd; }
-.grad-banner em { color: #93c5fd; font-style: normal; font-weight: 600; }
+.grad-banner strong { color: #ddd6fe; }
+.grad-banner em { color: #93c5fd; font-style: normal; font-weight: 700; }
 
 .card.runner {
-  border-color: rgba(167, 139, 250, 0.5);
-  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.15);
+  border-color: rgba(167, 139, 250, 0.55);
+  box-shadow: var(--shadow-out), 0 0 28px rgba(167, 139, 250, 0.15);
 }
-
-.card.dip {
-  border-color: rgba(96, 165, 250, 0.45);
-}
-
-.card.watch {
-  border-color: rgba(148, 163, 184, 0.4);
-}
+.card.dip { border-color: rgba(96, 165, 250, 0.5); }
+.card.watch { border-color: rgba(148, 163, 184, 0.4); }
 
 .badge.RUNNER {
-  background: rgba(167, 139, 250, 0.2);
-  color: #c4b5fd;
+  background: linear-gradient(180deg, rgba(196, 181, 253, 0.4), rgba(91, 33, 182, 0.5));
+  color: #ede9fe;
+  border-color: rgba(167, 139, 250, 0.55);
 }
-
 .badge.DIP {
-  background: rgba(96, 165, 250, 0.18);
-  color: #93c5fd;
-}
-
-.badge.WATCH {
-  background: rgba(148, 163, 184, 0.16);
-  color: #cbd5e1;
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.35), rgba(30, 64, 175, 0.45));
+  color: #dbeafe;
+  border-color: rgba(96, 165, 250, 0.5);
 }

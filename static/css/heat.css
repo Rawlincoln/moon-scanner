@@ -1,78 +1,55 @@
-/* Organic Heat page accents */
-.page-heat .bg {
+/* Organic Heat — fire aurora accents */
+
+.page-heat .bg::before {
   background:
-    radial-gradient(ellipse 55% 42% at 60% 0%, rgba(255, 90, 50, 0.14), transparent),
-    radial-gradient(ellipse 40% 30% at 10% 85%, rgba(255, 176, 32, 0.08), transparent);
+    radial-gradient(ellipse 50% 30% at 55% 20%, rgba(255, 107, 61, 0.28), transparent 55%),
+    radial-gradient(ellipse 40% 25% at 20% 60%, rgba(251, 191, 36, 0.16), transparent 50%);
 }
 
 .heat-mark {
-  color: #ff6b3d !important;
-  text-shadow: 0 0 24px rgba(255, 90, 50, 0.5) !important;
+  color: #ff8a5c !important;
+  filter: drop-shadow(0 0 18px rgba(255, 107, 61, 0.6)) !important;
 }
 
 .page-heat .nav a.active {
-  color: #0a0b10;
-  background: linear-gradient(135deg, #ff6b3d, #ffb020);
-  border-color: transparent;
+  background: linear-gradient(180deg, #ffb08a 0%, #ff6b3d 40%, #c2410c 100%) !important;
+  color: #1a0800 !important;
+  border-color: rgba(255, 180, 140, 0.55) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 0 24px rgba(255, 107, 61, 0.4) !important;
 }
 
 .heat-banner {
-  border-color: rgba(255, 90, 50, 0.4) !important;
-  background: rgba(255, 90, 50, 0.1) !important;
+  border-color: rgba(255, 107, 61, 0.45) !important;
+  background: linear-gradient(100deg, rgba(255, 107, 61, 0.2), rgba(251, 191, 36, 0.08)) !important;
+  box-shadow: var(--shadow-out) !important;
 }
-
-.heat-banner strong {
-  color: #ff8a5c;
-}
-
-.heat-banner a {
-  color: var(--green);
-}
+.heat-banner strong { color: #ffb08a; }
+.heat-banner a { color: var(--green); }
 
 .card.heat {
-  border-color: rgba(255, 90, 50, 0.5);
-  box-shadow: 0 0 0 1px rgba(255, 90, 50, 0.15);
+  border-color: rgba(255, 107, 61, 0.55);
+  box-shadow: var(--shadow-out), 0 0 28px rgba(255, 107, 61, 0.14);
 }
-
-.card.warm {
-  border-color: rgba(255, 176, 32, 0.45);
-}
-
+.card.warm { border-color: rgba(251, 191, 36, 0.5); }
 .card.risky {
-  border-color: rgba(255, 80, 100, 0.4);
-  opacity: 0.95;
+  border-color: rgba(251, 113, 133, 0.45);
+  opacity: 0.96;
 }
 
 .badge.HEAT {
-  background: rgba(255, 90, 50, 0.2);
-  color: #ff8a5c;
+  background: linear-gradient(180deg, rgba(255, 140, 90, 0.45), rgba(180, 50, 20, 0.5));
+  color: #ffd4c0;
+  border-color: rgba(255, 107, 61, 0.55);
 }
-
 .badge.WARM {
-  background: rgba(255, 176, 32, 0.18);
-  color: var(--warn);
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.35), rgba(160, 90, 10, 0.45));
+  color: #ffe6a8;
+  border-color: rgba(251, 191, 36, 0.45);
 }
-
 .badge.RISKY {
-  background: rgba(255, 80, 100, 0.18);
-  color: #ff6b7a;
-}
-
-.risk-tag {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #ff6b7a;
-  font-weight: 600;
-}
-
-.dev-line {
-  font-size: 0.82rem !important;
-  color: var(--muted);
-  margin-top: 2px;
-}
-
-.dev-line strong {
-  color: #ffb08a;
-  font-weight: 600;
+  background: linear-gradient(180deg, rgba(251, 113, 133, 0.35), rgba(140, 20, 50, 0.45));
+  color: #ffc9d2;
+  border-color: rgba(251, 113, 133, 0.5);
 }

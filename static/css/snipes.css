@@ -1,127 +1,40 @@
-/* Safe Snipes page accents */
-.page-snipes .bg {
+/* Safe Snipes — aurora accents */
+
+.page-snipes .bg::before {
   background:
-    radial-gradient(ellipse 50% 40% at 70% 0%, rgba(255, 176, 32, 0.1), transparent),
-    radial-gradient(ellipse 40% 30% at 15% 90%, rgba(0, 229, 160, 0.08), transparent);
-}
-
-.nav {
-  position: relative;
-  z-index: 2;
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 16px 20px 0;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.nav a {
-  text-decoration: none;
-  color: var(--muted);
-  font-size: 0.88rem;
-  font-weight: 600;
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--card);
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-
-.nav a:hover {
-  color: var(--text);
-  border-color: #3a4158;
-}
-
-.nav a.active {
-  color: #0a0b10;
-  background: linear-gradient(135deg, #ffb020, #00e5a0);
-  border-color: transparent;
+    radial-gradient(ellipse 45% 28% at 70% 25%, rgba(251, 191, 36, 0.22), transparent 60%),
+    radial-gradient(ellipse 40% 25% at 25% 50%, rgba(62, 240, 176, 0.16), transparent 55%);
 }
 
 .snipe-mark {
   color: var(--warn) !important;
-  text-shadow: 0 0 24px rgba(255, 176, 32, 0.45) !important;
+  filter: drop-shadow(0 0 16px rgba(251, 191, 36, 0.55)) !important;
 }
 
-.plan-banner {
-  position: relative;
-  z-index: 1;
-  max-width: 960px;
-  margin: 8px auto 12px;
-  padding: 12px 16px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 176, 32, 0.35);
-  background: rgba(255, 176, 32, 0.08);
-  color: var(--muted);
-  font-size: 0.9rem;
-  line-height: 1.4;
+.page-snipes .nav a.active {
+  background: linear-gradient(180deg, #ffe08a 0%, var(--warn) 40%, #c2780a 100%) !important;
+  color: #1a1000 !important;
+  border-color: rgba(255, 220, 140, 0.55) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 0 22px rgba(251, 191, 36, 0.4) !important;
 }
-
-.plan-banner strong { color: var(--warn); }
-.plan-banner em { color: var(--green); font-style: normal; font-weight: 600; }
 
 .card.snipe {
-  border-color: rgba(0, 229, 160, 0.45);
-  box-shadow: 0 0 0 1px rgba(0, 229, 160, 0.12);
+  border-color: rgba(251, 191, 36, 0.5);
+  box-shadow: var(--shadow-out), 0 0 28px rgba(251, 191, 36, 0.12);
 }
-
 .card.setup {
-  border-color: rgba(255, 176, 32, 0.4);
+  border-color: rgba(62, 240, 176, 0.4);
 }
 
 .badge.SNIPE {
-  background: rgba(0, 229, 160, 0.18);
-  color: var(--green);
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.4), rgba(180, 100, 10, 0.5));
+  color: #fff3c4;
+  border-color: rgba(251, 191, 36, 0.5);
 }
-
 .badge.SETUP {
-  background: rgba(255, 176, 32, 0.16);
-  color: var(--warn);
+  background: linear-gradient(180deg, rgba(62, 240, 176, 0.3), rgba(10, 100, 70, 0.45));
+  color: #b8ffe6;
+  border-color: rgba(62, 240, 176, 0.45);
 }
-
-.tp-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  margin: 8px 0 4px;
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  color: var(--muted);
-}
-
-.tp-row strong {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.tp-row .tp { color: var(--green); }
-.tp-row .inv { color: var(--bad); }
-
-.plan-box {
-  margin-top: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid var(--line);
-  font-size: 0.82rem;
-  color: var(--muted);
-}
-
-.empty .muted { opacity: 0.75; font-size: 0.9rem; }
-.near-miss {
-  margin-top: 14px;
-  text-align: left;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: rgba(255, 176, 32, 0.06);
-}
-.near-miss ul {
-  margin: 8px 0 0;
-  padding-left: 1.1rem;
-  font-size: 0.86rem;
-  color: var(--muted);
-}
-.near-miss li { margin: 4px 0; }
-.near-miss .muted { margin-left: 4px; }
