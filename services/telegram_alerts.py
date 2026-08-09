@@ -81,7 +81,7 @@ def status() -> dict[str, Any]:
         "dedupe_sec": TELEGRAM_ALERT_DEDUPE_SEC,
         "last_cycle": dict(_last_cycle),
         "hint": (
-            "MONEY MODE: MOON+SNIPE only · entry/stop/TP · auto-CANCEL if setup breaks"
+            "MONEY MODE: MOON+SNIPE+HEAT · entry/stop/TP · auto-CANCEL if setup breaks"
             if TELEGRAM_MONEY_MODE
             else "Full multi-feed alerts (set TELEGRAM_MONEY_MODE=1 for capital mode)"
         ),
@@ -231,11 +231,11 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
     if not plan:
         plan = (
             enrich_plan_with_size(kind, t)
-            if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe")
+            if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat")
             else build_money_plan(kind, t)
         )
     plan_lines = ""
-    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe"):
+    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat"):
         sizing = plan.get("sizing") or {}
         size_line = ""
         if sizing.get("size_usd"):
@@ -269,21 +269,27 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
             cockpit = extract_cockpit(token_to_cockpit_input(t))
         except Exception:
             cockpit = None
-    if cockpit and (MONEY_AUTO_LAB or TELEGRAM_MONEY_MODE or kind in ("moon", "snipe")):
+    if cockpit and (
+        MONEY_AUTO_LAB or TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat")
+    ):
         lab_lines = format_cockpit_telegram(cockpit)
 
     dev_lines = ""
     dev = t.get("devRisk") or t.get("_dev_risk")
-    if not isinstance(dev, dict) and (TELEGRAM_MONEY_MODE or kind in ("moon", "snipe")):
+    if not isinstance(dev, dict) and (
+        TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat")
+    ):
         try:
             dev = attach_dev_risk(t)
         except Exception:
             dev = None
-    if isinstance(dev, dict) and (TELEGRAM_MONEY_MODE or kind in ("moon", "snipe")):
+    if isinstance(dev, dict) and (
+        TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat")
+    ):
         dev_lines = format_dev_telegram(dev)
 
     ticker_lines = ""
-    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe"):
+    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat"):
         try:
             from services.ticker_registry import attach_ticker_uniqueness
 
@@ -312,7 +318,7 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
             ticker_lines = ""
 
     flow_lines = ""
-    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe"):
+    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat"):
         try:
             from services.fee_flow import attach_fee_flow, format_fee_telegram
 
@@ -395,9 +401,9 @@ async def notify_new_picks(
         return 0
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return 0
-    # Money mode hard-blocks heat/grad even if env accidentally lists them
+    # Money mode: moon + snipe + heat (organic edge). Still block grad spam.
     kind_l = kind.lower().strip()
-    if TELEGRAM_MONEY_MODE and kind_l not in ("moon", "snipe", "snipes"):
+    if TELEGRAM_MONEY_MODE and kind_l not in ("moon", "snipe", "snipes", "heat"):
         return 0
     if kind not in TELEGRAM_ALERT_FEEDS and not force:
         # allow snipes alias
@@ -534,17 +540,27 @@ async def notify_new_picks(
                 logger.debug("cockpit extract failed: %s", exc)
                 cockpit = None
 
+            # Control surface: required for moon/snipe; HEAT soft-fail (higher recall)
             if TELEGRAM_MONEY_MODE and MONEY_REQUIRE_CONTROL_SURFACE:
-                if cockpit is None:
-                    logger.info("skip %s — no cockpit/control surface", mint[:8])
-                    continue
-                ok_ctrl, why_ctrl = control_surface_gate(cockpit)
-                if not ok_ctrl:
-                    logger.info(
-                        "skip %s control surface: %s", mint[:8], why_ctrl
-                    )
-                    _last_cycle["control_skip"] = why_ctrl
-                    continue
+                if feed_key in ("moon", "snipe"):
+                    if cockpit is None:
+                        logger.info("skip %s — no cockpit/control surface", mint[:8])
+                        continue
+                    ok_ctrl, why_ctrl = control_surface_gate(cockpit)
+                    if not ok_ctrl:
+                        logger.info(
+                            "skip %s control surface: %s", mint[:8], why_ctrl
+                        )
+                        _last_cycle["control_skip"] = why_ctrl
+                        continue
+                elif feed_key == "heat" and cockpit is not None:
+                    ok_ctrl, why_ctrl = control_surface_gate(cockpit)
+                    if not ok_ctrl:
+                        logger.info(
+                            "skip heat %s control surface: %s", mint[:8], why_ctrl
+                        )
+                        _last_cycle["control_skip"] = why_ctrl
+                        continue
 
             # Dev / serial rugger gate
             try:
@@ -574,6 +590,19 @@ async def notify_new_picks(
                         continue
             except Exception as exc:
                 logger.debug("fee flow failed: %s", exc)
+
+            # Heat: only alert quality band (HEAT always; WARM if score high enough)
+            if feed_key == "heat":
+                lab_h = _label_of("heat", t)
+                hs = int(
+                    t.get("heat_score")
+                    or (t.get("heat") or {}).get("heat_score")
+                    or 0
+                )
+                if lab_h == "WARM" and hs < 58:
+                    continue
+                if lab_h == "RISKY":
+                    continue
 
             # Archive snapshot into Lab (non-blocking best-effort)
             if MONEY_AUTO_LAB and cockpit:
@@ -629,11 +658,11 @@ async def run_alert_cycle(*, force: bool = False) -> dict[str, Any]:
             n = await notify_new_picks("snipe", data.get("tokens") or [], force=force)
             feeds["snipe"] = {"shown": len(data.get("tokens") or []), "sent": n}
             total += n
-        # Heat/grad only when money mode OFF
-        if not TELEGRAM_MONEY_MODE and "heat" in TELEGRAM_ALERT_FEEDS:
+        # Organic heat — enabled in money mode (live edge); still no grad spam
+        if "heat" in TELEGRAM_ALERT_FEEDS:
             from services.scan_heat import scan_organic_heat
 
-            data = await scan_organic_heat(limit=12, max_age_minutes=120, force=True)
+            data = await scan_organic_heat(limit=14, max_age_minutes=150, force=True)
             n = await notify_new_picks("heat", data.get("tokens") or [], force=force)
             feeds["heat"] = {"shown": len(data.get("tokens") or []), "sent": n}
             total += n
@@ -693,7 +722,7 @@ async def background_telegram_alert_loop() -> None:
         desk = desk_snapshot(get_journal())
         mode_line = (
             "💰 <b>COMPLETE MONEY SYSTEM</b>\n"
-            "MOON + SNIPE only · risk-sized · TP1/TP2/STOP managed\n"
+            "MOON + SNIPE + 🔥 HEAT · risk-sized · TP1/TP2/STOP managed\n"
             f"Bankroll ${desk.get('bankroll_usd')} · "
             f"risk {desk.get('risk_per_trade_pct')}%/trade "
             f"(${desk.get('risk_per_trade_usd')})\n"
@@ -739,11 +768,11 @@ async def _seed_seen_from_scans() -> None:
             jobs.append(
                 ("snipe", scan_safe_snipes(limit=10, max_age_minutes=60, force=False))
             )
-        if not TELEGRAM_MONEY_MODE and "heat" in TELEGRAM_ALERT_FEEDS:
+        if "heat" in TELEGRAM_ALERT_FEEDS:
             from services.scan_heat import scan_organic_heat
 
             jobs.append(
-                ("heat", scan_organic_heat(limit=12, max_age_minutes=120, force=False))
+                ("heat", scan_organic_heat(limit=14, max_age_minutes=150, force=False))
             )
         for kind, coro in jobs:
             try:

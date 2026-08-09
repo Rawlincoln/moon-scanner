@@ -270,19 +270,22 @@ _money_raw = (os.getenv("TELEGRAM_MONEY_MODE", "1") or "1").strip().lower()
 TELEGRAM_MONEY_MODE = _money_raw not in ("0", "false", "no", "off")
 
 if TELEGRAM_MONEY_MODE:
-    _default_feeds = "moon,snipe"
+    # Heat included — organic heat is the live edge; still no grad spam
+    _default_feeds = "moon,snipe,heat"
     # WATCH allowed so mid-curve migrators surface (still gated by stage filter in telegram)
     _default_moon_labels = "MOON,WATCH"
     _default_snipe_labels = "SNIPE"
+    _default_heat_labels = "HEAT,WARM"  # HEAT first; WARM secondary
 else:
     _default_feeds = "moon,snipe,heat,grad"
     _default_moon_labels = "MOON,WATCH"
     _default_snipe_labels = "SNIPE,SETUP"
+    _default_heat_labels = "HEAT,WARM"
 
 _tg_feeds = os.getenv("TELEGRAM_ALERT_FEEDS", _default_feeds).strip()
 TELEGRAM_ALERT_FEEDS: list[str] = [
     f.strip().lower() for f in _tg_feeds.split(",") if f.strip()
-] or (["moon", "snipe"] if TELEGRAM_MONEY_MODE else ["moon", "snipe", "heat", "grad"])
+] or (["moon", "snipe", "heat"] if TELEGRAM_MONEY_MODE else ["moon", "snipe", "heat", "grad"])
 TELEGRAM_ALERT_INTERVAL_SEC = float(
     os.getenv("TELEGRAM_ALERT_INTERVAL_SEC", "45") or "45"
 )
@@ -290,8 +293,8 @@ TELEGRAM_ALERT_DEDUPE_SEC = float(
     os.getenv("TELEGRAM_ALERT_DEDUPE_SEC", str(45 * 60)) or str(45 * 60)
 )
 TELEGRAM_ALERT_MAX_PER_CYCLE = int(
-    os.getenv("TELEGRAM_ALERT_MAX_PER_CYCLE", "4" if TELEGRAM_MONEY_MODE else "6")
-    or ("4" if TELEGRAM_MONEY_MODE else "6")
+    os.getenv("TELEGRAM_ALERT_MAX_PER_CYCLE", "5" if TELEGRAM_MONEY_MODE else "6")
+    or ("5" if TELEGRAM_MONEY_MODE else "6")
 )
 TELEGRAM_ALERT_MOON_LABELS = {
     x.strip().upper()
@@ -312,7 +315,8 @@ TELEGRAM_ALERT_SNIPE_LABELS = {
 TELEGRAM_ALERT_HEAT_LABELS = {
     x.strip().upper()
     for x in (
-        os.getenv("TELEGRAM_ALERT_HEAT_LABELS", "HEAT,WARM") or "HEAT,WARM"
+        os.getenv("TELEGRAM_ALERT_HEAT_LABELS", _default_heat_labels)
+        or _default_heat_labels
     ).split(",")
     if x.strip()
 }

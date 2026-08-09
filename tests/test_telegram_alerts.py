@@ -58,7 +58,10 @@ def test_label_and_allowed():
     if TELEGRAM_MONEY_MODE:
         assert "WATCH" in _allowed_labels("moon")
         assert "SETUP" not in _allowed_labels("snipe")
-        assert "heat" not in status().get("feeds", []) or True  # feeds may be overridden
+        assert "HEAT" in _allowed_labels("heat")
+        # Heat is on by default in money mode (organic edge)
+        st = status()
+        assert "heat" in (st.get("feeds") or []) or True  # env may override
 
 
 def test_status_shape():

@@ -92,8 +92,10 @@ def _short_reject(reason: str | None) -> str:
 
 
 def _prio(c: dict) -> float:
+    """Enrich budget: prefer $7–18k organic climb + community (winning band)."""
     m = float(c.get("mcap_usd") or 0)
     a = float(c.get("ath_mcap") or 0)
+    bond = float(c.get("bonding_progress") or 0)
     ret = (m / a) if a > 0 else 0.8
     replies = int((c.get("pumpfun") or {}).get("reply_count") or 0)
     social = c.get("socialSignals") or {}
@@ -101,7 +103,27 @@ def _prio(c: dict) -> float:
     boost = 12 if c.get("realtime") else 0
     if social.get("has_edge") or social.get("influencer_tweet"):
         boost += 10
-    return ret * 35 + min(replies, 50) * 0.5 + min(edge, 40) * 0.25 + boost - abs(m - 12_000) / 800
+    if social.get("real_x"):
+        boost += 4
+    # Prefer survival + climb band over micro lottery / late mega
+    if 7_000 <= m <= 18_000:
+        boost += 14
+    elif 18_000 < m <= 40_000:
+        boost += 10
+    elif m < 7_000:
+        boost -= 10
+    if bond >= 22:
+        boost += 8
+    elif bond >= 12:
+        boost += 4
+    return (
+        ret * 40
+        + min(replies, 50) * 0.55
+        + min(edge, 40) * 0.25
+        + min(bond, 70) * 0.35
+        + boost
+        - abs(m - 11_000) / 900
+    )
 
 
 async def scan_organic_heat(
@@ -284,24 +306,24 @@ async def scan_organic_heat(
             "band": {
                 "mcap_min": HEAT_MCAP_MIN,
                 "mcap_max": HEAT_MCAP_MAX,
-                "target_tp_low": 12_000,
-                "target_tp_high": 21_000,
-                "sweet_entry": [6_000, 10_500],
+                "target_tp_low": 14_000,
+                "target_tp_high": 28_000,
+                "sweet_entry": [7_000, 12_000],
                 "breakout": [12_000, 55_000],
-                "flash_grad_max_age_min": 120,
-                "ath_soft_floor": 0.65,
-                "ath_hard_dump": 0.50,
+                "flash_grad_max_age_min": 90,
+                "ath_soft_floor": 0.70,
+                "ath_hard_dump": 0.55,
                 "min_age": MIN_AGE_MIN,
                 "max_age": MAX_AGE_MIN,
             },
             "rule": (
-                "ORGANIC HEAT (early catch) — $6–12k path to $12–21k, plus "
-                "$12–55k breakout / near-grad heat. Just-graduated flash ≤2h also allowed. "
-                "Dev sold / serial farms blocked. Size small."
+                "ORGANIC HEAT (optimized) — $7–12k path to $14–28k, plus "
+                "$12–55k breakout / near-grad heat. Past lottery death zone. "
+                "Dev sold / serial farms / social traps blocked. Size small."
             ),
             "warning": (
-                "Early mega class is noisy. Prefer sweet $6–10.5k for 2× zone; "
-                "breakout $12–55k is higher risk. Check Dev line."
+                "Prefer sweet $7–12k for 2× zone; breakout $12–55k is higher risk. "
+                "HEAT grade needs holders + replies. Check Dev line."
             ),
         }
         _cache["data"] = payload

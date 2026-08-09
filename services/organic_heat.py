@@ -1,11 +1,12 @@
-"""Organic Heat — tighter mid-cap climbers aimed at 12–21k runs.
+"""Organic Heat — optimized mid-cap climbers (12–28k path + breakout).
 
-Design:
-  - Entry band ≥ $6k mcap (no micro dust)
-  - Room to run into $12–21k (≈2–3.5× from $6k; ≤$12k entry preferred)
-  - Higher recall than Moons, but capital path is explicit
+Design (optimized from live winners):
+  - Entry band ≥ $7k (past lottery death zone; aligned with survival floor)
+  - Sweet $7–12k → path into $14–28k; breakout $12–55k still scored
+  - Higher recall than Moons; HEAT grade is Telegram-quality
+  - Soft packaging demotes; entry-trap / social-spoof hard-block (honest books)
 
-Never claims "safe". Still blocks rugs / hard avoids / critical bundles / deep dumps.
+Never claims "safe". Blocks rugs / hard avoids / critical bundles / deep dumps.
 """
 
 from __future__ import annotations
@@ -18,34 +19,34 @@ from services.bundle_sniper import analyze_bundle_and_snipers
 from services.runner_radar import extract_ath_mcap, extract_mcap_usd, is_crashed_runner
 from services.social_signals import analyze_social_narrative
 
-# Early catch band: $6k floor through near-migration breakout
-# - $6–12k: path to $12–21k (2–3.5× from $6k)
-# - $12–55k: breakout / pre-grad heat (catch FOMO-class before mega)
-HEAT_MCAP_MIN = 6_000.0
+# Optimized band: proved survival → climb / breakout
+# - $7–12k: path to $14–28k (what organic heat is winning on)
+# - $12–55k: breakout / pre-grad heat
+HEAT_MCAP_MIN = 7_000.0
 HEAT_MCAP_MAX = 55_000.0
-TARGET_TP_LOW = 12_000.0
-TARGET_TP_HIGH = 21_000.0
-BREAKOUT_MIN = 12_000.0  # above sweet 2× zone → breakout scoring
-# Prefer entries where 2× lands inside / near the target window
-SWEET_ENTRY_MIN = 6_000.0
-SWEET_ENTRY_MAX = 10_500.0  # 2× → $12k–$21k
-MIN_AGE_MIN = 0.8
-MAX_AGE_MIN = 240.0  # 4h — flash runners can graduate fast
-# Pullbacks allowed but tighter than loose heat
-ATH_HARD_DUMP = 0.50  # −50%
-ATH_SOFT_FLOOR = 0.65  # −35% still visible as RISKY for breakouts
+TARGET_TP_LOW = 14_000.0
+TARGET_TP_HIGH = 28_000.0
+BREAKOUT_MIN = 12_000.0
+# Prefer entries that already cleared survival + room to 2× into target
+SWEET_ENTRY_MIN = 7_000.0
+SWEET_ENTRY_MAX = 12_000.0
+# HEAT grade (Telegram) should sit in quality band
+HEAT_ALERT_MIN_MCAP = 7_000.0
+MIN_AGE_MIN = 2.0  # past flash sniper window
+MAX_AGE_MIN = 240.0  # 4h — organic runners can graduate mid-session
+# Pullbacks: slightly tighter for quality heat
+ATH_HARD_DUMP = 0.55  # −45% hard dump
+ATH_SOFT_FLOOR = 0.70  # −30% still scorable as WARM/RISKY
 # Just-graduated flash still scannable on heat for a short window
-FLASH_GRAD_MAX_AGE_MIN = 120.0
-FLASH_GRAD_MAX_MCAP = 200_000.0  # under $1M — no multi-million flash on Heat
+FLASH_GRAD_MAX_AGE_MIN = 90.0
+FLASH_GRAD_MAX_MCAP = 150_000.0  # under $150k flash only
 
-# Soft packaging may demote score but packaging-only hard_avoid from status links
-# can still be demoted rather than hidden. True capital hard_avoid always blocks.
+# Soft packaging may demote score. Entry-trap / social-spoof are HARD on heat
+# (those patterns dump — do not alert as organic).
 HEAT_SOFT_PACKAGING_FLAGS = frozenset(
     {
         "fake_twitter",
         "fake_website",
-        "entry_trap_social",
-        "social_spoof_scam",
         "parabolic_no_community",
         "wash_buys",
         "dead_book",
@@ -54,6 +55,13 @@ HEAT_SOFT_PACKAGING_FLAGS = frozenset(
         "suspicious_metadata",
         "zero_sellers",
         "bot_holder_cluster",
+    }
+)
+# Always invest-blocking on heat (not soft-pass)
+HEAT_HARD_PACKAGING_FLAGS = frozenset(
+    {
+        "entry_trap_social",
+        "social_spoof_scam",
     }
 )
 
@@ -220,13 +228,13 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
         if mcap > FLASH_GRAD_MAX_MCAP:
             return f"flash grad too large ${mcap:,.0f} — use Graduated lane"
     if mcap > 0 and mcap < HEAT_MCAP_MIN:
-        return f"below $6k entry band (${mcap:,.0f})"
+        return f"below $7k heat band (${mcap:,.0f}) — lottery zone"
     if mcap > HEAT_MCAP_MAX and not (
         complete and age <= FLASH_GRAD_MAX_AGE_MIN and mcap <= FLASH_GRAD_MAX_MCAP
     ):
         return f"above heat/breakout band ${mcap:,.0f}"
     if age < MIN_AGE_MIN:
-        return f"too fresh {age:.1f}m"
+        return f"too fresh {age:.1f}m — need {MIN_AGE_MIN:.0f}m+ for organic heat"
     if age > MAX_AGE_MIN and not (complete and age <= FLASH_GRAD_MAX_AGE_MIN):
         return f"too old {age:.0f}m"
 
@@ -271,6 +279,10 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
         or {}
     )
     flags = set(avoid.get("flags") or []) if isinstance(avoid, dict) else set()
+    # Entry-trap / social-spoof always kill heat (not organic)
+    if flags & HEAT_HARD_PACKAGING_FLAGS:
+        return "social packaging trap — not organic heat"
+
     hard, hard_why = is_hard_avoid(token)
     if hard:
         # Only allow through if ALL flags are soft packaging (status-link style)
@@ -278,6 +290,16 @@ def heat_reject_reason(token: dict[str, Any]) -> str | None:
             pass  # demote in scoring later
         else:
             return hard_why or "hard avoid"
+
+    # One-way wash under $20k is not organic heat
+    mkt = token.get("market") or {}
+    txns = (mkt.get("txns") or {}).get("m5") or {}
+    buys = _i(txns.get("buys"))
+    sells = _i(txns.get("sells"))
+    if buys >= 15 and sells == 0 and mcap < 20_000:
+        return "one-way wash buys — not organic heat"
+    if buys >= 10 and sells >= 1 and buys / max(sells, 1) > 10 and mcap < 15_000:
+        return "extreme buy skew — wash risk"
 
     safety = token.get("safety") or {}
     if safety.get("is_honeypot") or safety.get("rugged") or safety.get("honeypot"):
@@ -420,9 +442,9 @@ def _heat_signals(token: dict[str, Any]) -> tuple[int, list[str], dict[str, Any]
         why.append("Just graduated — early post-curve window")
 
     if SWEET_ENTRY_MIN <= mcap <= SWEET_ENTRY_MAX:
-        score += 18
+        score += 20
         why.append(
-            f"Sweet $6–10.5k entry → 2× ~${tp2x:,.0f} (12–21k zone)"
+            f"Sweet $7–12k entry → 2× ~${tp2x:,.0f} (14–28k zone)"
         )
     elif HEAT_MCAP_MIN <= mcap < BREAKOUT_MIN:
         score += 12
@@ -430,40 +452,47 @@ def _heat_signals(token: dict[str, Any]) -> tuple[int, list[str], dict[str, Any]
             f"Entry ${mcap:,.0f} · path to ${TARGET_TP_LOW:,.0f}–${TARGET_TP_HIGH:,.0f}"
         )
     elif BREAKOUT_MIN <= mcap <= HEAT_MCAP_MAX:
-        score += 14
+        score += 16
         why.append(
-            f"Breakout ${mcap:,.0f} — early mega / near-grad heat"
+            f"Breakout ${mcap:,.0f} — climb / near-grad heat"
         )
-        # Still climbing structure
         if mcap < 40_000:
-            score += 4
+            score += 6
             why.append("Room toward graduation ~$69k")
+        elif mcap < 55_000:
+            score += 3
     else:
         score += 4  # flash grad oversized still scorable
 
-    # Bonus if 2× lands inside 12–21k (early band only)
+    # Bonus if 2× lands inside target zone (early band)
     if mcap < BREAKOUT_MIN:
         if TARGET_TP_LOW <= tp2x <= TARGET_TP_HIGH:
-            score += 8
+            score += 10
             why.append(f"2× lands in target zone (${tp2x:,.0f})")
         elif tp2x < TARGET_TP_LOW:
-            score += 2
+            score += 3
         elif mcap < TARGET_TP_LOW:
-            score += 4
+            score += 5
             why.append(f"Room to ${TARGET_TP_HIGH:,.0f}")
 
     if bond >= 40:
-        score += 8
+        score += 10
+        why.append(f"Bonding {bond:.0f}% — migration structure")
+    elif bond >= 22:
+        score += 7
         why.append(f"Bonding {bond:.0f}%")
-    elif bond >= 18:
-        score += 5
+    elif bond >= 12:
+        score += 3
     elif bond >= 8:
-        score += 2
-
-    if 2.0 <= age <= 90:
-        score += 6
-    elif age < 2.0:
         score += 1
+
+    if 4.0 <= age <= 90:
+        score += 8
+        why.append(f"Age {age:.0f}m — past flash window")
+    elif 2.0 <= age < 4.0:
+        score += 4
+    elif age < 2.0:
+        score -= 2
         why.append("Very fresh — sniper risk")
 
     # --- Momentum (allow mild red if still heated) ---
@@ -501,17 +530,28 @@ def _heat_signals(token: dict[str, Any]) -> tuple[int, list[str], dict[str, Any]
             score -= 12
             why.append(f"Deep pullback {ath_ret:.0f}% ATH")
 
-    # --- Tx / flow ---
+    # --- Tx / flow (two-way = organic; one-way = wash) ---
     if tx.get("tilt") == "UP" or tx.get("in_sweet_spot"):
-        score += 10
+        score += 12
         why.append(tx.get("summary") or "Tx up")
     elif tx.get("tilt") == "DOWN":
-        score -= 12
+        score -= 14
         why.append("Tx tilt DOWN")
 
-    # --- Mild narrative bonus (not required) ---
+    mkt = token.get("market") or {}
+    txns = (mkt.get("txns") or {}).get("m5") or {}
+    buys = _i(txns.get("buys") or tx.get("buys_m5"))
+    sells = _i(txns.get("sells") or tx.get("sells_m5"))
+    if buys >= 6 and sells >= 2 and buys / max(sells, 1) <= 4.0:
+        score += 10
+        why.append(f"Two-way flow {buys}/{sells}")
+    elif buys >= 12 and sells == 0:
+        score -= 14
+        why.append("One-way buys only")
+
+    # --- Mild narrative bonus (not required for heat) ---
     if social.get("influencer_tweet"):
-        score += 14
+        score += 12
         why.append(social.get("summary") or "Influencer edge")
     elif social.get("has_edge"):
         score += 8
@@ -521,9 +561,9 @@ def _heat_signals(token: dict[str, Any]) -> tuple[int, list[str], dict[str, Any]
         why.append(str((social.get("narratives") or ["meta"])[0]))
 
     if social.get("real_x"):
-        score += 4
+        score += 5
     if social.get("namejack_risk") and not social.get("influencer_tweet"):
-        score -= 8
+        score -= 10
         why.append("Name-jack packaging")
 
     avoid = (
@@ -532,27 +572,51 @@ def _heat_signals(token: dict[str, Any]) -> tuple[int, list[str], dict[str, Any]
         or {}
     )
     flags = set(avoid.get("flags") or []) if isinstance(avoid, dict) else set()
-    if "fake_twitter" in flags or "entry_trap_social" in flags:
-        score -= 10
-        why.append("Status-link social — packaging risk")
-    if "social_spoof_scam" in flags:
+    if "fake_twitter" in flags:
         score -= 12
-        why.append("Social spoof packaging")
+        why.append("Status-link social — packaging risk")
+    if "entry_trap_social" in flags or "social_spoof_scam" in flags:
+        score -= 20
+        why.append("Social trap packaging")
 
     # --- Book ---
     if hk:
-        score += 8
+        score += 10
         if bun is not None and bun <= 5:
-            score += 6
+            score += 8
             why.append(f"Clean book · bundled {bun:.0f}%")
-        elif bun is not None and bun <= 12:
-            score += 2
-        elif bun is not None and bun > 18:
-            score -= 10
+        elif bun is not None and bun <= 10:
+            score += 3
+        elif bun is not None and bun > 15:
+            score -= 12
             why.append(f"Bundled {bun:.0f}%")
     else:
-        score -= 4
+        score -= 6
         why.append("Holders unknown — RISKY")
+
+    # Migration readiness soft boost (what heat is winning on)
+    try:
+        from services.migration_path import analyze_migration_path
+
+        mp = token.get("migrationPath")
+        if not isinstance(mp, dict):
+            mp = analyze_migration_path(
+                mcap_usd=mcap,
+                bonding_progress=bond,
+                safety=token.get("safety") or {},
+                pair=token.get("market") or {},
+                pump=token.get("pumpfun") or {},
+                avoid=avoid if isinstance(avoid, dict) else {},
+            )
+            token["migrationPath"] = mp
+        ms = _i(mp.get("score"))
+        if ms >= 60:
+            score += 10
+            why.append(mp.get("summary") or f"Migration path {ms}")
+        elif ms >= 45:
+            score += 5
+    except Exception:
+        pass
 
     if token.get("realtime"):
         score += 5
@@ -643,47 +707,50 @@ def evaluate_heat(token: dict[str, Any]) -> dict[str, Any]:
     ath_ok = ath_ret is None or ath_ret >= ATH_SOFT_FLOOR * 100
     dev = meta.get("dev") or _dev_profile(token)
 
-    # Labels: tighter for $6k→12–21k path
+    # Labels: HEAT = Telegram quality; WARM = watch; RISKY = dust only
     conf = score
     serial_ish = int(dev.get("tokens_launched") or 0) >= 6 and int(
         dev.get("tokens_migrated") or 0
     ) == 0
     in_sweet = SWEET_ENTRY_MIN <= mcap <= SWEET_ENTRY_MAX
+    ath_heat_ok = ath_ret is None or ath_ret >= 78
     if (
-        score >= 66
-        and replies >= 8
-        and ath_ok
-        and (enrich_ok or hk)
-        and (bun is None or bun <= 15)
+        score >= 68
+        and replies >= 10
+        and ath_heat_ok
+        and hk
+        and enrich_ok
+        and (bun is None or bun <= 12)
         and not dev.get("creator_sold")
         and not serial_ish
-        and mcap >= HEAT_MCAP_MIN
+        and mcap >= HEAT_ALERT_MIN_MCAP
     ):
         label = LABEL_HEAT
-        conf = max(conf, 60)
+        conf = max(conf, 64)
         risk = "elevated"
-    elif score >= 52 and ath_ok and mcap >= HEAT_MCAP_MIN and (
-        replies >= 5
+    elif score >= 54 and ath_ok and mcap >= HEAT_MCAP_MIN and (
+        replies >= 6
         or token.get("realtime")
         or social.get("has_edge")
         or in_sweet
+        or (hk and _f(token.get("bonding_progress")) >= 18)
     ):
         label = LABEL_WARM
-        conf = min(conf, 58)
+        conf = min(conf, 60)
         risk = "high"
         if dev.get("creator_sold") or serial_ish:
             label = LABEL_RISKY
             conf = min(conf, 48)
             risk = "very_high"
-    elif score >= 44 and ath_ok and mcap >= HEAT_MCAP_MIN:
+    elif score >= 46 and ath_ok and mcap >= HEAT_MCAP_MIN:
         label = LABEL_RISKY
         conf = min(conf, 48)
         risk = "very_high"
-        why = why + ["Smaller size — path to 12–21k uncertain"]
+        why = why + ["Smaller size — path to 14–28k uncertain"]
     else:
         return {
             "eligible": False,
-            "reject": "not enough heat for $6k→12–21k path",
+            "reject": "not enough heat for $7k→14–28k path",
             "heat_score": score,
             "label": LABEL_SKIP,
             "confidence": min(conf, 40),
@@ -696,28 +763,31 @@ def evaluate_heat(token: dict[str, Any]) -> dict[str, Any]:
 
     if not hk:
         label = LABEL_RISKY if label == LABEL_HEAT else label
-        if label == LABEL_WARM and score < 60:
+        if label == LABEL_WARM and score < 62:
             label = LABEL_RISKY
         conf = min(conf, 50)
         risk = "very_high"
 
     if not enrich_ok:
-        label = LABEL_RISKY
+        label = LABEL_RISKY if label != LABEL_SKIP else label
         conf = min(conf, 45)
         risk = "very_high"
 
     tp2x = round(mcap * 2.0, 0) if mcap else None
+    # Prefer target-zone TP when 2× overshoots zone for breakouts
+    zone_tp = TARGET_TP_HIGH if mcap and mcap < TARGET_TP_HIGH else tp2x
     plan = {
         "entry_usd": round(mcap, 0) if mcap else None,
         "take_profit_2x_usd": tp2x,
         "target_zone_usd": [TARGET_TP_LOW, TARGET_TP_HIGH],
-        "invalidation_usd": round(mcap * 0.72, 0) if mcap else None,
+        "target_tp_usd": round(zone_tp, 0) if zone_tp else None,
+        "invalidation_usd": round(mcap * 0.75, 0) if mcap else None,
         "size_advice": (
-            f"Entry ≥$6k · aim for ${TARGET_TP_LOW:,.0f}–${TARGET_TP_HIGH:,.0f} "
-            f"(~2–3.5× from $6k). Many still dump — size small. Cut on −28%."
+            f"Entry ≥$7k · aim for ${TARGET_TP_LOW:,.0f}–${TARGET_TP_HIGH:,.0f}. "
+            f"Many still dump — size small. Cut on −25%."
         ),
         "rule": (
-            "Organic Heat 6k→12–21k path. Not capital-safe moons. "
+            "Organic Heat $7k→14–28k path (optimized). Not capital-safe moons. "
             "Book partials into the target zone."
         ),
     }
@@ -770,14 +840,21 @@ def filter_and_rank_heat(
         out.append(row)
 
     rank = {LABEL_HEAT: 0, LABEL_WARM: 1, LABEL_RISKY: 2}
-    out.sort(
-        key=lambda x: (
+
+    def _heat_rank_key(x: dict[str, Any]) -> tuple:
+        m = extract_mcap_usd(x)
+        bond = _f(x.get("bonding_progress"))
+        # Prefer HEAT, then climb structure, then score
+        stage = 0 if bond >= 30 or m >= 18_000 else (1 if m >= 10_000 else 2)
+        return (
             rank.get(x.get("heat_label") or "", 9),
+            stage,
             -(x.get("heat_score") or 0),
             -(x.get("confidence") or 0),
             -_i((x.get("heat") or {}).get("replies")),
         )
-    )
+
+    out.sort(key=_heat_rank_key)
     return out[:limit]
 
 

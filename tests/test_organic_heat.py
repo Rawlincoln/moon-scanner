@@ -47,9 +47,16 @@ def _base(**kw):
     return t
 
 
-def test_heat_requires_6k_min():
+def test_heat_requires_7k_min():
     r = heat_reject_reason(_base(mcap_usd=4_500, ath_mcap=5_000))
-    assert r and ("6k" in r.lower() or "below" in r.lower() or "band" in r.lower())
+    assert r and (
+        "7k" in r.lower()
+        or "below" in r.lower()
+        or "band" in r.lower()
+        or "lottery" in r.lower()
+    )
+    r2 = heat_reject_reason(_base(mcap_usd=6_200, ath_mcap=6_500, age_minutes=10))
+    assert r2 and ("below" in r2.lower() or "7k" in r2.lower() or "lottery" in r2.lower())
 
 
 def test_heat_allows_breakout_15k():
@@ -60,15 +67,20 @@ def test_heat_allows_breakout_15k():
     assert ev["eligible"] is True
 
 
-def test_heat_allows_pullback_in_6k_band():
-    """−20% from ATH still ok if still in $6–12k entry band."""
+def test_heat_allows_pullback_in_7k_band():
+    """−20% from ATH still ok if still in $7–12k entry band."""
     t = _base(mcap_usd=8_000, ath_mcap=10_000)
     assert heat_reject_reason(t) is None
     ev = evaluate_heat(t)
     assert ev["eligible"] is True
     assert ev["label"] in (LABEL_HEAT, LABEL_WARM, LABEL_RISKY)
     assert ev.get("target_2x_usd") == 16_000
-    assert ev.get("target_zone_usd") == [12_000, 21_000]
+    assert ev.get("target_zone_usd") == [14_000, 28_000]
+
+
+def test_heat_blocks_too_fresh():
+    r = heat_reject_reason(_base(mcap_usd=9_000, ath_mcap=9_200, age_minutes=0.5))
+    assert r and "fresh" in r.lower()
 
 
 def test_heat_blocks_hard_dump():

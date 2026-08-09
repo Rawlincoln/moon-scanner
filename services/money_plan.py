@@ -56,6 +56,23 @@ def build_money_plan(
         if snipe_tp > e > 0:
             tp2_pct = (snipe_tp / e) - 1.0
             tp1_pct = min(tp1_pct, tp2_pct * 0.5)
+    # Organic heat: aim into 14–28k zone (optimized winners band)
+    elif kind_l == "heat":
+        stop_pct = min(stop_pct, 0.20)  # heat is looser path; cut −20%
+        heat = token.get("heat") if isinstance(token.get("heat"), dict) else {}
+        zone = heat.get("target_zone_usd") or token.get("target_zone_usd")
+        heat_tp = _f(
+            heat.get("target_tp_usd")
+            or heat.get("target_2x_usd")
+            or token.get("target_2x_usd")
+        )
+        if isinstance(zone, (list, tuple)) and len(zone) >= 2:
+            zone_hi = _f(zone[1])
+            if zone_hi > e > 0:
+                heat_tp = max(heat_tp, zone_hi)
+        if heat_tp > e > 0:
+            tp2_pct = max(0.35, min(2.5, (heat_tp / e) - 1.0))
+            tp1_pct = min(0.45, tp2_pct * 0.45)
 
     stop_mcap = e * (1.0 - stop_pct) if e > 0 else 0.0
     tp1_mcap = e * (1.0 + tp1_pct) if e > 0 else 0.0
