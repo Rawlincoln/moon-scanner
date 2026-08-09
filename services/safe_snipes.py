@@ -1,30 +1,38 @@
 """Safe snipes for ~2× take-profit setups.
 
 Capital-protection first: clean book, no dump, entry band where 2× is
-reachable before migration. Narrative edge is a bonus — not required
-(unlike the main Moon feed).
+reachable before migration.
+
+Social policy (bottom line):
+  - Social-optional: X / TG / website are not required.
+  - Social-honest: spoofed socials hard-reject (status X, media-as-site);
+    a real website does not save status-link X + empty description.
+  - Real socials are mild boosts only; silence demotes only with red flags.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from config import MONEY_ENTRY_MIN_USD, SURVIVAL_MCAP_USD
 from services.accuracy import holders_known, learning_soft_adjust, merge_ath_into_token
 from services.avoid_filters import BLOCKED_MINTS, analyze_avoid_flags, is_hard_avoid
 from services.bundle_sniper import analyze_bundle_and_snipers
 from services.moon_picks import extract_ath_mcap, extract_mcap_usd
 from services.runner_radar import is_crashed_runner
+from services.snipe_social import analyze_snipe_social
 from services.social_signals import analyze_social_narrative
 
-# Entry zone: 2× still under ~graduation band
-SNIPE_MCAP_MIN = 3_500.0
-SNIPE_MCAP_MAX = 16_000.0
+# Entry zone: past survival floor (~$7k) so we don't snipe lottery dumps.
+# Cap still allows 2× before full migration band.
+SNIPE_MCAP_MIN = float(MONEY_ENTRY_MIN_USD or SURVIVAL_MCAP_USD or 7_000)
+SNIPE_MCAP_MAX = 22_000.0  # climb band; 2× still under ~grad soft
 TARGET_MULT = 2.0
 GRAD_SOFT_CAP = 55_000.0  # 2× should not need moonshot migration
 
-MIN_AGE_MIN = 1.5
-MAX_AGE_MIN = 75.0
-MIN_ATH_RETENTION = 0.80  # align DUMP_HIDE_FRAC — hide fades >=20% from ATH
+MIN_AGE_MIN = 4.0  # past sniper flash window
+MAX_AGE_MIN = 120.0  # allow slower organic climbers
+MIN_ATH_RETENTION = 0.85  # tighter than dump wall — local tops still dump
 # SNIPE grade: clean book only. SETUP can stretch to ~8% bundle.
 MAX_BUNDLED_PCT = 5.0
 MAX_BUNDLED_PCT_SETUP = 8.0
@@ -64,7 +72,7 @@ def _sniper_level(token: dict[str, Any]) -> str:
 
 
 def snipe_reject_reason(token: dict[str, Any]) -> str | None:
-    """Hard rejects for safe 2× snipes (no narrative requirement)."""
+    """Hard rejects for safe 2× snipes (social-optional, social-honest)."""
     mint = (token.get("tokenAddress") or token.get("mint") or "").strip()
     if mint in BLOCKED_MINTS:
         return "blocklisted mint"
@@ -81,7 +89,7 @@ def snipe_reject_reason(token: dict[str, Any]) -> str | None:
     if mcap > SNIPE_MCAP_MAX:
         return f"mcap ${mcap:,.0f} above 2× entry band (max ${SNIPE_MCAP_MAX:,.0f})"
     if age < MIN_AGE_MIN:
-        return f"too fresh {age:.1f}m — sniper window"
+        return f"too fresh {age:.1f}m — sniper window (need {MIN_AGE_MIN:.0f}m+)"
     if age > MAX_AGE_MIN:
         return f"too old {age:.0f}m for snipe entry"
 
@@ -95,9 +103,25 @@ def snipe_reject_reason(token: dict[str, Any]) -> str | None:
     if ath >= 3_000 and mcap > 0 and mcap < ath * MIN_ATH_RETENTION:
         return f"faded from ATH ({100 * mcap / ath:.0f}% retained)"
 
+    # One-way wash under climb = dumps before next leg
+    mkt = token.get("market") or {}
+    txns = (mkt.get("txns") or {}).get("m5") or {}
+    buys = int(txns.get("buys") or 0)
+    sells = int(txns.get("sells") or 0)
+    if buys >= 12 and sells == 0 and mcap < 18_000:
+        return "one-way wash buys — not a durable snipe"
+    if buys >= 8 and sells >= 1 and buys / max(sells, 1) > 8 and mcap < 12_000:
+        return "extreme buy skew — wash risk"
+
     hard, hard_why = is_hard_avoid(token)
     if hard:
         return hard_why or "hard avoid"
+
+    # Social-honest gate (missing socials OK; spoofed socials fatal)
+    social_h = analyze_snipe_social(token)
+    token["snipeSocial"] = social_h
+    if social_h.get("hard_reject"):
+        return str(social_h["hard_reject"])
 
     # After enrich pipeline: enrich_ok must be True. Pre-enrich cards omit the key.
     if "enrich_ok" in token and token.get("enrich_ok") is not True:
@@ -196,38 +220,46 @@ def evaluate_snipe(token: dict[str, Any]) -> dict[str, Any]:
     score = 40
     why: list[str] = []
 
-    # Sweet 2× entry (~$5–10k)
-    if 5_000 <= mcap <= 10_000:
+    # Prefer proved survival + climb (not pre-$7k lottery)
+    if 8_000 <= mcap <= 14_000:
         score += 18
-        why.append(f"Sweet 2× entry ${mcap:,.0f} → ${target:,.0f}")
-    elif 3_500 <= mcap < 5_000:
-        score += 12
-        why.append(f"Early band ${mcap:,.0f} — 2× ${target:,.0f}")
+        why.append(f"Sweet 2× climb ${mcap:,.0f} → ${target:,.0f}")
+    elif SNIPE_MCAP_MIN <= mcap < 8_000:
+        score += 10
+        why.append(f"Survival band ${mcap:,.0f} — 2× ${target:,.0f}")
+    elif 14_000 < mcap <= 22_000:
+        score += 14
+        why.append(f"Climb band ${mcap:,.0f} — 2× ${target:,.0f}")
     else:
-        score += 8
+        score += 6
         why.append(f"2× target ${target:,.0f}")
 
     if ath_ret is not None:
         if ath_ret >= 92:
             score += 16
             why.append(f"Near ATH ({ath_ret}%)")
-        elif ath_ret >= 80:
+        elif ath_ret >= 85:
             score += 10
             why.append(f"Holding ATH zone ({ath_ret}%)")
         else:
-            score += 4
+            score += 2
 
-    if 2.5 <= age <= 25:
+    if 5 <= age <= 40:
         score += 12
         why.append(f"Survived snipers · {age:.0f}m old")
-    elif age <= 45:
+    elif age <= 75:
         score += 6
-
-    if 15 <= bond <= 55:
-        score += 8
-        why.append(f"Bonding {bond:.0f}% — room to climb")
-    elif bond < 15:
+    elif age <= 120:
         score += 3
+
+    if 18 <= bond <= 55:
+        score += 12
+        why.append(f"Bonding {bond:.0f}% — migration room")
+    elif 12 <= bond < 18:
+        score += 6
+        why.append(f"Bonding {bond:.0f}% — early climb")
+    elif bond < 12:
+        score += 1  # deep early still high fail
 
     bun = _bundled_pct(token)
     if bun is not None and bun < 3:
@@ -256,6 +288,22 @@ def evaluate_snipe(token: dict[str, Any]) -> dict[str, Any]:
     if social.get("influencer_tweet") or social.get("has_edge"):
         score += 10
         why.append(social.get("summary") or "Narrative edge bonus")
+
+    # Social-optional / social-honest: boost real links; silence demote only w/ red flags
+    snipe_soc = token.get("snipeSocial")
+    if not isinstance(snipe_soc, dict):
+        snipe_soc = analyze_snipe_social(token)
+        token["snipeSocial"] = snipe_soc
+    if snipe_soc.get("hard_reject"):
+        # Should already be rejected; keep score floor for safety
+        score = 0
+        why.append(str(snipe_soc["hard_reject"]))
+    else:
+        delta = int(snipe_soc.get("score_delta") or 0)
+        score += delta
+        for note in (snipe_soc.get("why") or [])[:3]:
+            if note and note not in why:
+                why.append(note)
 
     # Unique ticker = mild snipe signal; reused copycat = demote
     try:
@@ -370,10 +418,18 @@ def evaluate_snipe(token: dict[str, Any]) -> dict[str, Any]:
         "ath_retention_pct": ath_ret,
         "holders_known": hk,
         "learning_soft": learn_meta if learn_meta.get("applied") else None,
-        "why": why[:7] or ["Passed safe-snipe filters"],
+        "why": why[:8] or ["Passed safe-snipe filters"],
         "plan": plan,
         "bundle_pct": bun,
         "sniper_level": sn_lv,
+        "snipe_social": {
+            "policy": (snipe_soc or {}).get("policy") or "social-optional, social-honest",
+            "honest": (snipe_soc or {}).get("honest", True),
+            "has_any_social": (snipe_soc or {}).get("has_any_social"),
+            "has_real_social": (snipe_soc or {}).get("has_real_social"),
+            "flags": (snipe_soc or {}).get("flags") or [],
+            "score_delta": int((snipe_soc or {}).get("score_delta") or 0),
+        },
     }
 
 
@@ -413,7 +469,7 @@ def filter_and_rank_snipes(
             0 if x.get("snipe_label") == LABEL_SNIPE else 1,
             -(x.get("snipe_score") or 0),
             -(x.get("confidence") or 0),
-            abs((x.get("mcap_usd") or 0) - 7_000),  # prefer ~$7k sweet
+            abs((x.get("mcap_usd") or 0) - 10_000),  # prefer ~$10k climb sweet
         )
     )
     return out[:limit]
@@ -452,6 +508,21 @@ def snipe_card_from_coin(coin: dict, *, source: str = "pump.fun") -> dict[str, A
     hard, _ = is_hard_avoid({"avoid": avoid})
     if hard or avoid.get("hard_avoid"):
         return None
+    # Pre-build card shell for social-honesty gate (no enrich yet)
+    pre = {
+        "tokenAddress": mint,
+        "pumpfun": {
+            "twitter": coin.get("twitter"),
+            "telegram": coin.get("telegram"),
+            "website": coin.get("website"),
+            "description": coin.get("description"),
+            "reply_count": coin.get("reply_count", 0),
+        },
+        "avoid": avoid,
+    }
+    snipe_soc = analyze_snipe_social(pre)
+    if snipe_soc.get("hard_reject"):
+        return None
     social = analyze_social_narrative(
         pump_coin=coin,
         name=coin.get("name") or "",
@@ -483,6 +554,7 @@ def snipe_card_from_coin(coin: dict, *, source: str = "pump.fun") -> dict[str, A
         "safetyReport": {"avoid": avoid},
         "avoid": avoid,
         "socialSignals": social,
+        "snipeSocial": snipe_soc,
         "pump_url": f"https://pump.fun/coin/{mint}",
         "padre_url": f"{PADRE_TRADE_URL}/trade/solana/{mint}",
         "source": source,

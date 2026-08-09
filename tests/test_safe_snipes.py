@@ -42,8 +42,13 @@ def test_reject_high_mcap():
 
 
 def test_reject_dumped():
-    r = snipe_reject_reason(_base(mcap_usd=5000, ath_mcap=20_000))
-    assert r and ("faded" in r.lower() or "dump" in r.lower())
+    r = snipe_reject_reason(_base(mcap_usd=9_000, ath_mcap=20_000))
+    assert r and ("faded" in r.lower() or "dump" in r.lower() or "ath" in r.lower())
+
+
+def test_reject_below_survival_floor():
+    r = snipe_reject_reason(_base(mcap_usd=5_000, ath_mcap=5_200))
+    assert r and ("below" in r.lower() or "7,000" in r or "7000" in r)
 
 
 def test_reject_bundled():

@@ -61,14 +61,38 @@ def test_dump_from_ath_reject():
     r = reject_reason(
         {
             "tokenAddress": "DumpMint11111111111111111111111111111",
-            "mcap_usd": 5_000,
+            "mcap_usd": 12_000,
             "ath_mcap": 30_000,
             "age_minutes": 40,
             "pumpfun": {"reply_count": 50, "twitter": "https://x.com/proj"},
         }
     )
     assert r
-    assert "dump" in r.lower() or "faded" in r.lower() or "ath" in r.lower()
+    assert (
+        "dump" in r.lower()
+        or "faded" in r.lower()
+        or "ath" in r.lower()
+        or "survival" in r.lower()
+    )
+
+
+def test_below_survival_floor_reject():
+    """Lottery under $7k must not be recommended."""
+    r = reject_reason(
+        {
+            "tokenAddress": "LotteryMint1111111111111111111111111",
+            "mcap_usd": 5_000,
+            "ath_mcap": 5_200,
+            "age_minutes": 20,
+            "pumpfun": {
+                "reply_count": 40,
+                "twitter": "https://x.com/elonmusk/status/1",
+                "description": "moon",
+            },
+        }
+    )
+    assert r
+    assert "survival" in r.lower() or "small" in r.lower() or "lottery" in r.lower()
 
 
 def test_random_chart_no_narrative_reject():
@@ -187,14 +211,14 @@ def test_balanced_organic_community_near_ath():
 
 
 def test_balanced_ath_pullback_with_holders():
-    """Balanced: −16% ATH ok when holders known (strict would fade at −12%)."""
+    """Balanced: mild ATH pullback ok when holders known (−13% with strong floor)."""
     from services.moon_picks import moon_mode
 
     if moon_mode() != "balanced":
         return
     t = _base_token(
-        mcap_usd=16_800,
-        ath_mcap=20_000,  # 84% ATH
+        mcap_usd=17_200,
+        ath_mcap=20_000,  # 86% ATH — within strong floor 0.85
         bonding_progress=45,
         pumpfun={
             "twitter": "https://x.com/elonmusk/status/1",
@@ -202,9 +226,44 @@ def test_balanced_ath_pullback_with_holders():
             "description": "doge forever",
             "name": "Mars Dog",
             "symbol": "MARS",
-            "usd_market_cap": 16_800,
+            "usd_market_cap": 17_200,
             "ath_market_cap": 20_000,
         },
     )
     r = reject_reason(t)
     assert r is None, r
+
+
+def test_climb_structure_path_without_influencer():
+    """Mid-curve climber with clean book can pass without influencer edge."""
+    from services.moon_picks import moon_mode
+
+    if moon_mode() != "balanced":
+        return
+    t = _base_token(
+        tokenAddress="ClimbMint1111111111111111111111111111",
+        mcap_usd=22_000,
+        ath_mcap=23_000,
+        bonding_progress=35,
+        age_minutes=40,
+        name="Climb Cat",
+        symbol="CCAT",
+        market={
+            "txns": {"m5": {"buys": 20, "sells": 8}},
+            "priceChange": {"m5": 5, "h1": 12},
+        },
+        pumpfun={
+            "twitter": "https://x.com/climbcat",
+            "reply_count": 14,
+            "description": "organic climb",
+            "name": "Climb Cat",
+            "symbol": "CCAT",
+            "usd_market_cap": 22_000,
+            "ath_market_cap": 23_000,
+        },
+    )
+    r = reject_reason(t)
+    assert r is None, r
+    ev = evaluate(t)
+    assert ev["eligible"]
+    assert ev["stage"] in ("climb", "near_migration")

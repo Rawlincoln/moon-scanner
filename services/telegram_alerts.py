@@ -446,6 +446,28 @@ async def notify_new_picks(
             lab = _label_of(feed_key, t)
             if allowed and lab not in allowed:
                 continue
+            # Money mode: WATCH only for climb / near-migration (not lottery survivors)
+            if (
+                TELEGRAM_MONEY_MODE
+                and feed_key == "moon"
+                and lab == "WATCH"
+            ):
+                st = str(
+                    t.get("stage")
+                    or (t.get("moon") or {}).get("stage")
+                    or ""
+                ).lower()
+                mcap_w = 0.0
+                try:
+                    mcap_w = float(
+                        t.get("mcap_usd")
+                        or (t.get("moon") or {}).get("mcap_usd")
+                        or 0
+                    )
+                except (TypeError, ValueError):
+                    mcap_w = 0.0
+                if st not in ("climb", "near_migration") and mcap_w < 12_000:
+                    continue
             key = f"{feed_key}:{mint}"
             if key in seen and now - seen[key] < TELEGRAM_ALERT_DEDUPE_SEC:
                 continue

@@ -146,12 +146,16 @@ LEARNING_DB = Path(os.getenv("LEARNING_DB") or (DATA_DIR / "learning.db"))
 # Skip DexScreener smart-money order fetch during bulk trenches (saves ~0.5–1s/token)
 FAST_SCAN_SKIP_DEX_ORDERS = True
 
-# $6k entry radar — catch climbers BEFORE they leave the entry zone
-# (user missed GLourz… at $6k; scanner only saw it later at $30k+)
-SIXK_RADAR_MIN_USD = 2_000
-SIXK_RADAR_MAX_USD = 9_000
-SIXK_ENTRY_SWEET_MIN = 3_500
-SIXK_ENTRY_SWEET_MAX = 7_500
+# Survival floor — most lottery charts die before $7k; do not recommend below it.
+# (user: recs dump pre-$7k; real migrators live on the climb path)
+SURVIVAL_MCAP_USD = float(os.getenv("SURVIVAL_MCAP_USD", "7000") or "7000")
+# Money-grade alerts (MOON/SNIPE) require live mcap at/above this floor
+MONEY_ENTRY_MIN_USD = float(os.getenv("MONEY_ENTRY_MIN_USD", "7000") or "7000")
+# $7k+ radar — catch climbers that already proved survival (not pure lottery)
+SIXK_RADAR_MIN_USD = 7_000
+SIXK_RADAR_MAX_USD = 18_000
+SIXK_ENTRY_SWEET_MIN = 7_000
+SIXK_ENTRY_SWEET_MAX = 14_000
 # Heavy trenches warm OFF — saturates event loop; /api/moon is the primary path
 BACKGROUND_SCAN_INTERVAL_SEC = 0
 BACKGROUND_SCAN_PER_COLUMN = 0
@@ -163,14 +167,14 @@ RUNNER_ALERT_TTL_SEC = 45 * 60  # keep sticky alerts 45 min
 NEAR_MIGRATION_STICKY_TTL_SEC = 8 * 60  # short pin — dumps must vanish fast
 NEAR_MIGRATION_MAX_STICKY = 12
 
-# Pro trencher — early band still uses ~$6k; migration track uses bonding %
-TARGET_MCAP_USD = 6_000
-MCAP_INVEST_MIN_USD = 3_500  # start flagging earlier than $4k
-MCAP_INVEST_MAX_USD = 8_500  # still "entry" slightly past 6k
+# Pro trencher — entry after survival floor; migration track uses bonding %
+TARGET_MCAP_USD = 10_000
+MCAP_INVEST_MIN_USD = 7_000  # never flag pure lottery under survival floor
+MCAP_INVEST_MAX_USD = 22_000  # climb band still investable pre-migration
 # Under-$25k "structure" band (between lottery and near-migration)
 UNDER25K_MIN_USD = 8_000
 UNDER25K_MAX_USD = 25_000
-MIN_SURVIVAL_AGE_MINUTES = 0.75
+MIN_SURVIVAL_AGE_MINUTES = 4.0  # under $15k: need age past sniper flash
 MIN_TOKEN_HOLDERS = 12
 MIN_DEX_VOL_M5_USD = 600
 MIN_DEX_BUYS_M5 = 8
@@ -267,7 +271,8 @@ TELEGRAM_MONEY_MODE = _money_raw not in ("0", "false", "no", "off")
 
 if TELEGRAM_MONEY_MODE:
     _default_feeds = "moon,snipe"
-    _default_moon_labels = "MOON"
+    # WATCH allowed so mid-curve migrators surface (still gated by stage filter in telegram)
+    _default_moon_labels = "MOON,WATCH"
     _default_snipe_labels = "SNIPE"
 else:
     _default_feeds = "moon,snipe,heat,grad"

@@ -294,7 +294,7 @@ async def enrich_moon_card(
 
 
 def rough_priority(card: dict[str, Any]) -> float:
-    """Pre-rank before expensive dex enrich — prefer near-ATH + social + proven devs."""
+    """Pre-rank before expensive dex enrich — prefer climb/migration + social + devs."""
     mcap = float(card.get("mcap_usd") or 0)
     ath = float(card.get("ath_mcap") or 0)
     bond = float(card.get("bonding_progress") or 0)
@@ -311,6 +311,15 @@ def rough_priority(card: dict[str, Any]) -> float:
         boost += 10
     elif edge >= 30:
         boost += 5
+    # Prefer mid-curve climbers (migration path) over sub-$7k lottery for enrich budget
+    if mcap >= 28_000 or bond >= 40:
+        boost += 16  # near migration
+    elif mcap >= 14_000 or bond >= 22:
+        boost += 12  # climb
+    elif mcap >= 7_000:
+        boost += 6  # past survival floor
+    else:
+        boost -= 8  # lottery — deprioritize enrich
     # Prefer creators with migrate/moon track records for enrich budget
     try:
         from services.dev_risk import attach_dev_risk, dev_priority_boost
@@ -332,9 +341,9 @@ def rough_priority(card: dict[str, Any]) -> float:
         pass
     return (
         ret * 50
-        + min(bond, 80) * 0.4
+        + min(bond, 80) * 0.55  # bonding progress more weight (migration signal)
         + min(replies, 40) * 0.35
-        + min(mcap / 1000, 40)
+        + min(mcap / 1000, 55)  # higher mcap climbers get enrich priority
         + boost
     )
 

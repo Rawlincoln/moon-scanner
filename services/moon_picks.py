@@ -1,16 +1,18 @@
-"""Moon Picks v3 — capital-protection gate.
+"""Moon Picks v3 — capital-protection + migration path.
 
-After user losses: almost never recommend. Show only when:
+After user losses + pre-$7k dump feedback: almost never recommend lottery.
+Show only when:
   1. Not dumped / not rug / not ghost
-  2. Near ATH (still climbing)
-  3. Real narrative edge: influencer tweet OR trending meta + community
-  4. Multi-pillar score + confidence agree
+  2. Past survival floor (~$7k) — charts that die before $7k are not picks
+  3. Near ATH (still climbing) + structure toward migration
+  4. Real narrative edge OR organic climb path (holders + two-way + bond)
+  5. Multi-pillar score + confidence agree
 
 Modes (MOON_MODE env):
   strict   — ultra-tight post-loss gates (−12% ATH, hard community bar)
-  balanced — default; slight ATH/organic relax when holders clean (still not Heat)
+  balanced — default; organic climb path for mid-curve migrators (still not Heat)
 
-Random near-ATH charts without story = REJECT (they dump ~always).
+Random near-ATH sub-$7k charts without structure = REJECT.
 """
 
 from __future__ import annotations
@@ -22,7 +24,10 @@ from config import (
     GRADUATION_MCAP_USD,
     MIGRATION_MCAP_MAX_USD,
     MIGRATION_NEAR_MIN_PCT,
+    MIN_SURVIVAL_AGE_MINUTES,
+    MONEY_ENTRY_MIN_USD,
     MOON_MODE,
+    SURVIVAL_MCAP_USD,
 )
 from services.accuracy import holders_known, learning_soft_adjust, merge_ath_into_token
 from services.avoid_filters import BLOCKED_MINTS, is_hard_avoid
@@ -31,9 +36,11 @@ from services.runner_radar import extract_ath_mcap, extract_mcap_usd, is_crashed
 from services.social_signals import analyze_social_narrative
 from services.tx_activity import score_tx_activity
 
-# Stricter band — early dust rarely moons
-MIN_MCAP = 4_000
+# Discovery floor — still above pure dust; money labels use SURVIVAL_MCAP_USD
+MIN_MCAP = max(5_500.0, float(SURVIVAL_MCAP_USD) * 0.78)
 MAX_MCAP = MIGRATION_MCAP_MAX_USD
+# Recommend / MOON-WATCH money path: must live at/above survival (~$7k)
+RECOMMEND_MIN_MCAP = float(MONEY_ENTRY_MIN_USD or SURVIVAL_MCAP_USD or 7_000)
 
 # ATH floors depend on mode (balanced recovers slight-dip organic climbers)
 if MOON_MODE == "strict":
@@ -41,10 +48,10 @@ if MOON_MODE == "strict":
     NEAR_ATH_FRAC_STRONG = 0.85  # −15% with holders + edge
     FADE_ATH_FRAC = 0.93
 else:
-    # balanced: −15% default; −18% with holders + edge (still near peak)
-    NEAR_ATH_FRAC = 0.85
-    NEAR_ATH_FRAC_STRONG = 0.82
-    FADE_ATH_FRAC = 0.90
+    # balanced: tighter under survival/climb so local $5–6k tops don't pass
+    NEAR_ATH_FRAC = 0.88
+    NEAR_ATH_FRAC_STRONG = 0.85
+    FADE_ATH_FRAC = 0.92
 
 LABEL_MOON = "MOON"
 LABEL_WATCH = "WATCH"
@@ -59,8 +66,9 @@ def moon_mode() -> str:
 def default_rank_gates() -> dict[str, Any]:
     """Base score/conf floors before adaptive outcomes layer."""
     if moon_mode() == "strict":
-        return {"min_score": 55, "min_confidence": 52, "max_bundled_pct": 12.0}
-    return {"min_score": 52, "min_confidence": 50, "max_bundled_pct": 12.0}
+        return {"min_score": 58, "min_confidence": 54, "max_bundled_pct": 8.0}
+    # Tighter books for money path — lottery bundles dump pre-migration
+    return {"min_score": 54, "min_confidence": 52, "max_bundled_pct": 8.0}
 
 
 def _f(val: Any, default: float = 0.0) -> float:
@@ -124,6 +132,47 @@ def stage_of(token: dict[str, Any]) -> str:
     return "early"
 
 
+def _two_way_flow(token: dict[str, Any]) -> tuple[bool, bool, int, int]:
+    """Return (two_way, one_way_wash, buys_m5, sells_m5)."""
+    mkt = token.get("market") or {}
+    txns = (mkt.get("txns") or {}).get("m5") or {}
+    buys = _i(txns.get("buys"))
+    sells = _i(txns.get("sells"))
+    if buys == 0 and sells == 0:
+        tx = token.get("txActivity") or {}
+        buys = _i(tx.get("buys_m5") or tx.get("buys"))
+        sells = _i(tx.get("sells_m5") or tx.get("sells"))
+    ratio = buys / max(sells, 1)
+    one_way = buys >= 15 and sells == 0
+    two_way = buys >= 5 and sells >= 2 and ratio <= 3.8
+    return two_way, one_way, buys, sells
+
+
+def _attach_migration_path(token: dict[str, Any]) -> dict[str, Any]:
+    mp = token.get("migrationPath")
+    if isinstance(mp, dict) and mp.get("score") is not None:
+        return mp
+    try:
+        from services.migration_path import analyze_migration_path
+
+        mcap = extract_mcap_usd(token)
+        mp = analyze_migration_path(
+            mcap_usd=mcap,
+            bonding_progress=_bond(token, mcap),
+            safety=token.get("safety") or {},
+            pair=token.get("market") or {},
+            pump=_pf(token),
+            avoid=token.get("avoid")
+            or (token.get("safetyReport") or {}).get("avoid")
+            or {},
+            complete=bool(_pf(token).get("complete")),
+        )
+        token["migrationPath"] = mp
+        return mp
+    except Exception:
+        return {}
+
+
 def reject_reason(token: dict[str, Any]) -> str | None:
     """Hard reject — never show / recommend."""
     mint = _mint(token)
@@ -145,8 +194,26 @@ def reject_reason(token: dict[str, Any]) -> str | None:
     if mcap > MAX_MCAP:
         return f"too large ${mcap:,.0f}"
 
+    # Survival floor: most recommended dumps never print $7k — do not recommend lottery
+    if 0 < mcap < RECOMMEND_MIN_MCAP:
+        return (
+            f"below survival floor ${RECOMMEND_MIN_MCAP:,.0f} "
+            f"(${mcap:,.0f}) — lottery dump zone"
+        )
+
+    # Age past sniper flash for sub-$15k; mid-curve can be younger if already large
+    min_age = float(MIN_SURVIVAL_AGE_MINUTES or 4.0)
+    if mcap < 15_000 and 0 < age < min_age:
+        return f"too fresh {age:.1f}m under $15k — need {min_age:.0f}m+ survival"
     if 0 < age < 1.0 and mcap >= 15_000:
         return "flash launch — too young for mcap"
+
+    # One-way wash under climb band = pre-dump packaging
+    two_way, one_way, buys, sells = _two_way_flow(token)
+    if one_way and mcap < 25_000:
+        return "one-way wash buys — not a migration path"
+    if mcap < 12_000 and buys >= 10 and sells == 0:
+        return "zero sellers under $12k — wash risk"
 
     crashed, why = is_crashed_runner(
         token, mcap=mcap or None, ath=ath or None, peak=peak or None
@@ -233,6 +300,9 @@ def reject_reason(token: dict[str, Any]) -> str | None:
             if bun_pct > (12.0 if moon_mode() == "balanced" else 10.0):
                 bun_ok = False
 
+        two_way_f, _, _, _ = _two_way_flow(token)
+        mp = _attach_migration_path(token)
+        mig_score = _i(mp.get("score"))
         if moon_mode() == "strict":
             organic_ok = (
                 bond >= 42
@@ -243,30 +313,62 @@ def reject_reason(token: dict[str, Any]) -> str | None:
                 and mcap >= ath * 0.92
             )
         else:
-            # balanced organic: known book + real community near ATH
-            # (catches BAKI-class climbers that lack influencer tags)
+            # balanced organic climb path — catch migrators without influencer tags
+            # (user: missing tokens that go all the way to migration)
             near_ath_ok = ath > 0 and mcap >= ath * 0.85
             organic_ok = bun_ok and near_ath_ok and (
                 (
                     bond >= 35
                     and mcap >= 12_000
-                    and replies >= 12
+                    and replies >= 10
                     and social.get("real_x")
                 )
                 or (
                     hk
-                    and mcap >= 8_000
-                    and replies >= 15
+                    and mcap >= RECOMMEND_MIN_MCAP
+                    and replies >= 12
                     and (social.get("real_x") or social.get("has_tiktok"))
                     and not social.get("namejack_risk")
                 )
                 or (
                     hk
-                    and bond >= 28
+                    and bond >= 22
                     and mcap >= 10_000
-                    and replies >= 18
+                    and replies >= 12
                     and not social.get("namejack_risk")
                     and not social.get("status_only")
+                )
+                # Structure path: already past survival, climbing toward migration
+                or (
+                    hk
+                    and bun_ok
+                    and mcap >= 12_000
+                    and bond >= 18
+                    and near_ath_ok
+                    and (two_way_f or replies >= 8)
+                    and not social.get("namejack_risk")
+                    and not social.get("status_only")
+                )
+                # Strong migration_path score mid-curve
+                or (
+                    hk
+                    and bun_ok
+                    and mcap >= 14_000
+                    and mig_score >= 55
+                    and near_ath_ok
+                    and not social.get("namejack_risk")
+                )
+                # Near-migration: structure alone is enough (hold book known)
+                or (
+                    hk
+                    and bun_ok
+                    and (
+                        bond >= MIGRATION_NEAR_MIN_PCT
+                        or mcap >= 28_000
+                        or mig_score >= 65
+                    )
+                    and near_ath_ok
+                    and not social.get("namejack_risk")
                 )
             )
         if not organic_ok:
@@ -420,28 +522,54 @@ def _pillar_structure(token: dict[str, Any], mcap: float, bond: float) -> tuple[
     notes: list[str] = []
     score = 15
     stage = stage_of(token)
+    mp = _attach_migration_path(token)
+    mig_score = _i(mp.get("score"))
     if stage == "near_migration":
-        score += 42
+        score += 45
         notes.append(f"Near migration · {bond:.0f}% bonded")
     elif stage == "climb":
-        score += 30
+        score += 34
         notes.append(f"Climbing · {bond:.0f}% bonded")
     else:
-        score += 8
-        notes.append(f"Early · {bond:.0f}% bonded — high fail rate")
+        # Early / just-past survival — still high fail vs migration
+        score += 4
+        notes.append(f"Just past survival · {bond:.0f}% bonded — prove climb")
 
     if bond >= 55:
         score += 16
     elif bond >= 40:
         score += 12
     elif bond >= 25:
-        score += 6
+        score += 8
+    elif bond >= 15:
+        score += 4
 
-    if 12_000 <= mcap <= 55_000:
+    # Prefer mcap bands that actually migrate (not lottery)
+    if 18_000 <= mcap <= 55_000:
+        score += 18
+        notes.append("Migration mcap band")
+    elif 12_000 <= mcap < 18_000:
         score += 14
         notes.append("Runner mcap band")
-    elif 6_000 <= mcap < 12_000:
+    elif RECOMMEND_MIN_MCAP <= mcap < 12_000:
         score += 6
+        notes.append("Survival band — need structure")
+
+    if mig_score >= 65:
+        score += 12
+        notes.append(mp.get("summary") or f"Migration path {mig_score}")
+    elif mig_score >= 48:
+        score += 6
+        notes.append(f"Migration path {mig_score}")
+
+    two_way, one_way, _, _ = _two_way_flow(token)
+    if two_way:
+        score += 8
+        notes.append("Two-way flow")
+    elif one_way:
+        score -= 20
+        notes.append("One-way wash")
+
     return max(0, min(100, score)), notes
 
 
@@ -589,12 +717,15 @@ def moon_score(token: dict[str, Any]) -> int:
     n, _ = _pillar_narrative(token)
     i, _ = _pillar_interest(token)
     safe, _ = _pillar_safety(token)
-    # Narrative + momentum dominate (what actually moons)
-    composite = 0.28 * m + 0.18 * s + 0.30 * n + 0.14 * i + 0.10 * safe
+    # Momentum + structure + narrative — structure matters for migration survival
+    composite = 0.26 * m + 0.24 * s + 0.26 * n + 0.12 * i + 0.12 * safe
     if m < 55:
         composite = min(composite, 48)
-    if n < 40:
+    # Allow climb-path tokens with weaker influencer narrative if structure is strong
+    if n < 40 and s < 50:
         composite = min(composite, 50)
+    elif n < 35 and s >= 55:
+        composite = min(composite, 62)
     social = _ensure_social(token)
     if social.get("influencer_tweet"):
         composite = min(100, composite + 8)
@@ -625,6 +756,24 @@ def moon_score(token: dict[str, Any]) -> int:
             composite = max(0, min(100, composite + fb))
     except Exception:
         pass
+    # Migration path readiness (tokens that can actually graduate)
+    try:
+        mp = _attach_migration_path(token)
+        ms = _i(mp.get("score"))
+        if ms >= 65:
+            composite = min(100, composite + 8)
+        elif ms >= 50:
+            composite = min(100, composite + 4)
+        if str(mp.get("lane") or "") == "early_lottery":
+            composite = min(composite, 52)
+    except Exception:
+        pass
+    # Prefer climb/near-migration stages over just-survived charts
+    st = stage_of(token)
+    if st == "near_migration":
+        composite = min(100, composite + 6)
+    elif st == "climb":
+        composite = min(100, composite + 3)
     return max(0, min(100, int(round(composite))))
 
 
@@ -635,9 +784,17 @@ def moon_label(
     narrative: int = 100,
     social: dict | None = None,
     holders_known: bool = True,
+    mcap: float = 0.0,
+    bond: float = 0.0,
+    structure: int = 0,
+    stage: str = "",
 ) -> str:
     social = social or {}
     bal = moon_mode() == "balanced"
+    mcap = mcap or 0.0
+    # Never MOON/WATCH below survival floor
+    if 0 < mcap < RECOMMEND_MIN_MCAP:
+        return LABEL_WEAK
     # MOON only with real edge + near ATH + known holder book
     moon_score_floor = 72 if bal else 75
     moon_mom = 78 if bal else 80
@@ -650,10 +807,23 @@ def moon_label(
         and (social.get("influencer_tweet") or social.get("has_edge"))
     ):
         return LABEL_MOON
+    # Climb / near-migration structure MOON without influencer (real migrators)
+    if (
+        bal
+        and holders_known
+        and score >= 70
+        and momentum >= 76
+        and structure >= 55
+        and mcap >= 12_000
+        and (bond >= 18 or stage in ("climb", "near_migration") or mcap >= 18_000)
+        and not social.get("namejack_risk")
+        and not social.get("status_only")
+    ):
+        return LABEL_MOON
     # WATCH also needs holder book truth — unknown book is not a recommendation grade
     watch_score = 55 if bal else 58
     watch_mom = 66 if bal else 70
-    watch_narr = 36 if bal else 40
+    watch_narr = 34 if bal else 40
     if holders_known and score >= watch_score and momentum >= watch_mom and narrative >= watch_narr:
         return LABEL_WATCH
     if holders_known and score >= 50 and social.get("influencer_tweet") and momentum >= 72:
@@ -662,10 +832,20 @@ def moon_label(
     if (
         bal
         and holders_known
-        and score >= 56
-        and momentum >= 70
-        and narrative >= 32
-        and (social.get("real_x") or _i(social.get("replies")) >= 15)
+        and score >= 54
+        and momentum >= 68
+        and (
+            narrative >= 30
+            or structure >= 50
+            or stage in ("climb", "near_migration")
+            or mcap >= 14_000
+        )
+        and (
+            social.get("real_x")
+            or _i(social.get("replies")) >= 10
+            or structure >= 55
+            or stage == "near_migration"
+        )
         and not social.get("namejack_risk")
     ):
         return LABEL_WATCH
@@ -703,6 +883,7 @@ def evaluate(token: dict[str, Any]) -> dict[str, Any]:
     safe_sc, safe_why = _pillar_safety(token)
 
     hk = holders_known(token)
+    st = stage_of(token)
     score = moon_score(token)
     label = moon_label(
         score,
@@ -710,12 +891,18 @@ def evaluate(token: dict[str, Any]) -> dict[str, Any]:
         narrative=n_sc,
         social=social,
         holders_known=hk,
+        mcap=mcap,
+        bond=bond,
+        structure=s_sc,
+        stage=st,
     )
     conf = int(
-        round(0.30 * m_sc + 0.15 * s_sc + 0.30 * n_sc + 0.15 * i_sc + 0.10 * safe_sc)
+        round(0.26 * m_sc + 0.22 * s_sc + 0.26 * n_sc + 0.14 * i_sc + 0.12 * safe_sc)
     )
     if social.get("influencer_tweet"):
         conf = min(99, conf + 10)
+    if st in ("climb", "near_migration"):
+        conf = min(99, conf + 4)
     if not hk:
         conf = min(conf, 48)
         safe_sc = min(safe_sc, 50)
@@ -735,16 +922,23 @@ def evaluate(token: dict[str, Any]) -> dict[str, Any]:
             narrative=n_sc,
             social=social,
             holders_known=hk,
+            mcap=mcap,
+            bond=bond,
+            structure=s_sc,
+            stage=st,
         )
         if label == LABEL_WEAK:
             conf = min(conf, 45)
 
     ath_ret = round(100 * mcap / ath, 1) if ath > 0 and mcap > 0 else None
+    mp = _attach_migration_path(token)
     why: list[str] = []
     why.extend(n_why[:2])
     why.extend(m_why[:1])
     why.extend(s_why[:1])
     why.extend(i_why[:1])
+    if mp.get("summary") and st in ("climb", "near_migration"):
+        why.append(str(mp["summary"])[:90])
     if not hk:
         why.append("Holder book incomplete — not MOON/WATCH grade")
     if learn_meta.get("applied"):
@@ -761,11 +955,11 @@ def evaluate(token: dict[str, Any]) -> dict[str, Any]:
         "moon_score": score,
         "label": label,
         "confidence": conf,
-        "stage": stage_of(token),
+        "stage": st,
         "ath_retention_pct": ath_ret,
         "holders_known": hk,
         "learning_soft": learn_meta if learn_meta.get("applied") else None,
-        "why": why[:7],
+        "why": why[:8],
         "pillars": {
             "momentum": m_sc,
             "structure": s_sc,
@@ -773,6 +967,14 @@ def evaluate(token: dict[str, Any]) -> dict[str, Any]:
             "interest": i_sc,
             "safety": safe_sc,
         },
+        "migration_path": {
+            "score": mp.get("score"),
+            "lane": mp.get("lane"),
+            "summary": mp.get("summary"),
+            "recommend": mp.get("recommend"),
+        }
+        if mp
+        else None,
         "narrative": social.get("summary") or "",
         "narratives": social.get("narratives") or [],
         "badges": social.get("badges") or [],
@@ -853,13 +1055,23 @@ def filter_and_rank(
         row["socialSignals"] = t.get("socialSignals")
         out.append(row)
 
+    def _stage_rank(row: dict[str, Any]) -> int:
+        st = str(row.get("stage") or (row.get("moon") or {}).get("stage") or "")
+        if st == "near_migration":
+            return 0
+        if st == "climb":
+            return 1
+        return 2
+
     out.sort(
         key=lambda x: (
-            0 if x.get("moon", {}).get("influencer_tweet") else 1,
             0 if x.get("moon_label") == LABEL_MOON else 1,
+            _stage_rank(x),  # prefer migration path over lottery survivors
+            0 if x.get("moon", {}).get("influencer_tweet") else 1,
+            -int((x.get("moon") or {}).get("pillars", {}).get("structure") or 0),
             -int(x.get("confidence") or 0),
             -int(x.get("moon_score") or 0),
-            -int((x.get("moon") or {}).get("edge_score") or 0),
+            -float(x.get("mcap_usd") or 0),
         )
     )
     return out

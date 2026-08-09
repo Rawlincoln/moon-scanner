@@ -52,11 +52,11 @@ def test_label_and_allowed():
     assert _label_of("moon", {"moon_label": "WATCH"}) == "WATCH"
     assert "MOON" in _allowed_labels("moon")
     assert "SNIPE" in _allowed_labels("snipe")
-    # Money mode defaults: WATCH/SETUP not in allowed sets
+    # Money mode: WATCH allowed for climb/near-mig migrators; SETUP still off
     from config import TELEGRAM_MONEY_MODE
 
     if TELEGRAM_MONEY_MODE:
-        assert "WATCH" not in _allowed_labels("moon")
+        assert "WATCH" in _allowed_labels("moon")
         assert "SETUP" not in _allowed_labels("snipe")
         assert "heat" not in status().get("feeds", []) or True  # feeds may be overridden
 

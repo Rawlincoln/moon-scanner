@@ -82,6 +82,10 @@ HARD_AVOID_FLAGS: frozenset[str] = frozenset(
         "holder_velocity",
         "flash_fees",  # huge volume/fees too young — sniper war not organic
         "wash_fees",
+        # Social-honest: packaging is invest-blocking for moon + snipes
+        # (website alone does NOT save status-link X — Cashoty class)
+        "entry_trap_social",
+        "social_spoof_scam",
     }
 )
 
@@ -760,9 +764,8 @@ def analyze_avoid_flags(
     # Hard = invest-blocking (still shown in UI unless fatal for trenches hide)
     hard_set = set(HARD_AVOID_FLAGS)
     # Soft packaging — warn but don't treat as automatic hard hide
+    # entry_trap_social / social_spoof_scam are HARD (social-honest policy)
     soft_hardish = {
-        "social_spoof_scam",
-        "entry_trap_social",
         "parabolic_no_community",
         "zero_sellers",
         "wash_buys",
@@ -770,11 +773,9 @@ def analyze_avoid_flags(
         "bot_holder_cluster",
     }
     hard = bool(hard_set & set(flags))
-    # Status+empty desc is hard for invest, but only if also no real website
-    # (Cashoty-class is on blocklist; generic status tweets with real sites = soft)
-    if "entry_trap_social" in flags and "fake_website" in flags:
-        hard = True
-    elif "entry_trap_social" in flags and not has_real_social:
+    # Defense in depth: entry trap / spoof always invest-blocking.
+    # A real website does NOT save status-link X + empty desc (Cashoty).
+    if "entry_trap_social" in flags or "social_spoof_scam" in flags:
         hard = True
 
     soft_combo = {
