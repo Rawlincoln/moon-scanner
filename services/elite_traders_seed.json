@@ -13,7 +13,7 @@
     {"id": "elite_09", "address": "6HJetMbdHBuk3mLUainxAPpBpWzDgYbHGTS2TqDAUSX2", "label": "LJC", "tier": "S", "style": "kol_moon", "note": "LJC — user-tracked top trader; buy = elite signal"},
     {"id": "elite_10", "address": "6KR7SorsUQtNH6CB6JpAnWCAKeTysa95iyXeWihdNeGT", "label": "Korean", "tier": "S", "style": "kol_moon", "note": "Korean — user-tracked top trader; buy = elite signal"},
     {"id": "elite_11", "address": "BQVz7fQ1WsQmSTMY3umdPEPPTm1sdcBcX9sP7o6kPRmB", "label": "Limfork", "tier": "S", "style": "kol_moon", "note": "Limfork — user-tracked top trader; buy = elite signal"},
-    {"id": "elite_12", "address": "4Y7GFWkZhJ1d65hVbBq4XtZssV8B1RmTSaMWXETCiMda", "label": "Reply Heat", "tier": "B", "style": "community", "note": "High reply coins"},
+    {"id": "elite_12", "address": "FAicXNV5FVqtfbpn4Zccs71XcfGeyxBSGbqLDyDJZjke", "label": "Radiance", "tier": "S", "style": "kol_moon", "note": "Radiance — user-tracked top trader; buy = elite signal"},
     {"id": "elite_13", "address": "8haZGHAn7YTTHgoKb7dsnTGWZkzhnd4cxLD7tS2fyqtB", "label": "ATH Guard", "tier": "B", "style": "momentum", "note": "Near-ATH only"},
     {"id": "elite_14", "address": "CR5foJN7y6avSaAP54GdZ6hVjPBUCEWFu89573YgenaK", "label": "Fee Organic", "tier": "B", "style": "fee_flow", "note": "Avoids flash fee wars"},
     {"id": "elite_15", "address": "C1KsgbEohzsVj9okbt3ER9FvhsuUee9PQJftXJnnqdBp", "label": "First Dev", "tier": "B", "style": "fresh_dev", "note": "Prefers first-token devs"},
