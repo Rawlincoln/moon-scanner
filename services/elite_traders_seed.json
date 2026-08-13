@@ -8,7 +8,7 @@
     {"id": "elite_04", "address": "Bi4rd5FH5bYEN8scZ7wevxNZyNmKHdaBcvewdPFxYdLt", "label": "Theo", "tier": "S", "style": "kol_moon", "note": "Theo — user-tracked top trader; buy = elite signal"},
     {"id": "elite_05", "address": "B32QbbdDAyhvUQzjcaM5j6ZVKwjCxAwGH5Xgvb9SJqnC", "label": "Kadenox", "tier": "S", "style": "kol_moon", "note": "Kadenox — user-tracked top trader; buy = elite signal"},
     {"id": "elite_06", "address": "6S8GezkxYUfZy9JPtYnanbcZTMB87Wjt1qx3c6ELajKC", "label": "Nhyrox", "tier": "S", "style": "kol_moon", "note": "Nhyrox — user-tracked top trader; buy = elite signal"},
-    {"id": "elite_07", "address": "4zB4VvT29gDAPjh2XZXGM7EhSFCHcqQLcxRDf8eeaysb", "label": "2x Scalper", "tier": "A", "style": "scalp", "note": "Books 1.5–2× fast"},
+    {"id": "elite_07", "address": "JDd3hy3gQn2V982mi1zqhNqUw1GfV2UL6g76STojCJPN", "label": "West", "tier": "S", "style": "kol_moon", "note": "West — user-tracked top trader; buy = elite signal"},
     {"id": "elite_08", "address": "BWijX8PZETi4fdPw1miVh4mr2So6U4JVxgy8Dr3xEC74", "label": "Organic Heat", "tier": "A", "style": "organic", "note": "Matches organic heat band"},
     {"id": "elite_09", "address": "6CzNsxR5meDh1xCPC3UesXyYvdxebp187kpkAQjJB1An", "label": "Dev Filter", "tier": "A", "style": "safety", "note": "Skips serial farms"},
     {"id": "elite_10", "address": "9CqHqkto6TNLrejwemjtB1bV7hoUdJfJQoEFi6TNebdF", "label": "Bond Climber", "tier": "A", "style": "climb", "note": "Mid-curve structure"},
