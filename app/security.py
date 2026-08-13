@@ -29,7 +29,7 @@ from config import (
 _SOL_MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 _EVM_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
-# Paths that are expensive / amplify third-party APIs
+# Paths that are expensive / amplify third-party APIs (scan + force-refresh)
 _EXPENSIVE_PREFIXES = (
     "/api/moon",
     "/api/snipes",
@@ -46,6 +46,15 @@ _EXPENSIVE_PREFIXES = (
     "/api/pumpfun",
     "/api/alerts/telegram/cycle",
     "/api/alerts/telegram/tick",
+)
+# Cheap JSON under those prefixes — never burn rate budget
+_EXPENSIVE_EXEMPT = (
+    "/api/elite/traders",
+    "/api/moon/outcomes",
+    "/api/moon/outcomes/export",
+    "/api/moon/outcomes/import",
+    "/api/alerts/status",
+    "/api/realtime/status",
 )
 
 _ANALYZE_PREFIXES = (
@@ -200,6 +209,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._lock = Lock()
 
     def _is_expensive(self, path: str) -> bool:
+        if path in _EXPENSIVE_EXEMPT:
+            return False
+        if any(path == e or path.startswith(e + "/") for e in _EXPENSIVE_EXEMPT):
+            return False
         return any(path == p or path.startswith(p + "/") for p in _EXPENSIVE_PREFIXES)
 
     def _is_analyze(self, path: str) -> bool:

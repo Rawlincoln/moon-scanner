@@ -44,6 +44,16 @@ def test_safe_secret_eq_length_mismatch():
     assert safe_secret_eq("abc", "abd") is False
 
 
+def test_rate_limit_exempts_elite_traders():
+    from app.security import RateLimitMiddleware
+
+    mw = RateLimitMiddleware(app=None)
+    assert mw._is_expensive("/api/elite") is True
+    assert mw._is_expensive("/api/elite/traders") is False
+    assert mw._is_expensive("/api/moon") is True
+    assert mw._is_expensive("/api/moon/outcomes") is False
+
+
 def test_is_hard_avoid_shared():
     hard, why = is_hard_avoid(
         {"avoid": {"hard_avoid": True, "summary": "ghost", "flags": ["ghost_launch"]}}

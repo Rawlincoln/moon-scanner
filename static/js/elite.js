@@ -183,13 +183,15 @@ function render(tokens, counts = {}, traders = []) {
   if (se) se.textContent = `${counts.elite ?? 0} elite · ${counts.copy ?? 0} copy`;
 }
 
-async function scan() {
+async function scan(force = false) {
   const limit = $("#limit")?.value || 12;
   const maxAge = $("#maxAge")?.value || 120;
-  setStatus("Scanning elite wallets…");
+  setStatus(force ? "Force-scanning elite wallets…" : "Scanning elite wallets…");
   try {
     const res = await fetch(
-      apiUrl(`/api/elite?limit=${limit}&max_age_minutes=${maxAge}&force=1`)
+      apiUrl(
+        `/api/elite?limit=${limit}&max_age_minutes=${maxAge}&force=${force ? "true" : "false"}`
+      )
     );
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "scan failed");
@@ -227,18 +229,19 @@ async function loadRosterOnly() {
 }
 
 function bind() {
-  $("#scanBtn")?.addEventListener("click", scan);
+  // Manual scan may force; auto-refresh uses cache (avoids rate_limited)
+  $("#scanBtn")?.addEventListener("click", () => scan(true));
   let timer = null;
   const arm = () => {
     if (timer) clearInterval(timer);
     if ($("#autoRefresh")?.checked) {
-      timer = setInterval(scan, 15000);
+      timer = setInterval(() => scan(false), 15000);
     }
   };
   $("#autoRefresh")?.addEventListener("change", arm);
   arm();
   loadRosterOnly();
-  scan();
+  scan(false);
 }
 
 bind();

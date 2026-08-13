@@ -232,12 +232,13 @@ CORS_ORIGINS_LIST: list[str] = (
     [o.strip() for o in _cors_raw.split(",") if o.strip()] if _cors_raw else []
 )
 # Expensive API routes — per IP sliding windows
-RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "30") or "30")
-RATE_LIMIT_BURST = int(os.getenv("RATE_LIMIT_BURST", "8") or "8")  # short 10s window
+# Defaults raised for solo desk + multi-tab auto-refresh (override via env if abused)
+RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "90") or "90")
+RATE_LIMIT_BURST = int(os.getenv("RATE_LIMIT_BURST", "24") or "24")  # short 10s window
 # Stricter for deep analyze / checkers (third-party amplification)
-RATE_LIMIT_ANALYZE_PER_MIN = int(os.getenv("RATE_LIMIT_ANALYZE_PER_MIN", "12") or "12")
-# force=true costs this many tokens (anti-amp)
-RATE_LIMIT_FORCE_COST = int(os.getenv("RATE_LIMIT_FORCE_COST", "4") or "4")
+RATE_LIMIT_ANALYZE_PER_MIN = int(os.getenv("RATE_LIMIT_ANALYZE_PER_MIN", "20") or "20")
+# force=true costs this many tokens (anti-amp) — keep modest for manual rescans
+RATE_LIMIT_FORCE_COST = int(os.getenv("RATE_LIMIT_FORCE_COST", "2") or "2")
 # Client IP: when True (default on production), use rightmost X-Forwarded-For hop
 # (proxy-appended). When False, ignore XFF — prevents client spoofing.
 _trust_xff_raw = os.getenv("TRUST_X_FORWARDED_FOR", "").strip().lower()
