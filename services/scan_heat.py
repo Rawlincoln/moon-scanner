@@ -277,6 +277,18 @@ async def scan_organic_heat(
                 ]
                 if train:
                     eng.observe_feed_cards(train, source="heat", limit=limit)
+                # Promote holders of quality heat into elite roster
+                try:
+                    from services.elite_traders import credit_holders_from_token
+
+                    for t in train[:12]:
+                        credit_holders_from_token(
+                            t,
+                            points=2.5 if t.get("heat_label") == "HEAT" else 1.5,
+                            reason="quality_token",
+                        )
+                except Exception:
+                    pass
         except Exception as exc:
             logger.debug("learning observe heat failed: %s", exc)
 

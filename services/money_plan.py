@@ -73,6 +73,16 @@ def build_money_plan(
         if heat_tp > e > 0:
             tp2_pct = max(0.35, min(2.5, (heat_tp / e) - 1.0))
             tp1_pct = min(0.45, tp2_pct * 0.45)
+    # Elite copy: slightly tighter stop; 2× TP default
+    elif kind_l == "elite":
+        stop_pct = min(stop_pct, 0.18)
+        elite_tp = _f(
+            token.get("target_2x_usd")
+            or (token.get("elite") or {}).get("target_2x_usd")
+        )
+        if elite_tp > e > 0:
+            tp2_pct = (elite_tp / e) - 1.0
+            tp1_pct = min(0.40, tp2_pct * 0.45)
 
     stop_mcap = e * (1.0 - stop_pct) if e > 0 else 0.0
     tp1_mcap = e * (1.0 + tp1_pct) if e > 0 else 0.0

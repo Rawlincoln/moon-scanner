@@ -3,21 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Moon Scanner — High-accuracy climbers only</title>
+  <title>Elite Copy — Top 20 smart wallets · Moon Scanner</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/moon.css?v=aurora1" />
   <link rel="stylesheet" href="/static/css/snipes.css?v=aurora1" />
+  <link rel="stylesheet" href="/static/css/elite.css?v=1" />
 </head>
-<body>
+<body class="page-elite">
   <div class="bg"></div>
 
   <nav class="nav">
-    <a href="/" class="active">◈ Moons</a>
+    <a href="/">◈ Moons</a>
     <a href="/snipes">⚡ Safe Snipes 2×</a>
     <a href="/heat">🔥 Organic Heat</a>
-    <a href="/elite">👑 Elite Copy</a>
+    <a href="/elite" class="active">👑 Elite Copy</a>
     <a href="/graduated">◆ Graduated</a>
     <a href="/money">💰 Money</a>
     <a href="/lab">🔬 Lab</a>
@@ -25,32 +26,28 @@
 
   <header class="top">
     <div class="brand">
-      <span class="mark">◈</span>
+      <span class="mark elite-mark">👑</span>
       <div>
-        <h1>Moon Scanner</h1>
-        <p>Narrative + influencer edge only — random dumps stay hidden</p>
+        <h1>Elite Copy</h1>
+        <p>Top <strong>20</strong> smart wallets · buy signal when they enter · <strong>full safety</strong> still required</p>
       </div>
     </div>
     <div class="pills">
       <span class="pill" id="statShown">—</span>
-      <span class="pill" id="statMoon">0 moon</span>
+      <span class="pill" id="statElite">0 elite</span>
       <span class="pill muted" id="statBackend">local</span>
     </div>
   </header>
 
   <section class="bar">
-    <button type="button" class="btn primary" id="scanBtn">Scan moons</button>
+    <button type="button" class="btn primary" id="scanBtn">Scan elites</button>
     <label class="chk">
-      <input type="checkbox" id="autoRefresh" checked /> Auto 10s
+      <input type="checkbox" id="autoRefresh" checked /> Auto 15s
     </label>
-    <label class="chk" title="Desktop alerts for new MOON / WATCH picks">
+    <label class="chk" title="Desktop alerts for ELITE / COPY">
       <input type="checkbox" id="alertToggle" /> 🔔 Alerts
     </label>
     <span class="pill muted" id="alertStatus" style="font-size:0.78rem">Alerts off</span>
-    <label class="chk" title="When a token is on Moons AND Safe Snipes, open Padre in a new tab">
-      <input type="checkbox" id="padreBothToggle" checked /> Padre if both
-    </label>
-    <span class="pill muted" id="padreBothStatus" style="font-size:0.78rem">Padre auto-open when on both</span>
     <label class="field">
       Max age
       <select id="maxAge">
@@ -63,34 +60,36 @@
     <label class="field">
       Show
       <select id="limit">
-        <option value="8">8</option>
         <option value="12" selected>12</option>
         <option value="16">16</option>
         <option value="24">24</option>
       </select>
     </label>
-    <label class="field">
-      API
-      <select id="apiBackend">
-        <option value="local" selected>Local</option>
-        <option value="cloud">Cloud</option>
-      </select>
-    </label>
   </section>
 
-  <p class="status" id="status">Ready — scanning for Elon/CZ/Trump tweets, hot tickers, real narratives</p>
+  <div class="plan-banner elite-banner" id="planBanner">
+    <strong>Signal:</strong> elite wallet on book + survival $7k+ + hard-avoid / flash / wash / bundle filters.
+    Seed wallets are placeholders — put real GMGN/Kolscan addresses in <code>data/elite_traders.json</code>.
+    Learned wallets auto-fill from HEAT/MOON winners.
+  </div>
+
+  <p class="status" id="status">Ready — elite buy signals with full capital safety</p>
   <p class="rule" id="rule"></p>
-  <p class="rule" id="outcomeStats">Outcomes: —</p>
+
+  <section class="roster-wrap">
+    <h2 class="roster-title">Desk — 20 smart wallets</h2>
+    <div id="roster" class="roster"></div>
+  </section>
 
   <main id="list" class="list"></main>
 
   <footer class="foot">
-    Not financial advice. DYOR. Empty list is normal — most coins dump. We only surface near-ATH + narrative edge.
-    Track results: <a href="/api/moon/outcomes" style="color:inherit">/api/moon/outcomes</a>
-    · Telegram: <a href="/api/alerts/status" style="color:inherit">/api/alerts/status</a> (see TELEGRAM_ALERTS.md)
+    Not financial advice. Elites get rekt too. Size small. API:
+    <a href="/api/elite" style="color:inherit">/api/elite</a> ·
+    <a href="/api/elite/traders" style="color:inherit">/api/elite/traders</a>
   </footer>
 
   <script src="/static/js/alerts.js?v=3"></script>
-  <script src="/static/js/moon.js?v=16"></script>
+  <script src="/static/js/elite.js?v=1"></script>
 </body>
 </html>

@@ -1,0 +1,114 @@
+/* Elite Copy — gold / royal aurora */
+
+.page-elite .bg::before {
+  background:
+    radial-gradient(ellipse 50% 30% at 50% 18%, rgba(251, 191, 36, 0.28), transparent 55%),
+    radial-gradient(ellipse 40% 25% at 75% 55%, rgba(167, 139, 250, 0.18), transparent 50%),
+    radial-gradient(ellipse 35% 20% at 15% 70%, rgba(56, 189, 248, 0.12), transparent 50%);
+}
+
+.elite-mark {
+  color: #fbbf24 !important;
+  filter: drop-shadow(0 0 18px rgba(251, 191, 36, 0.65)) !important;
+}
+
+.page-elite .nav a.active {
+  background: linear-gradient(180deg, #fde68a 0%, #fbbf24 40%, #b45309 100%) !important;
+  color: #1a1000 !important;
+  border-color: rgba(253, 230, 138, 0.55) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 0 24px rgba(251, 191, 36, 0.45) !important;
+}
+
+.elite-banner {
+  border-color: rgba(251, 191, 36, 0.45) !important;
+  background: linear-gradient(100deg, rgba(251, 191, 36, 0.18), rgba(167, 139, 250, 0.08)) !important;
+  box-shadow: var(--shadow-out) !important;
+}
+.elite-banner strong { color: #fde68a; }
+.elite-banner code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.85em;
+  color: #fbbf24;
+}
+
+.card.elite {
+  border-color: rgba(251, 191, 36, 0.6);
+  box-shadow: var(--shadow-out), 0 0 32px rgba(251, 191, 36, 0.18);
+}
+.card.copy {
+  border-color: rgba(167, 139, 250, 0.55);
+}
+.card.watch {
+  border-color: rgba(148, 163, 184, 0.45);
+  opacity: 0.95;
+}
+
+.badge.ELITE {
+  background: linear-gradient(180deg, #fde68a, #f59e0b);
+  color: #1a1000;
+}
+.badge.COPY {
+  background: linear-gradient(180deg, #c4b5fd, #7c3aed);
+  color: #0f0a1a;
+}
+.badge.WATCH {
+  background: rgba(148, 163, 184, 0.35);
+  color: #e2e8f0;
+}
+
+.roster-wrap {
+  max-width: 1100px;
+  margin: 0.5rem auto 1.25rem;
+  padding: 0 1rem;
+}
+.roster-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fde68a;
+  margin: 0 0 0.65rem;
+  letter-spacing: 0.02em;
+}
+.roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.55rem;
+}
+.roster-card {
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: 12px;
+  padding: 0.55rem 0.7rem;
+  background: linear-gradient(160deg, rgba(30, 24, 12, 0.85), rgba(12, 14, 22, 0.9));
+  box-shadow: var(--shadow-out);
+  font-size: 0.78rem;
+}
+.roster-card .tier {
+  display: inline-block;
+  font-weight: 700;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  margin-right: 0.3rem;
+}
+.roster-card .tier.S { background: #fbbf24; color: #1a1000; }
+.roster-card .tier.A { background: #a78bfa; color: #0f0a1a; }
+.roster-card .tier.B { background: #64748b; color: #f1f5f9; }
+.roster-card .lbl { font-weight: 600; color: #fef3c7; }
+.roster-card .addr {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.68rem;
+  color: #94a3b8;
+  margin-top: 0.25rem;
+  word-break: break-all;
+}
+.roster-card .meta-line {
+  color: #cbd5e1;
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+}
+.elite-hits {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: #fde68a;
+}

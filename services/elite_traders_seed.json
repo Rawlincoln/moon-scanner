@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "note": "20 elite slots for copy-trade buy signals. Seed addresses are placeholders — replace with real wallets from GMGN/Kolscan/Solscan. The app also auto-learns top wallets from tokens that pass our HEAT/MOON safety and win outcomes. Not financial advice.",
+  "traders": [
+    {"id": "elite_01", "address": "H47kiuPLUEXGsw8JFPi2BtubU4ovSwLbcxu5tHR4byzX", "label": "Alpha Desk", "tier": "S", "style": "early_curve", "note": "Replace with your #1 tracked KOL wallet"},
+    {"id": "elite_02", "address": "9Vv95EqzTmrDmGGPTPgruUR7hpH65QMiSQSo9JqNz7HH", "label": "Moon Sniper", "tier": "S", "style": "sniper_survivor", "note": "Enters after first dump, rides second leg"},
+    {"id": "elite_03", "address": "Gyyra5osiYuy2GSGso4RBwdENYkr8bDx8KNop8mJV2YU", "label": "Curve King", "tier": "S", "style": "near_migration", "note": "High bond % specialists"},
+    {"id": "elite_04", "address": "2tTKBMmd5goAuN3tNKoMy5AjvDw19dmacTR46wuW7GH2", "label": "Narrative Wolf", "tier": "A", "style": "narrative", "note": "CT + community heat"},
+    {"id": "elite_05", "address": "GW1aozFm4EwhLUVbx5AZoaCtaPS7p7EYzRFXZkeyb2NV", "label": "Clean Book", "tier": "A", "style": "anti_bundle", "note": "Avoids bundled launches"},
+    {"id": "elite_06", "address": "5ZaTiqSSSgrKxBTvMA4f8vE5TGiTG4aLCJEkPS5AyRV9", "label": "Size Patient", "tier": "A", "style": "conviction", "note": "Fewer, larger bags"},
+    {"id": "elite_07", "address": "4zB4VvT29gDAPjh2XZXGM7EhSFCHcqQLcxRDf8eeaysb", "label": "2x Scalper", "tier": "A", "style": "scalp", "note": "Books 1.5–2× fast"},
+    {"id": "elite_08", "address": "BWijX8PZETi4fdPw1miVh4mr2So6U4JVxgy8Dr3xEC74", "label": "Organic Heat", "tier": "A", "style": "organic", "note": "Matches organic heat band"},
+    {"id": "elite_09", "address": "6CzNsxR5meDh1xCPC3UesXyYvdxebp187kpkAQjJB1An", "label": "Dev Filter", "tier": "A", "style": "safety", "note": "Skips serial farms"},
+    {"id": "elite_10", "address": "9CqHqkto6TNLrejwemjtB1bV7hoUdJfJQoEFi6TNebdF", "label": "Bond Climber", "tier": "A", "style": "climb", "note": "Mid-curve structure"},
+    {"id": "elite_11", "address": "7zeoDcvyAensT2eKvW67hgP8vixNsdV2MjsjLiGcE75J", "label": "Whale Follow", "tier": "B", "style": "follow", "note": "Stacks with other smart bags"},
+    {"id": "elite_12", "address": "4Y7GFWkZhJ1d65hVbBq4XtZssV8B1RmTSaMWXETCiMda", "label": "Reply Heat", "tier": "B", "style": "community", "note": "High reply coins"},
+    {"id": "elite_13", "address": "8haZGHAn7YTTHgoKb7dsnTGWZkzhnd4cxLD7tS2fyqtB", "label": "ATH Guard", "tier": "B", "style": "momentum", "note": "Near-ATH only"},
+    {"id": "elite_14", "address": "CR5foJN7y6avSaAP54GdZ6hVjPBUCEWFu89573YgenaK", "label": "Fee Organic", "tier": "B", "style": "fee_flow", "note": "Avoids flash fee wars"},
+    {"id": "elite_15", "address": "C1KsgbEohzsVj9okbt3ER9FvhsuUee9PQJftXJnnqdBp", "label": "First Dev", "tier": "B", "style": "fresh_dev", "note": "Prefers first-token devs"},
+    {"id": "elite_16", "address": "Cy4ZZpMdXSCyVMeom9GXekTDhWAW2nFdasAxgaQ6nFBv", "label": "Grad Path", "tier": "B", "style": "migration", "note": "Path to graduation"},
+    {"id": "elite_17", "address": "94y8UmxDgeq9X1KJBrVn7yE1fKNqH4huPTUdKHRyGXYL", "label": "Anti Trap", "tier": "B", "style": "anti_spoof", "note": "Skips status-link socials"},
+    {"id": "elite_18", "address": "EXyeLh3JvzuZNZ15PYH8E3wfNsz1Y1eKE1QsgFAEf2UY", "label": "Volume Real", "tier": "B", "style": "two_way", "note": "Two-way flow buyers"},
+    {"id": "elite_19", "address": "4qfZJEcNnbRG5mV2hGYET67r4tdwJn2ucdWjm9ka9oTd", "label": "Unique Ticker", "tier": "B", "style": "ticker", "note": "Avoids copycat tickers"},
+    {"id": "elite_20", "address": "49FbqWyanE8sid1sbtoqWL8tYeGrJLseBvVjWUH4izrT", "label": "Desk Reserve", "tier": "B", "style": "flex", "note": "Your 20th tracked wallet slot"}
+  ]
+}

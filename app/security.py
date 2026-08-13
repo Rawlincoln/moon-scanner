@@ -34,6 +34,7 @@ _EXPENSIVE_PREFIXES = (
     "/api/moon",
     "/api/snipes",
     "/api/heat",
+    "/api/elite",
     "/api/graduated",
     "/api/analyze",
     "/api/checkers",

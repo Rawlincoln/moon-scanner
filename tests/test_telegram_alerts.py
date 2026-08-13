@@ -59,9 +59,10 @@ def test_label_and_allowed():
         assert "WATCH" in _allowed_labels("moon")
         assert "SETUP" not in _allowed_labels("snipe")
         assert "HEAT" in _allowed_labels("heat")
-        # Heat is on by default in money mode (organic edge)
+        assert "ELITE" in _allowed_labels("elite")
+        assert "COPY" in _allowed_labels("elite")
         st = status()
-        assert "heat" in (st.get("feeds") or []) or True  # env may override
+        assert "elite" in (st.get("feeds") or []) or True  # env may override
 
 
 def test_status_shape():

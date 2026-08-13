@@ -1,6 +1,6 @@
-"""Telegram push alerts for Moon / Snipe / Heat picks.
+"""Telegram push alerts for Moon / Snipe / Heat / Elite picks.
 
-Money-mode (default): MOON + SNIPE only, with entry/stop/TP/invalid rules.
+Money-mode: MOON + SNIPE + HEAT + ELITE, with entry/stop/TP/invalid rules.
 Works even when the browser is closed — background loop + post-scan hooks.
 Configure TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env (see TELEGRAM_ALERTS.md).
 """
@@ -20,6 +20,7 @@ from config import (
     MONEY_REQUIRE_CONTROL_SURFACE,
     PADRE_TRADE_URL,
     TELEGRAM_ALERT_DEDUPE_SEC,
+    TELEGRAM_ALERT_ELITE_LABELS,
     TELEGRAM_ALERT_FEEDS,
     TELEGRAM_ALERT_GRAD_LABELS,
     TELEGRAM_ALERT_HEAT_LABELS,
@@ -76,12 +77,13 @@ def status() -> dict[str, Any]:
             "moon": list(TELEGRAM_ALERT_MOON_LABELS),
             "snipe": list(TELEGRAM_ALERT_SNIPE_LABELS),
             "heat": list(TELEGRAM_ALERT_HEAT_LABELS),
+            "elite": list(TELEGRAM_ALERT_ELITE_LABELS),
             "grad": list(TELEGRAM_ALERT_GRAD_LABELS),
         },
         "dedupe_sec": TELEGRAM_ALERT_DEDUPE_SEC,
         "last_cycle": dict(_last_cycle),
         "hint": (
-            "MONEY MODE: MOON+SNIPE+HEAT · entry/stop/TP · auto-CANCEL if setup breaks"
+            "MONEY MODE: MOON+SNIPE+HEAT+ELITE · entry/stop/TP · auto-CANCEL if setup breaks"
             if TELEGRAM_MONEY_MODE
             else "Full multi-feed alerts (set TELEGRAM_MONEY_MODE=1 for capital mode)"
         ),
@@ -146,6 +148,10 @@ def _label_of(kind: str, t: dict[str, Any]) -> str:
         ).upper()
     if kind == "heat":
         return str(t.get("heat_label") or (t.get("heat") or {}).get("label") or "").upper()
+    if kind == "elite":
+        return str(
+            t.get("elite_label") or (t.get("elite") or {}).get("label") or ""
+        ).upper()
     if kind in ("grad", "graduated"):
         return str(t.get("grad_label") or (t.get("grad") or {}).get("label") or "").upper()
     return ""
@@ -158,6 +164,8 @@ def _allowed_labels(kind: str) -> set[str]:
         return set(TELEGRAM_ALERT_SNIPE_LABELS)
     if kind == "heat":
         return set(TELEGRAM_ALERT_HEAT_LABELS)
+    if kind == "elite":
+        return set(TELEGRAM_ALERT_ELITE_LABELS)
     if kind in ("grad", "graduated"):
         return set(TELEGRAM_ALERT_GRAD_LABELS)
     return set()
@@ -170,6 +178,8 @@ def _emoji(kind: str, label: str) -> str:
         return "⚡" if label == "SNIPE" else "🟡"
     if kind == "heat":
         return "🔥" if label == "HEAT" else "🟠"
+    if kind == "elite":
+        return "👑" if label == "ELITE" else "👁" if label == "COPY" else "✦"
     if kind in ("grad", "graduated"):
         return "◆" if label == "RUNNER" else "📉" if label == "DIP" else "◆"
     return "•"
@@ -206,6 +216,15 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
         )
         if ath_ret is not None:
             why = list(why) + [f"ATH retention {ath_ret}%"]
+    elif kind == "elite":
+        why = (t.get("elite") or {}).get("why") or []
+        score = t.get("elite_score") or (t.get("elite") or {}).get("elite_score")
+        hits = t.get("elite_hits") or (t.get("elite") or {}).get("elite_hits") or []
+        if hits:
+            names = ", ".join(
+                str(h.get("label") or str(h.get("address") or "")[:6]) for h in hits[:4]
+            )
+            why = list(why) + [f"elites: {names}"]
     else:
         why = (t.get("heat") or {}).get("why") or []
         score = t.get("heat_score") or (t.get("heat") or {}).get("heat_score")
@@ -231,11 +250,11 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
     if not plan:
         plan = (
             enrich_plan_with_size(kind, t)
-            if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat")
+            if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat", "elite")
             else build_money_plan(kind, t)
         )
     plan_lines = ""
-    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat"):
+    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat", "elite"):
         sizing = plan.get("sizing") or {}
         size_line = ""
         if sizing.get("size_usd"):
@@ -270,26 +289,28 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
         except Exception:
             cockpit = None
     if cockpit and (
-        MONEY_AUTO_LAB or TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat")
+        MONEY_AUTO_LAB
+        or TELEGRAM_MONEY_MODE
+        or kind in ("moon", "snipe", "heat", "elite")
     ):
         lab_lines = format_cockpit_telegram(cockpit)
 
     dev_lines = ""
     dev = t.get("devRisk") or t.get("_dev_risk")
     if not isinstance(dev, dict) and (
-        TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat")
+        TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat", "elite")
     ):
         try:
             dev = attach_dev_risk(t)
         except Exception:
             dev = None
     if isinstance(dev, dict) and (
-        TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat")
+        TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat", "elite")
     ):
         dev_lines = format_dev_telegram(dev)
 
     ticker_lines = ""
-    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat"):
+    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat", "elite"):
         try:
             from services.ticker_registry import attach_ticker_uniqueness
 
@@ -318,7 +339,7 @@ def format_pick_message(kind: str, t: dict[str, Any]) -> str:
             ticker_lines = ""
 
     flow_lines = ""
-    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat"):
+    if TELEGRAM_MONEY_MODE or kind in ("moon", "snipe", "heat", "elite"):
         try:
             from services.fee_flow import attach_fee_flow, format_fee_telegram
 
@@ -401,9 +422,15 @@ async def notify_new_picks(
         return 0
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return 0
-    # Money mode: moon + snipe + heat (organic edge). Still block grad spam.
+    # Money mode: moon + snipe + heat + elite. Still block grad spam.
     kind_l = kind.lower().strip()
-    if TELEGRAM_MONEY_MODE and kind_l not in ("moon", "snipe", "snipes", "heat"):
+    if TELEGRAM_MONEY_MODE and kind_l not in (
+        "moon",
+        "snipe",
+        "snipes",
+        "heat",
+        "elite",
+    ):
         return 0
     if kind not in TELEGRAM_ALERT_FEEDS and not force:
         # allow snipes alias
@@ -435,7 +462,9 @@ async def notify_new_picks(
             "MOON": 0,
             "SNIPE": 0,
             "HEAT": 0,
+            "ELITE": 0,
             "RUNNER": 0,
+            "COPY": 1,
             "WATCH": 1,
             "SETUP": 1,
             "WARM": 1,
@@ -505,7 +534,10 @@ async def notify_new_picks(
             score = -int(
                 x.get("moon_score")
                 or x.get("snipe_score")
+                or x.get("heat_score")
+                or x.get("elite_score")
                 or (x.get("moon") or {}).get("moon_score")
+                or (x.get("elite") or {}).get("elite_score")
                 or 0
             )
             return (lab_p, proven, moons, mig, uniq, reused_n, score)
@@ -540,9 +572,9 @@ async def notify_new_picks(
                 logger.debug("cockpit extract failed: %s", exc)
                 cockpit = None
 
-            # Control surface: required for moon/snipe; HEAT soft-fail (higher recall)
+            # Control surface: required for moon/snipe/elite; HEAT soft when present
             if TELEGRAM_MONEY_MODE and MONEY_REQUIRE_CONTROL_SURFACE:
-                if feed_key in ("moon", "snipe"):
+                if feed_key in ("moon", "snipe", "elite"):
                     if cockpit is None:
                         logger.info("skip %s — no cockpit/control surface", mint[:8])
                         continue
@@ -602,6 +634,14 @@ async def notify_new_picks(
                 if lab_h == "WARM" and hs < 58:
                     continue
                 if lab_h == "RISKY":
+                    continue
+
+            # Elite: never alert WATCH in money mode (too thin)
+            if feed_key == "elite":
+                lab_e = _label_of("elite", t)
+                if TELEGRAM_MONEY_MODE and lab_e == "WATCH":
+                    continue
+                if lab_e not in ("ELITE", "COPY", "WATCH"):
                     continue
 
             # Archive snapshot into Lab (non-blocking best-effort)
@@ -666,6 +706,13 @@ async def run_alert_cycle(*, force: bool = False) -> dict[str, Any]:
             n = await notify_new_picks("heat", data.get("tokens") or [], force=force)
             feeds["heat"] = {"shown": len(data.get("tokens") or []), "sent": n}
             total += n
+        if "elite" in TELEGRAM_ALERT_FEEDS:
+            from services.scan_elite import scan_elite_signals
+
+            data = await scan_elite_signals(limit=12, max_age_minutes=120, force=True)
+            n = await notify_new_picks("elite", data.get("tokens") or [], force=force)
+            feeds["elite"] = {"shown": len(data.get("tokens") or []), "sent": n}
+            total += n
         if not TELEGRAM_MONEY_MODE and (
             "grad" in TELEGRAM_ALERT_FEEDS or "graduated" in TELEGRAM_ALERT_FEEDS
         ):
@@ -722,7 +769,7 @@ async def background_telegram_alert_loop() -> None:
         desk = desk_snapshot(get_journal())
         mode_line = (
             "💰 <b>COMPLETE MONEY SYSTEM</b>\n"
-            "MOON + SNIPE + 🔥 HEAT · risk-sized · TP1/TP2/STOP managed\n"
+            "MOON + SNIPE + 🔥 HEAT + 👑 ELITE · risk-sized · TP1/TP2/STOP\n"
             f"Bankroll ${desk.get('bankroll_usd')} · "
             f"risk {desk.get('risk_per_trade_pct')}%/trade "
             f"(${desk.get('risk_per_trade_usd')})\n"
@@ -773,6 +820,12 @@ async def _seed_seen_from_scans() -> None:
 
             jobs.append(
                 ("heat", scan_organic_heat(limit=14, max_age_minutes=150, force=False))
+            )
+        if "elite" in TELEGRAM_ALERT_FEEDS:
+            from services.scan_elite import scan_elite_signals
+
+            jobs.append(
+                ("elite", scan_elite_signals(limit=12, max_age_minutes=120, force=False))
             )
         for kind, coro in jobs:
             try:
