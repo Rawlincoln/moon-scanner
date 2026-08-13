@@ -28,7 +28,7 @@ _LEARNED_PATH = Path(DATA_DIR) / "elite_learned.json"
 
 # 20 elite desk slots (replace addresses with real GMGN/Kolscan wallets)
 DEFAULT_ELITE_SEEDS: list[dict[str, str]] = [
-    {"id": "elite_01", "address": "H47kiuPLUEXGsw8JFPi2BtubU4ovSwLbcxu5tHR4byzX", "label": "Alpha Desk", "tier": "S", "style": "early_curve", "note": "Replace with your #1 tracked KOL"},
+    {"id": "elite_01", "address": "2fg5QD1eD7rzNNCsvnhmXFm5hqNgwTTG8p7kQ6f3rx6f", "label": "Cupsey", "tier": "S", "style": "kol_moon", "note": "Cupsey — user-tracked top trader; buy = primary elite signal"},
     {"id": "elite_02", "address": "9Vv95EqzTmrDmGGPTPgruUR7hpH65QMiSQSo9JqNz7HH", "label": "Moon Sniper", "tier": "S", "style": "sniper_survivor", "note": "Post-sniper second leg"},
     {"id": "elite_03", "address": "Gyyra5osiYuy2GSGso4RBwdENYkr8bDx8KNop8mJV2YU", "label": "Curve King", "tier": "S", "style": "near_migration", "note": "High bond specialists"},
     {"id": "elite_04", "address": "2tTKBMmd5goAuN3tNKoMy5AjvDw19dmacTR46wuW7GH2", "label": "Narrative Wolf", "tier": "A", "style": "narrative", "note": "CT + community"},
