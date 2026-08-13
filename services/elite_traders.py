@@ -36,7 +36,7 @@ DEFAULT_ELITE_SEEDS: list[dict[str, str]] = [
     {"id": "elite_06", "address": "6S8GezkxYUfZy9JPtYnanbcZTMB87Wjt1qx3c6ELajKC", "label": "Nhyrox", "tier": "S", "style": "kol_moon", "note": "Nhyrox — user-tracked top trader; buy = elite signal"},
     {"id": "elite_07", "address": "JDd3hy3gQn2V982mi1zqhNqUw1GfV2UL6g76STojCJPN", "label": "West", "tier": "S", "style": "kol_moon", "note": "West — user-tracked top trader; buy = elite signal"},
     {"id": "elite_08", "address": "4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk", "label": "Jijo", "tier": "S", "style": "kol_moon", "note": "Jijo — user-tracked top trader; buy = elite signal"},
-    {"id": "elite_09", "address": "6CzNsxR5meDh1xCPC3UesXyYvdxebp187kpkAQjJB1An", "label": "Dev Filter", "tier": "A", "style": "safety", "note": "Skips serial farms"},
+    {"id": "elite_09", "address": "6HJetMbdHBuk3mLUainxAPpBpWzDgYbHGTS2TqDAUSX2", "label": "LJC", "tier": "S", "style": "kol_moon", "note": "LJC — user-tracked top trader; buy = elite signal"},
     {"id": "elite_10", "address": "9CqHqkto6TNLrejwemjtB1bV7hoUdJfJQoEFi6TNebdF", "label": "Bond Climber", "tier": "A", "style": "climb", "note": "Mid-curve"},
     {"id": "elite_11", "address": "7zeoDcvyAensT2eKvW67hgP8vixNsdV2MjsjLiGcE75J", "label": "Whale Follow", "tier": "B", "style": "follow", "note": "Stacks with smart bags"},
     {"id": "elite_12", "address": "4Y7GFWkZhJ1d65hVbBq4XtZssV8B1RmTSaMWXETCiMda", "label": "Reply Heat", "tier": "B", "style": "community", "note": "High replies"},
