@@ -33,7 +33,7 @@ DEFAULT_ELITE_SEEDS: list[dict[str, str]] = [
     {"id": "elite_03", "address": "CAPn1yH4oSywsxGU456jfgTrSSUidf9jgeAnHceNUJdw", "label": "Cap", "tier": "S", "style": "kol_moon", "note": "Cap — user-tracked top trader; buy = elite signal"},
     {"id": "elite_04", "address": "Bi4rd5FH5bYEN8scZ7wevxNZyNmKHdaBcvewdPFxYdLt", "label": "Theo", "tier": "S", "style": "kol_moon", "note": "Theo — user-tracked top trader; buy = elite signal"},
     {"id": "elite_05", "address": "B32QbbdDAyhvUQzjcaM5j6ZVKwjCxAwGH5Xgvb9SJqnC", "label": "Kadenox", "tier": "S", "style": "kol_moon", "note": "Kadenox — user-tracked top trader; buy = elite signal"},
-    {"id": "elite_06", "address": "5ZaTiqSSSgrKxBTvMA4f8vE5TGiTG4aLCJEkPS5AyRV9", "label": "Size Patient", "tier": "A", "style": "conviction", "note": "Fewer larger bags"},
+    {"id": "elite_06", "address": "6S8GezkxYUfZy9JPtYnanbcZTMB87Wjt1qx3c6ELajKC", "label": "Nhyrox", "tier": "S", "style": "kol_moon", "note": "Nhyrox — user-tracked top trader; buy = elite signal"},
     {"id": "elite_07", "address": "4zB4VvT29gDAPjh2XZXGM7EhSFCHcqQLcxRDf8eeaysb", "label": "2x Scalper", "tier": "A", "style": "scalp", "note": "Fast 1.5–2×"},
     {"id": "elite_08", "address": "BWijX8PZETi4fdPw1miVh4mr2So6U4JVxgy8Dr3xEC74", "label": "Organic Heat", "tier": "A", "style": "organic", "note": "Heat band entries"},
     {"id": "elite_09", "address": "6CzNsxR5meDh1xCPC3UesXyYvdxebp187kpkAQjJB1An", "label": "Dev Filter", "tier": "A", "style": "safety", "note": "Skips serial farms"},
