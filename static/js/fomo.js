@@ -106,8 +106,11 @@ function renderKolSelect(wallets = []) {
   wallets.forEach((w) => {
     if (w.address) _walletByAddr[w.address] = w;
   });
+  const n = wallets.length;
   const opts = [
-    `<option value="">— Select KOL (${wallets.length}) — name · wallet · 1d / 7d / 30d PnL —</option>`,
+    n
+      ? `<option value="">— Click to open watchlist (${n}) — name · wallet · 1d / 7d / 30d —</option>`
+      : `<option value="">— No wallets yet — add one below —</option>`,
   ];
   wallets.forEach((w) => {
     const a = w.address || "";
@@ -119,8 +122,6 @@ function renderKolSelect(wallets = []) {
   if (prev && _walletByAddr[prev]) {
     sel.value = prev;
     showKolDetail(_walletByAddr[prev]);
-  } else if (sel.value) {
-    showKolDetail(_walletByAddr[sel.value]);
   } else {
     showKolDetail(null);
   }
@@ -130,9 +131,11 @@ function showKolDetail(w) {
   const el = $("#kolDetail");
   if (!el) return;
   if (!w) {
-    el.innerHTML = `<div class="kol-detail-empty">Select a KOL to see wallet + PnL breakdown</div>`;
+    el.hidden = true;
+    el.innerHTML = `<div class="kol-detail-empty">Select a wallet from the dropdown</div>`;
     return;
   }
+  el.hidden = false;
   const a = w.address || "";
   const d1 = fmtPnl(w.pnl_1d ?? w.pnl?.["1d"]);
   const d7 = fmtPnl(w.pnl_7d ?? w.pnl?.["7d"]);
@@ -173,53 +176,8 @@ function showKolDetail(w) {
 
 function renderWallets(wallets = []) {
   renderKolSelect(wallets);
-  const el = $("#wallets");
-  if (!el) return;
   const count = $("#walletCount");
   if (count) count.textContent = `(${wallets.length})`;
-  if (!wallets.length) {
-    el.innerHTML = `<div class="wallet-empty">No wallets yet — use <strong>Add FOMO wallet</strong> above. Alerts start on the next new buy/sell.</div>`;
-    return;
-  }
-  const rows = wallets
-    .map((w) => {
-      const a = w.address || "";
-      const href = a ? `https://solscan.io/account/${a}` : "#";
-      const d1 = fmtPnl(w.pnl_1d ?? w.pnl?.["1d"]);
-      const d7 = fmtPnl(w.pnl_7d ?? w.pnl?.["7d"]);
-      const d30 = fmtPnl(w.pnl_30d ?? w.pnl?.["30d"]);
-      return `<tr data-addr="${escapeHtml(a)}">
-        <td class="name-cell"><span class="tier-pill">${escapeHtml(w.tier || "S")}</span>${escapeHtml(w.label || "?")}</td>
-        <td class="addr-cell"><a href="${href}" target="_blank" rel="noopener" title="${escapeHtml(a)}">${escapeHtml(a)}</a></td>
-        <td class="pnl-cell-td ${d1.cls}">${d1.text}</td>
-        <td class="pnl-cell-td ${d7.cls}">${d7.text}</td>
-        <td class="pnl-cell-td ${d30.cls}">${d30.text}</td>
-        <td class="actions-cell">
-          <button type="button" class="btn sm danger rm-btn" data-addr="${escapeHtml(a)}" title="Stop watching">Remove</button>
-        </td>
-      </tr>`;
-    })
-    .join("");
-
-  el.innerHTML = `<div class="wallet-table-wrap">
-    <table class="wallet-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Wallet address</th>
-          <th style="text-align:right">1d PnL</th>
-          <th style="text-align:right">7d PnL</th>
-          <th style="text-align:right">30d PnL</th>
-          <th style="text-align:right">Action</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </div>`;
-
-  el.querySelectorAll(".rm-btn").forEach((btn) => {
-    btn.onclick = () => removeWallet(btn.dataset.addr);
-  });
 }
 
 function eventCard(ev) {

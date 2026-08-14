@@ -88,45 +88,13 @@
   font-size: 0.85em;
 }
 
-/* Full wallet table — always readable */
-.wallet-table-wrap {
-  overflow-x: auto;
-  border-radius: 12px;
-  border: 1px solid rgba(244, 63, 94, 0.3);
-  background: rgba(0, 0, 0, 0.28);
+.hint-line {
+  margin: 0 0 0.55rem;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  line-height: 1.4;
 }
-.wallet-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.82rem;
-  min-width: 640px;
-}
-.wallet-table th {
-  text-align: left;
-  padding: 0.55rem 0.65rem;
-  color: #fda4af;
-  font-weight: 600;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid rgba(244, 63, 94, 0.35);
-  background: rgba(40, 12, 18, 0.65);
-  white-space: nowrap;
-}
-.wallet-table td {
-  padding: 0.55rem 0.65rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  vertical-align: middle;
-  color: #e2e8f0;
-}
-.wallet-table tr:last-child td { border-bottom: none; }
-.wallet-table tr:hover td { background: rgba(244, 63, 94, 0.08); }
-.wallet-table .name-cell {
-  font-weight: 700;
-  color: #fecdd3;
-  white-space: nowrap;
-}
-.wallet-table .tier-pill {
+.tier-pill {
   display: inline-block;
   font-size: 0.65rem;
   font-weight: 700;
@@ -137,34 +105,9 @@
   color: #fff;
   vertical-align: middle;
 }
-.wallet-table .addr-cell {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.72rem;
-  color: #94a3b8;
-  word-break: break-all;
-}
-.wallet-table .addr-cell a {
-  color: #93c5fd;
-  text-decoration: none;
-}
-.wallet-table .addr-cell a:hover { text-decoration: underline; }
-.wallet-table .pnl-cell-td {
-  font-family: "JetBrains Mono", monospace;
-  font-weight: 600;
-  white-space: nowrap;
-  text-align: right;
-}
-.wallet-table .pnl-cell-td.pos { color: #6ee7b7; }
-.wallet-table .pnl-cell-td.neg { color: #fca5a5; }
-.wallet-table .pnl-cell-td.na { color: #64748b; font-weight: 500; }
-.wallet-table .actions-cell {
-  text-align: right;
-  white-space: nowrap;
-}
-.wallet-empty {
-  padding: 1rem;
-  color: #94a3b8;
-  font-size: 0.88rem;
+/* Detail only appears after you pick a wallet from the dropdown */
+.kol-detail[hidden] {
+  display: none !important;
 }
 
 /* Compact buttons used across FOMO */
@@ -191,11 +134,14 @@
 .manage-panel {
   max-width: 1100px;
   margin: 0.5rem auto 1rem;
-  padding: 0.95rem 1.1rem;
+  padding: 0.85rem 1.1rem;
   border: 1px solid rgba(244, 63, 94, 0.4);
   border-radius: 14px;
   background: linear-gradient(160deg, rgba(40, 12, 18, 0.92), rgba(12, 10, 16, 0.95));
   box-shadow: var(--shadow-out);
+}
+.kol-select-wrap {
+  margin-bottom: 0.5rem !important;
 }
 
 /* Add form — force visible inputs even if global CSS is odd */

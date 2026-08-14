@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/moon.css?v=aurora1" />
   <link rel="stylesheet" href="/static/css/snipes.css?v=aurora1" />
-  <link rel="stylesheet" href="/static/css/fomo.css?v=5" />
+  <link rel="stylesheet" href="/static/css/fomo.css?v=6" />
 </head>
 <body class="page-fomo">
   <div class="bg" aria-hidden="true"></div>
@@ -30,7 +30,7 @@
       <span class="mark fomo-mark">🚀</span>
       <div>
         <h1>FOMO Aping Channel</h1>
-        <p>KOL dropdown with <strong>1d / 7d / 30d PnL</strong> · Telegram on buy &amp; exit</p>
+        <p>Watchlist dropdown · <strong>1d / 7d / 30d PnL</strong> · Telegram on buy &amp; exit</p>
       </div>
     </div>
     <div class="pills">
@@ -48,22 +48,17 @@
     <span class="pill muted" id="pollInfo">poll —</span>
   </section>
 
-  <div class="plan-banner fomo-banner">
-    <strong>KOL list</strong> — pick a wallet from the dropdown (name · address · 1d/7d/30d PnL).
-    Add wallets below; they keep triggering Telegram FOMO alerts.
-    PnL needs <code>BIRDEYE_API_KEY</code> or <code>CIELO_API_KEY</code> for full stats (else shows —).
-  </div>
-
   <section class="manage-panel">
-    <h2 class="roster-title">Select KOL</h2>
+    <h2 class="roster-title">Watchlist <span class="muted" id="walletCount"></span></h2>
+    <p class="hint-line">Click the dropdown to open all watched wallets (name · address · 1d/7d/30d). Pick one for details &amp; remove.</p>
     <label class="field kol-select-wrap">
-      Wallet
+      All watched wallets
       <select id="kolSelect" class="kol-select">
         <option value="">Loading wallets…</option>
       </select>
     </label>
-    <div class="kol-detail" id="kolDetail">
-      <div class="kol-detail-empty">Select a KOL to see wallet + PnL breakdown</div>
+    <div class="kol-detail" id="kolDetail" hidden>
+      <div class="kol-detail-empty">Select a wallet from the dropdown</div>
     </div>
 
     <h2 class="roster-title" style="margin-top:1.1rem">Add FOMO wallet</h2>
@@ -95,11 +90,6 @@
 
   <p class="status" id="status">Loading FOMO feed…</p>
 
-  <section class="roster-wrap">
-    <h2 class="roster-title">All watched wallets <span class="muted" id="walletCount"></span></h2>
-    <div id="wallets"></div>
-  </section>
-
   <h2 class="roster-title" style="max-width:1100px;margin:0 auto 0.5rem;padding:0 1rem;position:relative;z-index:1">Live events</h2>
   <main id="list" class="list"></main>
 
@@ -109,6 +99,6 @@
     <a href="/api/fomo/wallets" style="color:inherit">/api/fomo/wallets</a>
   </footer>
 
-  <script src="/static/js/fomo.js?v=5"></script>
+  <script src="/static/js/fomo.js?v=6"></script>
 </body>
 </html>
