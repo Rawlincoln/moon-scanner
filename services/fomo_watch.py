@@ -23,12 +23,15 @@ from config import (
     FOMO_ALERT_TELEGRAM,
     FOMO_ENABLED,
     FOMO_MAX_WALLETS,
+    FOMO_OPEN_MANAGE,
     FOMO_POLL_SEC,
     FOMO_SIGS_PER_WALLET,
+    FOMO_WALLETS_PER_CYCLE,
     HELIUS_API_KEY,
     PADRE_TRADE_URL,
     SOLANA_RPC_HTTP,
     TELEGRAM_FOMO_CHAT_ID,
+    rpc_is_paid,
 )
 from services.fomo_wallets import list_wallets as list_managed_wallets
 from services.http_client import get_client
@@ -68,6 +71,7 @@ _last_status: dict[str, Any] = {
 }
 _lock = asyncio.Lock()
 _rpc_id = 1
+_rr_index = 0  # round-robin start index
 
 
 def _next_id() -> int:
@@ -168,6 +172,7 @@ def status() -> dict[str, Any]:
         "rpc": (http_url() or SOLANA_RPC_HTTP)[:48],
         "helius": bool(HELIUS_API_KEY),
         "manageable": True,
+        "open_manage": FOMO_OPEN_MANAGE,
         "wallets": [
             {
                 "label": w.get("label"),
@@ -185,7 +190,8 @@ def status() -> dict[str, Any]:
         "last": dict(_last_status),
         "hint": (
             "Add/remove wallets on this page — they keep firing FOMO buy/exit alerts. "
-            "Set HELIUS_API_KEY for speed. Optional TELEGRAM_FOMO_CHAT_ID for a FOMO channel."
+            "Set HELIUS_API_KEY for reliable polls (public RPC often 429s). "
+            "Optional TELEGRAM_FOMO_CHAT_ID for a FOMO channel."
         ),
     }
 
@@ -507,7 +513,8 @@ async def process_delta(
 
 
 async def poll_once(*, seed: bool = False) -> dict[str, Any]:
-    """One FOMO poll cycle over tracked wallets."""
+    """One FOMO poll cycle over tracked wallets (round-robin to avoid RPC 429)."""
+    global _rr_index
     if not FOMO_ENABLED:
         return {"ok": False, "error": "FOMO disabled", "buys": 0, "exits": 0}
 
@@ -517,9 +524,40 @@ async def poll_once(*, seed: bool = False) -> dict[str, Any]:
     new_sigs = 0
     errors: list[str] = []
     emitted: list[dict[str, Any]] = []
-    sig_limit = max(3, min(25, int(FOMO_SIGS_PER_WALLET)))
+    sig_limit = max(2, min(12, int(FOMO_SIGS_PER_WALLET)))
+    paid = rpc_is_paid()
+    # Public RPC: few wallets/cycle + longer gaps. Paid: more aggressive.
+    per_cycle = len(wallets) if seed else max(1, int(FOMO_WALLETS_PER_CYCLE))
+    if paid and not seed:
+        per_cycle = max(per_cycle, min(8, len(wallets) or 1))
+    gap = 0.35 if paid else 1.1
+    tx_gap = 0.2 if paid else 0.55
 
-    for w in wallets:
+    if not wallets:
+        _last_status.update(
+            {
+                "ts": time.time(),
+                "cycle": int(_last_status.get("cycle") or 0) + 1,
+                "wallets": 0,
+                "new_sigs": 0,
+                "buys": 0,
+                "exits": 0,
+                "errors": ["No FOMO wallets — add some on /fomo"],
+                "emitted": 0,
+            }
+        )
+        return {"ok": True, "wallets": 0, "buys": 0, "exits": 0, "events": []}
+
+    # Round-robin slice
+    n = len(wallets)
+    start = 0 if seed else (_rr_index % n)
+    batch: list[dict[str, Any]] = []
+    for i in range(min(per_cycle if not seed else n, n)):
+        batch.append(wallets[(start + i) % n])
+    if not seed:
+        _rr_index = (start + len(batch)) % n
+
+    for w in batch:
         addr = str(w.get("address") or "").strip()
         label = str(w.get("label") or addr[:6])
         tier = str(w.get("tier") or "S")
@@ -528,8 +566,13 @@ async def poll_once(*, seed: bool = False) -> dict[str, Any]:
         try:
             sigs = await _sigs_for_wallet(addr, sig_limit)
         except Exception as exc:
-            errors.append(f"{label}:sigs {str(exc)[:60]}")
-            await asyncio.sleep(0.2)
+            err = str(exc)
+            if "429" in err:
+                errors.append(f"{label}: RPC rate-limited (add HELIUS_API_KEY)")
+                await asyncio.sleep(2.0 if not paid else 0.5)
+            else:
+                errors.append(f"{label}:sigs {err[:55]}")
+                await asyncio.sleep(gap)
             continue
 
         # Newest first from RPC; process oldest first for chronological opens
@@ -546,17 +589,23 @@ async def poll_once(*, seed: bool = False) -> dict[str, Any]:
         if seed:
             for sig in fresh:
                 _seen[sig] = time.time()
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(gap)
             continue
 
-        for sig in reversed(fresh):
+        # Only process a few newest per wallet per cycle
+        for sig in reversed(fresh[-3:]):
             _seen[sig] = time.time()
             new_sigs += 1
             try:
                 tx = await _get_tx(sig)
             except Exception as exc:
-                errors.append(f"{label}:tx {str(exc)[:50]}")
-                await asyncio.sleep(0.15)
+                err = str(exc)
+                if "429" in err:
+                    errors.append(f"{label}:tx rate-limited")
+                    await asyncio.sleep(1.5)
+                    break
+                errors.append(f"{label}:tx {err[:45]}")
+                await asyncio.sleep(tx_gap)
                 continue
             if not tx:
                 continue
@@ -572,7 +621,7 @@ async def poll_once(*, seed: bool = False) -> dict[str, Any]:
                         notify=True,
                     )
                 except Exception as exc:
-                    errors.append(f"{label}:delta {str(exc)[:50]}")
+                    errors.append(f"{label}:delta {str(exc)[:45]}")
                     continue
                 if not ev:
                     continue
@@ -581,8 +630,8 @@ async def poll_once(*, seed: bool = False) -> dict[str, Any]:
                     buys += 1
                 else:
                     exits += 1
-            await asyncio.sleep(0.12)
-        await asyncio.sleep(0.18)
+            await asyncio.sleep(tx_gap)
+        await asyncio.sleep(gap)
 
     _persist()
     _last_status.update(
@@ -590,12 +639,14 @@ async def poll_once(*, seed: bool = False) -> dict[str, Any]:
             "ts": time.time(),
             "cycle": int(_last_status.get("cycle") or 0) + 1,
             "wallets": len(wallets),
+            "polled": len(batch),
             "new_sigs": new_sigs,
             "buys": buys,
             "exits": exits,
             "errors": errors[-8:],
             "seeded": bool(_last_status.get("seeded") or seed),
             "emitted": len(emitted),
+            "rpc_paid": paid,
         }
     )
     if seed:
@@ -607,6 +658,7 @@ async def poll_once(*, seed: bool = False) -> dict[str, Any]:
         "ok": True,
         "seed": seed,
         "wallets": len(wallets),
+        "polled": len(batch),
         "new_sigs": new_sigs,
         "buys": buys,
         "exits": exits,

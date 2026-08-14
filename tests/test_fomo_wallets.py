@@ -39,6 +39,13 @@ def test_add_and_remove(tmp_path, monkeypatch):
     assert remove_wallet(addr) is False
 
 
+def test_open_manage_allows_without_key():
+    from config import FOMO_OPEN_MANAGE
+
+    # Default is open manage so the FOMO UI works on Render without pasting keys
+    assert FOMO_OPEN_MANAGE is True
+
+
 def test_fomo_wallets_uses_managed(tmp_path, monkeypatch):
     import services.fomo_wallets as fw
     import services.fomo_watch as watch

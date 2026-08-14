@@ -43,9 +43,22 @@ function setManageMsg(msg, kind = "") {
   el.className = "manage-msg" + (kind ? ` ${kind}` : "");
 }
 
+function detailText(data) {
+  const d = data?.detail ?? data?.error ?? data?.message;
+  if (d == null) return "";
+  if (typeof d === "string") return d;
+  if (Array.isArray(d)) {
+    return d
+      .map((x) => (typeof x === "string" ? x : x?.msg || JSON.stringify(x)))
+      .join("; ");
+  }
+  if (typeof d === "object") return d.msg || JSON.stringify(d);
+  return String(d);
+}
+
 function adminHeaders() {
   const key = ($("#adminKey")?.value || localStorage.getItem(ADMIN_KEY_LS) || "").trim();
-  const h = { "Content-Type": "application/json" };
+  const h = { "Content-Type": "application/json", Accept: "application/json" };
   if (key) h["X-Admin-Key"] = key;
   return h;
 }
@@ -167,12 +180,22 @@ function render(data) {
     pi.textContent = `poll ${data.poll_sec ?? "—"}s · buys ${last.buys ?? 0} · exits ${last.exits ?? 0}`;
   }
 
-  setStatus(
-    data.enabled
-      ? `Live · ${wallets.length} watched · ${events.length} events · TG ${data.telegram ? "on" : "off"}`
-      : "FOMO disabled (FOMO_ENABLED=0)",
-    data.enabled ? "ok" : ""
-  );
+  const errs = (data.last && data.last.errors) || [];
+  const rpcWarn = errs.some((e) => /429|rate-limit/i.test(String(e)));
+  let statusMsg = data.enabled
+    ? `Live · ${wallets.length} watched · ${events.length} events · TG ${data.telegram ? "on" : "off"}`
+    : "FOMO disabled (FOMO_ENABLED=0)";
+  if (rpcWarn) {
+    statusMsg +=
+      " · ⚠ Public RPC rate-limited — set HELIUS_API_KEY on Render for FOMO to fire reliably";
+  } else if (errs.length) {
+    statusMsg += ` · last error: ${String(errs[0]).slice(0, 80)}`;
+  }
+  setStatus(statusMsg, rpcWarn ? "err" : data.enabled ? "ok" : "");
+
+  // Hide admin key if open manage
+  const ak = document.querySelector(".admin-key-field");
+  if (ak) ak.style.display = data.open_manage === false ? "" : "none";
 }
 
 async function load() {
@@ -208,7 +231,7 @@ async function addWallet(ev) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data.detail || data.error || res.statusText || "Add failed");
+      throw new Error(detailText(data) || res.statusText || "Add failed");
     }
     setManageMsg(
       `Added ${data.wallet?.label || label || "wallet"} — watching for new buys/exits` +
@@ -221,8 +244,8 @@ async function addWallet(ev) {
   } catch (e) {
     const msg = String(e.message || e);
     setManageMsg(
-      msg.includes("401") || /Admin-Key|required/i.test(msg)
-        ? "Need Admin key — paste ADMIN_API_KEY below and try again"
+      /Admin-Key|required|401/i.test(msg)
+        ? "Need Admin key — paste ADMIN_API_KEY from Render env, or set FOMO_OPEN_MANAGE=1"
         : msg,
       "err"
     );
@@ -244,7 +267,7 @@ async function removeWallet(address) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data.detail || data.error || "Remove failed");
+      throw new Error(detailText(data) || "Remove failed");
     }
     setManageMsg("Removed — no more alerts for that wallet", "ok");
     await load();

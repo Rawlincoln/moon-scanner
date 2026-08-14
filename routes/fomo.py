@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.paths import BASE_DIR
+from config import FOMO_OPEN_MANAGE
 from services.alert_auth import force_auth_ok
 from services.fomo_wallets import add_wallet, list_wallets, remove_wallet, valid_address
 from services.fomo_watch import poll_once, seed_wallet_history, status as fomo_status
@@ -19,16 +20,21 @@ router = APIRouter(tags=["fomo"])
 class FomoWalletIn(BaseModel):
     address: str = Field(..., min_length=32, max_length=64)
     label: str | None = Field(default=None, max_length=40)
-    tier: str = Field(default="S", max_length=1)
+    tier: str = Field(default="S", max_length=8)
     note: str | None = Field(default=None, max_length=160)
 
 
 def _require_manage_auth(x_admin_key: str | None) -> None:
-    """Allow manage if admin/cron ok, or local dev with no secrets."""
+    """FOMO desk: open manage by default so the UI works without pasting keys.
+
+    Set FOMO_OPEN_MANAGE=0 to require X-Admin-Key / cron secret.
+    """
+    if FOMO_OPEN_MANAGE:
+        return
     if not force_auth_ok(x_admin_key=x_admin_key, bot_wired=False):
         raise HTTPException(
             status_code=401,
-            detail="X-Admin-Key required to add/remove FOMO wallets",
+            detail="X-Admin-Key required (or set FOMO_OPEN_MANAGE=1)",
         )
 
 

@@ -49,8 +49,9 @@
   </section>
 
   <div class="plan-banner fomo-banner">
-    <strong>Manage list below.</strong> New wallets are seeded (no history spam), then every buy/exit after that alerts on Telegram.
-    Production may need your <code>ADMIN_API_KEY</code> in the field under the form.
+    <strong>Add / remove wallets below</strong> — no admin key needed by default.
+    New wallets are seeded (no history spam), then buys/exits alert on Telegram.
+    For reliable alerts set <code>HELIUS_API_KEY</code> on Render (public RPC often 429s).
   </div>
 
   <section class="manage-panel">
@@ -97,6 +98,6 @@
     <a href="/api/fomo/wallets" style="color:inherit">/api/fomo/wallets</a>
   </footer>
 
-  <script src="/static/js/fomo.js?v=2"></script>
+  <script src="/static/js/fomo.js?v=3"></script>
 </body>
 </html>

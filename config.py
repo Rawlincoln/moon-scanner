@@ -346,16 +346,23 @@ TELEGRAM_ALERT_ELITE_LABELS = {
 TELEGRAM_CRON_SECRET = os.getenv("TELEGRAM_CRON_SECRET", "").strip()
 
 # --- FOMO aping channel (elite wallet buy/exit alerts) ---
-# Poll S/A-tier elite wallets for SPL buys & sells; Telegram FOMO alerts.
+# Poll managed FOMO wallets for SPL buys & sells; Telegram FOMO alerts.
 _fomo_en = (os.getenv("FOMO_ENABLED", "1") or "1").strip().lower()
 FOMO_ENABLED = _fomo_en not in ("0", "false", "no", "off")
-FOMO_POLL_SEC = float(os.getenv("FOMO_POLL_SEC", "10") or "10")
-FOMO_MAX_WALLETS = int(os.getenv("FOMO_MAX_WALLETS", "16") or "16")
-FOMO_SIGS_PER_WALLET = int(os.getenv("FOMO_SIGS_PER_WALLET", "8") or "8")
+# Public RPC needs slower polls; Helius can use 8–12s
+FOMO_POLL_SEC = float(os.getenv("FOMO_POLL_SEC", "18") or "18")
+FOMO_MAX_WALLETS = int(os.getenv("FOMO_MAX_WALLETS", "20") or "20")
+FOMO_SIGS_PER_WALLET = int(os.getenv("FOMO_SIGS_PER_WALLET", "5") or "5")
+# How many wallets to hit per cycle (round-robin) — avoids public RPC 429
+FOMO_WALLETS_PER_CYCLE = int(os.getenv("FOMO_WALLETS_PER_CYCLE", "3") or "3")
 _fomo_tg = (os.getenv("FOMO_ALERT_TELEGRAM", "1") or "1").strip().lower()
 FOMO_ALERT_TELEGRAM = _fomo_tg not in ("0", "false", "no", "off")
 # Optional dedicated Telegram chat/channel for FOMO (else main TELEGRAM_CHAT_ID)
 TELEGRAM_FOMO_CHAT_ID = os.getenv("TELEGRAM_FOMO_CHAT_ID", "").strip()
+# Allow add/remove FOMO wallets from the UI without Admin key (private desk).
+# Set FOMO_OPEN_MANAGE=0 to require X-Admin-Key again.
+_fomo_open = (os.getenv("FOMO_OPEN_MANAGE", "1") or "1").strip().lower()
+FOMO_OPEN_MANAGE = _fomo_open not in ("0", "false", "no", "off")
 
 # --- Money plan (entry / stop / TP / invalidation) ---
 MONEY_STOP_PCT = float(os.getenv("MONEY_STOP_PCT", "0.18") or "0.18")  # −18%
