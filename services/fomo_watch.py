@@ -35,7 +35,7 @@ from config import (
 )
 from services.fomo_wallets import list_wallets as list_managed_wallets
 from services.http_client import get_client
-from services.realtime_rpc import http_url
+from services.realtime_rpc import http_url, redact_rpc_url
 
 logger = logging.getLogger("moon-scanner.fomo")
 
@@ -169,7 +169,7 @@ def status() -> dict[str, Any]:
         "poll_sec": FOMO_POLL_SEC,
         "telegram": FOMO_ALERT_TELEGRAM,
         "chat_override": bool((TELEGRAM_FOMO_CHAT_ID or "").strip()),
-        "rpc": (http_url() or SOLANA_RPC_HTTP)[:48],
+        "rpc": redact_rpc_url(http_url() or SOLANA_RPC_HTTP),
         "helius": bool(HELIUS_API_KEY),
         "manageable": True,
         "open_manage": FOMO_OPEN_MANAGE,
