@@ -190,10 +190,24 @@ def status() -> dict[str, Any]:
         "last": dict(_last_status),
         "hint": (
             "Add/remove wallets on this page — they keep firing FOMO buy/exit alerts. "
-            "Set HELIUS_API_KEY for reliable polls (public RPC often 429s). "
-            "Optional TELEGRAM_FOMO_CHAT_ID for a FOMO channel."
+            "KOL dropdown shows 1d/7d/30d PnL when BIRDEYE_API_KEY or CIELO_API_KEY is set. "
+            "Set HELIUS_API_KEY for reliable buy/exit polls."
         ),
     }
+
+
+async def status_with_pnl(*, force_pnl: bool = False) -> dict[str, Any]:
+    """Status payload plus PnL on each wallet for the KOL dropdown."""
+    st = status()
+    try:
+        from services.wallet_pnl import fetch_pnl_for_wallets
+
+        st["wallets"] = await fetch_pnl_for_wallets(
+            st.get("wallets") or [], force=force_pnl
+        )
+    except Exception as exc:
+        logger.debug("status_with_pnl: %s", exc)
+    return st
 
 
 async def _rpc(method: str, params: list[Any]) -> Any:

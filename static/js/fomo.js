@@ -63,7 +63,99 @@ function adminHeaders() {
   return h;
 }
 
+/** Signed USD for PnL cells */
+function fmtPnl(n) {
+  if (n == null || n === "" || Number.isNaN(Number(n))) {
+    return { text: "—", cls: "na" };
+  }
+  const v = Number(n);
+  const sign = v >= 0 ? "+" : "-";
+  const a = Math.abs(v);
+  let text;
+  if (a >= 1e6) text = `${sign}$${(a / 1e6).toFixed(2)}M`;
+  else if (a >= 1e3) text = `${sign}$${(a / 1e3).toFixed(1)}k`;
+  else text = `${sign}$${a.toFixed(0)}`;
+  return { text, cls: v >= 0 ? "pos" : "neg" };
+}
+
+function shortAddr(a) {
+  if (!a || a.length < 10) return a || "—";
+  return `${a.slice(0, 4)}…${a.slice(-4)}`;
+}
+
+function optionLabel(w) {
+  const name = w.label || "KOL";
+  const addr = shortAddr(w.address);
+  const d1 = fmtPnl(w.pnl_1d ?? w.pnl?.["1d"]);
+  const d7 = fmtPnl(w.pnl_7d ?? w.pnl?.["7d"]);
+  const d30 = fmtPnl(w.pnl_30d ?? w.pnl?.["30d"]);
+  return `${name}  ·  ${addr}  ·  1d ${d1.text}  ·  7d ${d7.text}  ·  30d ${d30.text}`;
+}
+
+let _walletByAddr = {};
+
+function renderKolSelect(wallets = []) {
+  const sel = $("#kolSelect");
+  if (!sel) return;
+  const prev = sel.value;
+  _walletByAddr = {};
+  wallets.forEach((w) => {
+    if (w.address) _walletByAddr[w.address] = w;
+  });
+  const opts = [
+    `<option value="">— Select KOL (${wallets.length}) — name · wallet · 1d / 7d / 30d PnL —</option>`,
+  ];
+  wallets.forEach((w) => {
+    const a = w.address || "";
+    opts.push(
+      `<option value="${escapeHtml(a)}">${escapeHtml(optionLabel(w))}</option>`
+    );
+  });
+  sel.innerHTML = opts.join("");
+  if (prev && _walletByAddr[prev]) sel.value = prev;
+  else if (!prev) showKolDetail(null);
+  if (sel.value) showKolDetail(_walletByAddr[sel.value]);
+}
+
+function showKolDetail(w) {
+  const el = $("#kolDetail");
+  if (!el) return;
+  if (!w) {
+    el.innerHTML = `<div class="kol-detail-empty">Select a KOL to see wallet + PnL breakdown</div>`;
+    return;
+  }
+  const a = w.address || "";
+  const d1 = fmtPnl(w.pnl_1d ?? w.pnl?.["1d"]);
+  const d7 = fmtPnl(w.pnl_7d ?? w.pnl?.["7d"]);
+  const d30 = fmtPnl(w.pnl_30d ?? w.pnl?.["30d"]);
+  const src = w.pnl_source || w.pnl?.source || "n/a";
+  const sol = a ? `https://solscan.io/account/${a}` : "#";
+  el.innerHTML = `
+    <div class="kol-detail-grid">
+      <div>
+        <div class="name">${escapeHtml(w.label || "?")} <span class="tier">${escapeHtml(w.tier || "S")}</span></div>
+        <div class="addr">${escapeHtml(a)}</div>
+        <div class="meta-line" style="margin-top:0.35rem;font-size:0.72rem;color:#94a3b8">PnL source: ${escapeHtml(src)}</div>
+      </div>
+      <div class="pnl-cell"><div class="lbl">1 day</div><div class="val ${d1.cls}">${d1.text}</div></div>
+      <div class="pnl-cell"><div class="lbl">7 day</div><div class="val ${d7.cls}">${d7.text}</div></div>
+      <div class="pnl-cell"><div class="lbl">30 day</div><div class="val ${d30.cls}">${d30.text}</div></div>
+    </div>
+    <div class="kol-actions">
+      <a class="btn sm" href="${sol}" target="_blank" rel="noopener">Solscan</a>
+      <button type="button" class="btn sm" id="fillFormBtn">Fill add form</button>
+      <button type="button" class="btn sm danger" id="detailRmBtn">Remove from FOMO</button>
+    </div>`;
+  $("#fillFormBtn")?.addEventListener("click", () => {
+    if ($("#wLabel")) $("#wLabel").value = w.label || "";
+    if ($("#wAddress")) $("#wAddress").value = a;
+    if ($("#wTier")) $("#wTier").value = w.tier || "S";
+  });
+  $("#detailRmBtn")?.addEventListener("click", () => removeWallet(a));
+}
+
 function renderWallets(wallets = []) {
+  renderKolSelect(wallets);
   const el = $("#wallets");
   if (!el) return;
   const count = $("#walletCount");
@@ -75,8 +167,11 @@ function renderWallets(wallets = []) {
   el.innerHTML = wallets
     .map((w) => {
       const a = w.address || "";
-      const short = a ? `${a.slice(0, 4)}…${a.slice(-4)}` : "—";
+      const short = shortAddr(a);
       const href = a ? `https://solscan.io/account/${a}` : "#";
+      const d1 = fmtPnl(w.pnl_1d ?? w.pnl?.["1d"]);
+      const d7 = fmtPnl(w.pnl_7d ?? w.pnl?.["7d"]);
+      const d30 = fmtPnl(w.pnl_30d ?? w.pnl?.["30d"]);
       return `<div class="roster-card" data-addr="${escapeHtml(a)}">
         <div class="card-top">
           <span class="tier">${escapeHtml(w.tier || "S")}</span>
@@ -84,7 +179,11 @@ function renderWallets(wallets = []) {
           <button type="button" class="btn sm danger rm-btn" data-addr="${escapeHtml(a)}" title="Stop watching">Remove</button>
         </div>
         <div class="addr"><a href="${href}" target="_blank" rel="noopener">${escapeHtml(short)}</a></div>
-        <div class="meta-line">${escapeHtml(w.source || "manual")}${w.note ? " · " + escapeHtml(w.note) : ""}</div>
+        <div class="pnl-row">
+          <span class="${d1.cls}">1d ${d1.text}</span>
+          <span class="${d7.cls}">7d ${d7.text}</span>
+          <span class="${d30.cls}">30d ${d30.text}</span>
+        </div>
       </div>`;
     })
     .join("");
@@ -200,7 +299,10 @@ function render(data) {
 
 async function load() {
   try {
-    const res = await fetch("/api/fomo", { signal: AbortSignal.timeout(20000) });
+    // with_pnl loads KOL 1d/7d/30d for dropdown (may take a few seconds)
+    const res = await fetch("/api/fomo?with_pnl=1", {
+      signal: AbortSignal.timeout(45000),
+    });
     const data = await res.json();
     render(data);
   } catch (e) {
@@ -281,10 +383,21 @@ function bind() {
   if (ak) ak.value = localStorage.getItem(ADMIN_KEY_LS) || "";
   $("#refreshBtn")?.addEventListener("click", load);
   $("#addForm")?.addEventListener("submit", addWallet);
+  $("#kolSelect")?.addEventListener("change", (e) => {
+    const addr = e.target.value;
+    showKolDetail(addr ? _walletByAddr[addr] : null);
+    if (addr && _walletByAddr[addr]) {
+      // Filter events list highlight — optional scroll
+      const w = _walletByAddr[addr];
+      if ($("#wLabel")) $("#wLabel").value = w.label || "";
+      if ($("#wAddress")) $("#wAddress").value = w.address || "";
+    }
+  });
   let t = null;
   const arm = () => {
     if (t) clearInterval(t);
-    if ($("#autoRefresh")?.checked) t = setInterval(load, 8000);
+    // PnL is cached server-side; refresh UI every 20s to avoid spam
+    if ($("#autoRefresh")?.checked) t = setInterval(load, 20000);
   };
   $("#autoRefresh")?.addEventListener("change", arm);
   arm();

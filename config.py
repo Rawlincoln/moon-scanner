@@ -223,6 +223,11 @@ YELLOWSTONE_ONLY = os.getenv("YELLOWSTONE_ONLY", "").strip().lower() in (
     "yes",
 )
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "").strip()
+# Optional wallet PnL providers for FOMO KOL dropdown (1d/7d/30d)
+BIRDEYE_API_KEY = os.getenv("BIRDEYE_API_KEY", "").strip()
+CIELO_API_KEY = (
+    os.getenv("CIELO_API_KEY") or os.getenv("CIELO_API_TOKEN") or ""
+).strip()
 
 # Admin / security
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()

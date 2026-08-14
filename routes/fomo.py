@@ -12,7 +12,12 @@ from app.paths import BASE_DIR
 from config import FOMO_OPEN_MANAGE
 from services.alert_auth import force_auth_ok
 from services.fomo_wallets import add_wallet, list_wallets, remove_wallet, valid_address
-from services.fomo_watch import poll_once, seed_wallet_history, status as fomo_status
+from services.fomo_watch import (
+    poll_once,
+    seed_wallet_history,
+    status as fomo_status,
+    status_with_pnl,
+)
 
 router = APIRouter(tags=["fomo"])
 
@@ -44,16 +49,33 @@ async def fomo_page():
 
 
 @router.get("/api/fomo")
-async def fomo_status_api():
-    """Recent FOMO events + watched wallets + poll health."""
+async def fomo_status_api(with_pnl: bool = True, force_pnl: bool = False):
+    """Recent FOMO events + watched wallets + poll health (+ optional PnL)."""
+    if with_pnl:
+        return await status_with_pnl(force_pnl=force_pnl)
     return fomo_status()
 
 
 @router.get("/api/fomo/wallets")
-async def fomo_list_wallets():
-    """List managed FOMO wallets (same set the poller watches)."""
+async def fomo_list_wallets(with_pnl: bool = True, force_pnl: bool = False):
+    """List managed FOMO wallets (same set the poller watches).
+
+    ``with_pnl=1`` attaches 1d/7d/30d PnL for the KOL dropdown.
+    """
     wallets = list_wallets()
-    return {"ok": True, "count": len(wallets), "wallets": wallets}
+    if with_pnl:
+        from services.wallet_pnl import fetch_pnl_for_wallets
+
+        wallets = await fetch_pnl_for_wallets(wallets, force=force_pnl)
+    return {
+        "ok": True,
+        "count": len(wallets),
+        "wallets": wallets,
+        "pnl_note": (
+            "PnL from BIRDEYE_API_KEY / CIELO_API_KEY when set; "
+            "else local FOMO exits only (or n/a)."
+        ),
+    }
 
 
 @router.post("/api/fomo/wallets")

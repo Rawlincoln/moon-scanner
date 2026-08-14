@@ -175,3 +175,100 @@
   color: #94a3b8;
   font-size: 0.85em;
 }
+
+.kol-select-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: #fda4af;
+  margin-bottom: 0.75rem;
+}
+.kol-select {
+  width: 100%;
+  max-width: 100%;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(253, 164, 175, 0.45);
+  border-radius: 10px;
+  color: #fff;
+  padding: 0.65rem 0.75rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.kol-select option {
+  background: #1a0a0e;
+  color: #fde2e8;
+  padding: 0.4rem;
+}
+.kol-detail {
+  border: 1px solid rgba(244, 63, 94, 0.28);
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem;
+  background: rgba(0, 0, 0, 0.25);
+  margin-bottom: 0.25rem;
+  min-height: 4.5rem;
+}
+.kol-detail-empty {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+.kol-detail-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  gap: 0.65rem;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .kol-detail-grid { grid-template-columns: 1fr 1fr; }
+}
+.kol-detail .name {
+  font-weight: 700;
+  color: #fecdd3;
+  font-size: 1.05rem;
+}
+.kol-detail .addr {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  word-break: break-all;
+  margin-top: 0.25rem;
+}
+.pnl-cell {
+  text-align: center;
+  padding: 0.35rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.pnl-cell .lbl {
+  font-size: 0.68rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pnl-cell .val {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-top: 0.15rem;
+}
+.pnl-cell .val.pos { color: #6ee7b7; }
+.pnl-cell .val.neg { color: #fca5a5; }
+.pnl-cell .val.na { color: #64748b; font-weight: 500; }
+.kol-actions {
+  margin-top: 0.65rem;
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.roster-card .pnl-row {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.65rem;
+  flex-wrap: wrap;
+}
+.roster-card .pnl-row span.pos { color: #6ee7b7; }
+.roster-card .pnl-row span.neg { color: #fca5a5; }
+.roster-card .pnl-row span.na { color: #64748b; }
