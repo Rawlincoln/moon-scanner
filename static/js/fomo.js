@@ -1,7 +1,8 @@
 /**
- * FOMO aping channel UI — live elite buy/exit events.
+ * FOMO aping channel — manage wallets + live buy/exit events.
  */
 const $ = (s) => document.querySelector(s);
+const ADMIN_KEY_LS = "fomo_admin_key";
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -35,11 +36,27 @@ function setStatus(msg, kind = "") {
   el.className = "status" + (kind ? ` ${kind}` : "");
 }
 
+function setManageMsg(msg, kind = "") {
+  const el = $("#manageMsg");
+  if (!el) return;
+  el.textContent = msg || "";
+  el.className = "manage-msg" + (kind ? ` ${kind}` : "");
+}
+
+function adminHeaders() {
+  const key = ($("#adminKey")?.value || localStorage.getItem(ADMIN_KEY_LS) || "").trim();
+  const h = { "Content-Type": "application/json" };
+  if (key) h["X-Admin-Key"] = key;
+  return h;
+}
+
 function renderWallets(wallets = []) {
   const el = $("#wallets");
   if (!el) return;
+  const count = $("#walletCount");
+  if (count) count.textContent = `(${wallets.length})`;
   if (!wallets.length) {
-    el.innerHTML = `<div class="roster-card">No S/A-tier wallets — add elites on /elite</div>`;
+    el.innerHTML = `<div class="roster-card">No wallets yet — add one above. Alerts start after the first new buy/sell.</div>`;
     return;
   }
   el.innerHTML = wallets
@@ -47,13 +64,21 @@ function renderWallets(wallets = []) {
       const a = w.address || "";
       const short = a ? `${a.slice(0, 4)}…${a.slice(-4)}` : "—";
       const href = a ? `https://solscan.io/account/${a}` : "#";
-      return `<div class="roster-card">
-        <span class="tier">${escapeHtml(w.tier || "S")}</span>
-        <span class="lbl">${escapeHtml(w.label || "?")}</span>
+      return `<div class="roster-card" data-addr="${escapeHtml(a)}">
+        <div class="card-top">
+          <span class="tier">${escapeHtml(w.tier || "S")}</span>
+          <span class="lbl">${escapeHtml(w.label || "?")}</span>
+          <button type="button" class="btn sm danger rm-btn" data-addr="${escapeHtml(a)}" title="Stop watching">Remove</button>
+        </div>
         <div class="addr"><a href="${href}" target="_blank" rel="noopener">${escapeHtml(short)}</a></div>
+        <div class="meta-line">${escapeHtml(w.source || "manual")}${w.note ? " · " + escapeHtml(w.note) : ""}</div>
       </div>`;
     })
     .join("");
+
+  el.querySelectorAll(".rm-btn").forEach((btn) => {
+    btn.onclick = () => removeWallet(btn.dataset.addr);
+  });
 }
 
 function eventCard(ev) {
@@ -63,9 +88,7 @@ function eventCard(ev) {
   const cls = isBuy ? "buy" : "exit";
   const mint = ev.mint || "";
   const short = mint ? `${mint.slice(0, 4)}…${mint.slice(-4)}` : "";
-  const padre = mint
-    ? `https://trade.padre.gg/trade/solana/${mint}`
-    : "#";
+  const padre = mint ? `https://trade.padre.gg/trade/solana/${mint}` : "#";
   const pump = mint ? `https://pump.fun/coin/${mint}` : "#";
   const tx = ev.signature ? `https://solscan.io/tx/${ev.signature}` : "#";
   let bag = "";
@@ -114,8 +137,8 @@ function render(data) {
     if (!events.length) {
       list.innerHTML = `<div class="empty">
         <strong>No FOMO events yet</strong>
-        <p>When Cupsey / Cented / Cap / … buy or sell a token, it appears here and on Telegram.</p>
-        <p class="muted">Poll ~${data.poll_sec ?? "—"}s · Helius ${data.helius ? "ON" : "off (public RPC)"} · cycle ${last.cycle ?? 0}</p>
+        <p>Add wallets above. When they buy or sell after being added, alerts show here and on Telegram.</p>
+        <p class="muted">Poll ~${data.poll_sec ?? "—"}s · Helius ${data.helius ? "ON" : "off"} · cycle ${last.cycle ?? 0}</p>
       </div>`;
     } else {
       list.innerHTML = events.map(eventCard).join("");
@@ -146,7 +169,7 @@ function render(data) {
 
   setStatus(
     data.enabled
-      ? `Live · ${events.length} recent events · telegram ${data.telegram ? "on" : "off"}`
+      ? `Live · ${wallets.length} watched · ${events.length} events · TG ${data.telegram ? "on" : "off"}`
       : "FOMO disabled (FOMO_ENABLED=0)",
     data.enabled ? "ok" : ""
   );
@@ -156,17 +179,85 @@ async function load() {
   try {
     const res = await fetch("/api/fomo", { signal: AbortSignal.timeout(20000) });
     const data = await res.json();
-    if (!data.ok && data.enabled === false) {
-      setStatus("FOMO disabled", "err");
-    }
     render(data);
   } catch (e) {
     setStatus(`Load failed: ${e.message || e}`, "err");
   }
 }
 
+async function addWallet(ev) {
+  ev?.preventDefault?.();
+  const label = ($("#wLabel")?.value || "").trim();
+  const address = ($("#wAddress")?.value || "").trim();
+  const tier = ($("#wTier")?.value || "S").trim();
+  const key = ($("#adminKey")?.value || "").trim();
+  if (key) localStorage.setItem(ADMIN_KEY_LS, key);
+
+  if (!address) {
+    setManageMsg("Wallet address required", "err");
+    return;
+  }
+  setManageMsg("Adding…");
+  const btn = $("#addBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch("/api/fomo/wallets", {
+      method: "POST",
+      headers: adminHeaders(),
+      body: JSON.stringify({ address, label: label || undefined, tier }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || data.error || res.statusText || "Add failed");
+    }
+    setManageMsg(
+      `Added ${data.wallet?.label || label || "wallet"} — watching for new buys/exits` +
+        (data.seeded_sigs ? ` (seeded ${data.seeded_sigs} old txs)` : ""),
+      "ok"
+    );
+    if ($("#wAddress")) $("#wAddress").value = "";
+    if ($("#wLabel")) $("#wLabel").value = "";
+    await load();
+  } catch (e) {
+    const msg = String(e.message || e);
+    setManageMsg(
+      msg.includes("401") || /Admin-Key|required/i.test(msg)
+        ? "Need Admin key — paste ADMIN_API_KEY below and try again"
+        : msg,
+      "err"
+    );
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function removeWallet(address) {
+  if (!address) return;
+  if (!confirm(`Stop watching this wallet?\n${address}`)) return;
+  const key = ($("#adminKey")?.value || "").trim();
+  if (key) localStorage.setItem(ADMIN_KEY_LS, key);
+  setManageMsg("Removing…");
+  try {
+    const res = await fetch(`/api/fomo/wallets/${encodeURIComponent(address)}`, {
+      method: "DELETE",
+      headers: adminHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || data.error || "Remove failed");
+    }
+    setManageMsg("Removed — no more alerts for that wallet", "ok");
+    await load();
+  } catch (e) {
+    setManageMsg(String(e.message || e), "err");
+  }
+}
+
 function bind() {
+  const ak = $("#adminKey");
+  if (ak) ak.value = localStorage.getItem(ADMIN_KEY_LS) || "";
   $("#refreshBtn")?.addEventListener("click", load);
+  $("#addForm")?.addEventListener("submit", addWallet);
   let t = null;
   const arm = () => {
     if (t) clearInterval(t);

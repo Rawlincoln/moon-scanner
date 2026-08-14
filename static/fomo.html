@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FOMO Aping — Elite buys & exits · Moon Scanner</title>
+  <title>FOMO Aping — Manage wallets · buy/exit alerts</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/moon.css?v=aurora1" />
   <link rel="stylesheet" href="/static/css/snipes.css?v=aurora1" />
-  <link rel="stylesheet" href="/static/css/fomo.css?v=1" />
+  <link rel="stylesheet" href="/static/css/fomo.css?v=2" />
 </head>
 <body class="page-fomo">
   <div class="bg"></div>
@@ -30,7 +30,7 @@
       <span class="mark fomo-mark">🚀</span>
       <div>
         <h1>FOMO Aping Channel</h1>
-        <p>Telegram alerts when <strong>Cupsey / Cented / Cap / …</strong> <em>buy</em> or <em>exit</em> — as soon as the tx confirms</p>
+        <p>Add wallets here → Telegram <strong>BUY</strong> / <strong>EXIT</strong> alerts keep firing until you remove them</p>
       </div>
     </div>
     <div class="pills">
@@ -49,16 +49,42 @@
   </section>
 
   <div class="plan-banner fomo-banner">
-    <strong>How it works:</strong> watches your elite S/A-tier wallets on-chain.
-    <b>🔥 FOMO BUY</b> when they increase a token bag ·
-    <b>🚪 FOMO EXIT</b> when they sell down / clear.
-    Optional dedicated chat: <code>TELEGRAM_FOMO_CHAT_ID</code>. Use <code>HELIUS_API_KEY</code> for reliable speed.
+    <strong>Manage list below.</strong> New wallets are seeded (no history spam), then every buy/exit after that alerts on Telegram.
+    Production may need your <code>ADMIN_API_KEY</code> in the field under the form.
   </div>
+
+  <section class="manage-panel">
+    <h2 class="roster-title">Add FOMO wallet</h2>
+    <form id="addForm" class="add-form">
+      <label class="field grow">
+        Label
+        <input type="text" id="wLabel" placeholder="Cupsey" maxlength="40" required />
+      </label>
+      <label class="field grow2">
+        Wallet address
+        <input type="text" id="wAddress" placeholder="Solana base58 address" maxlength="64" required spellcheck="false" />
+      </label>
+      <label class="field">
+        Tier
+        <select id="wTier">
+          <option value="S" selected>S</option>
+          <option value="A">A</option>
+          <option value="B">B</option>
+        </select>
+      </label>
+      <button type="submit" class="btn primary" id="addBtn">Add wallet</button>
+    </form>
+    <label class="field admin-key-field">
+      Admin key (if required)
+      <input type="password" id="adminKey" placeholder="X-Admin-Key from Render / .env" autocomplete="off" />
+    </label>
+    <p class="manage-msg" id="manageMsg"></p>
+  </section>
 
   <p class="status" id="status">Loading FOMO feed…</p>
 
   <section class="roster-wrap">
-    <h2 class="roster-title">Watched wallets</h2>
+    <h2 class="roster-title">Watched wallets <span class="muted" id="walletCount"></span></h2>
     <div id="wallets" class="roster"></div>
   </section>
 
@@ -66,10 +92,11 @@
   <main id="list" class="list"></main>
 
   <footer class="foot">
-    Not financial advice. Confirmed txs only (not mempool). API:
-    <a href="/api/fomo" style="color:inherit">/api/fomo</a>
+    Not financial advice. Confirmed txs only. API:
+    <a href="/api/fomo" style="color:inherit">/api/fomo</a> ·
+    <a href="/api/fomo/wallets" style="color:inherit">/api/fomo/wallets</a>
   </footer>
 
-  <script src="/static/js/fomo.js?v=1"></script>
+  <script src="/static/js/fomo.js?v=2"></script>
 </body>
 </html>

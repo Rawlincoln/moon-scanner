@@ -90,3 +90,88 @@
   margin-top: 0.2rem;
   word-break: break-all;
 }
+.roster-card .card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.roster-card .rm-btn {
+  margin-left: auto;
+  font-size: 0.7rem !important;
+  padding: 0.2rem 0.45rem !important;
+}
+.btn.danger {
+  background: rgba(248, 113, 113, 0.2) !important;
+  border-color: rgba(248, 113, 113, 0.5) !important;
+  color: #fecaca !important;
+}
+.btn.danger:hover {
+  background: rgba(220, 38, 38, 0.45) !important;
+}
+
+.manage-panel {
+  max-width: 1100px;
+  margin: 0.5rem auto 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(40, 12, 18, 0.75), rgba(12, 10, 16, 0.85));
+  box-shadow: var(--shadow-out);
+}
+.add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: flex-end;
+}
+.add-form .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #fda4af;
+}
+.add-form .field.grow { flex: 1 1 120px; min-width: 100px; }
+.add-form .field.grow2 { flex: 2 1 220px; min-width: 180px; }
+.add-form input,
+.add-form select {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(253, 164, 175, 0.35);
+  border-radius: 8px;
+  color: #fff;
+  padding: 0.45rem 0.55rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8rem;
+}
+.admin-key-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.65rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  max-width: 420px;
+}
+.admin-key-field input {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  color: #e2e8f0;
+  padding: 0.4rem 0.55rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.78rem;
+}
+.manage-msg {
+  margin: 0.5rem 0 0;
+  font-size: 0.82rem;
+  color: #cbd5e1;
+  min-height: 1.2em;
+}
+.manage-msg.ok { color: #6ee7b7; }
+.manage-msg.err { color: #fca5a5; }
+.roster-title .muted {
+  font-weight: 400;
+  color: #94a3b8;
+  font-size: 0.85em;
+}

@@ -30,7 +30,7 @@ from config import (
     SOLANA_RPC_HTTP,
     TELEGRAM_FOMO_CHAT_ID,
 )
-from services.elite_traders import get_elite_roster
+from services.fomo_wallets import list_wallets as list_managed_wallets
 from services.http_client import get_client
 from services.realtime_rpc import http_url
 
@@ -121,12 +121,40 @@ def _persist() -> None:
 
 
 def fomo_wallets() -> list[dict[str, Any]]:
-    """S-tier first, then A — user KOLs only for FOMO speed."""
-    roster = get_elite_roster(limit=40)
-    s = [t for t in roster if str(t.get("tier") or "").upper() == "S"]
-    a = [t for t in roster if str(t.get("tier") or "").upper() == "A"]
-    out = s + a
-    return out[: max(1, int(FOMO_MAX_WALLETS))]
+    """Wallets managed in the app (DATA_DIR/fomo_wallets.json).
+
+    Add/remove on /fomo UI — these always drive Telegram FOMO alerts.
+    """
+    managed = list_managed_wallets()
+    # Prefer S then A then B for poll order
+    tier_r = {"S": 0, "A": 1, "B": 2}
+    managed = sorted(
+        managed,
+        key=lambda w: (
+            tier_r.get(str(w.get("tier") or "S"), 9),
+            str(w.get("label") or ""),
+        ),
+    )
+    return managed[: max(1, int(FOMO_MAX_WALLETS))]
+
+
+async def seed_wallet_history(address: str) -> int:
+    """Mark current signatures seen so adding a wallet doesn't spam old buys."""
+    addr = (address or "").strip()
+    if not addr:
+        return 0
+    n = 0
+    try:
+        sigs = await _sigs_for_wallet(addr, max(3, min(25, int(FOMO_SIGS_PER_WALLET))))
+        for s in sigs:
+            sig = str(s.get("signature") or "")
+            if sig:
+                _seen[sig] = time.time()
+                n += 1
+        _persist()
+    except Exception as exc:
+        logger.warning("seed wallet %s: %s", addr[:8], exc)
+    return n
 
 
 def status() -> dict[str, Any]:
@@ -139,11 +167,16 @@ def status() -> dict[str, Any]:
         "chat_override": bool((TELEGRAM_FOMO_CHAT_ID or "").strip()),
         "rpc": (http_url() or SOLANA_RPC_HTTP)[:48],
         "helius": bool(HELIUS_API_KEY),
+        "manageable": True,
         "wallets": [
             {
                 "label": w.get("label"),
                 "address": w.get("address"),
                 "tier": w.get("tier"),
+                "note": w.get("note"),
+                "source": w.get("source"),
+                "added_at": w.get("added_at"),
+                "id": w.get("id"),
             }
             for w in wallets
         ],
@@ -151,9 +184,8 @@ def status() -> dict[str, Any]:
         "events": list(reversed(_events[-40:])),
         "last": dict(_last_status),
         "hint": (
-            "FOMO alerts fire when tracked wallets buy/sell SPL tokens. "
-            "Set HELIUS_API_KEY for faster reliable polls. "
-            "Optional TELEGRAM_FOMO_CHAT_ID for a dedicated channel."
+            "Add/remove wallets on this page — they keep firing FOMO buy/exit alerts. "
+            "Set HELIUS_API_KEY for speed. Optional TELEGRAM_FOMO_CHAT_ID for a FOMO channel."
         ),
     }
 
