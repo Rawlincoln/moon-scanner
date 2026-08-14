@@ -16,13 +16,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Restore alert + outcomes cache
+      - name: Restore alert + outcomes + FOMO cache
         uses: actions/cache@v4
         with:
           path: |
             data/gha_telegram_seen.json
             data/gha_moon_outcomes.json
-          key: gha-telegram-outcomes-v2
+            data/gha_fomo_wallets.json
+          key: gha-telegram-outcomes-v3
           restore-keys: |
             gha-telegram-outcomes-
             gha-telegram-seen-
@@ -35,6 +36,14 @@ jobs:
         run: python scripts/gha_moon_outcomes_sync.py
         continue-on-error: true
 
+      - name: Sync FOMO wallets (durable across redeploys)
+        env:
+          TELEGRAM_CRON_SECRET: ${{ secrets.TELEGRAM_CRON_SECRET }}
+          BASE_URL: https://moon-scanner-9tlz.onrender.com
+          FOMO_WALLETS_CACHE: data/gha_fomo_wallets.json
+        run: python scripts/gha_fomo_wallets_sync.py
+        continue-on-error: true
+
       - name: Run alert worker
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -44,11 +53,12 @@ jobs:
           SEEN_PATH: data/gha_telegram_seen.json
         run: python scripts/gha_telegram_alerts.py
 
-      - name: Save alert + outcomes cache
+      - name: Save alert + outcomes + FOMO cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: |
             data/gha_telegram_seen.json
             data/gha_moon_outcomes.json
-          key: gha-telegram-outcomes-v2-${{ github.run_id }}
+            data/gha_fomo_wallets.json
+          key: gha-telegram-outcomes-v3-${{ github.run_id }}

@@ -4,6 +4,8 @@
  */
 const $ = (s) => document.querySelector(s);
 const ADMIN_KEY_LS = "fomo_admin_key";
+/** Browser backup so free-tier redeploys keep your add/remove list */
+const WALLETS_LS = "fomo_wallets_v1";
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -97,6 +99,111 @@ let _walletByAddr = {};
 let _lastData = null;
 let _loading = false;
 let _pnlInflight = false;
+let _restoring = false;
+
+function readLocalWallets() {
+  try {
+    const raw = localStorage.getItem(WALLETS_LS);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || !Array.isArray(o.wallets)) return null;
+    return o;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalWallets(wallets, { userTouched = true, updated = 0 } = {}) {
+  try {
+    const payload = {
+      version: 1,
+      user_touched: !!userTouched,
+      updated: Number(updated) || Date.now() / 1000,
+      wallets: (wallets || []).map((w) => ({
+        address: w.address,
+        label: w.label,
+        tier: w.tier,
+        note: w.note,
+        source: w.source,
+        added_at: w.added_at,
+        id: w.id,
+      })),
+    };
+    localStorage.setItem(WALLETS_LS, JSON.stringify(payload));
+  } catch {
+    /* private mode etc. */
+  }
+}
+
+function addrSet(wallets) {
+  return new Set(
+    (wallets || []).map((w) => String(w.address || "").trim()).filter(Boolean)
+  );
+}
+
+function setsEqual(a, b) {
+  if (a.size !== b.size) return false;
+  for (const x of a) if (!b.has(x)) return false;
+  return true;
+}
+
+/**
+ * After free-tier wipe the server re-seeds elite defaults.
+ * If this browser has a newer customized list, push it back.
+ */
+async function maybeRestoreFromLocal(serverData) {
+  if (_restoring) return false;
+  const local = readLocalWallets();
+  if (!local || !local.user_touched) return false;
+
+  const serverTouched = !!serverData.user_touched;
+  const serverUpd = Number(serverData.wallets_updated || serverData.updated || 0);
+  const localUpd = Number(local.updated || 0);
+  const serverW = serverData.wallets || [];
+  const localW = local.wallets || [];
+
+  // Server already has our (or newer) custom list
+  if (serverTouched && serverUpd >= localUpd && setsEqual(addrSet(serverW), addrSet(localW))) {
+    return false;
+  }
+  // Prefer newer server customization from another device/session
+  if (serverTouched && serverUpd > localUpd) {
+    saveLocalWallets(serverW, { userTouched: true, updated: serverUpd });
+    return false;
+  }
+  // Only restore when local is customized and differs / is newer
+  if (!local.user_touched) return false;
+  if (serverTouched && serverUpd >= localUpd) return false;
+  if (setsEqual(addrSet(serverW), addrSet(localW)) && serverTouched) return false;
+
+  _restoring = true;
+  try {
+    setManageMsg("Restoring your saved watchlist after restart…");
+    const res = await fetch("/api/fomo/wallets/import", {
+      method: "POST",
+      headers: adminHeaders(),
+      body: JSON.stringify({
+        wallets: localW,
+        user_touched: true,
+        updated: localUpd || undefined,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(detailText(data) || "Restore failed");
+    }
+    setManageMsg(
+      `Restored ${data.count ?? localW.length} wallets from your browser backup`,
+      "ok"
+    );
+    return true;
+  } catch (e) {
+    setManageMsg(`Watchlist restore skipped: ${e.message || e}`, "err");
+    return false;
+  } finally {
+    _restoring = false;
+  }
+}
 
 function renderKolSelect(wallets = []) {
   const sel = $("#kolSelect");
@@ -283,6 +390,14 @@ function render(data) {
   // Hide admin key if open manage
   const ak = document.querySelector(".admin-key-field");
   if (ak) ak.style.display = data.open_manage === false ? "" : "none";
+
+  // Keep browser backup when server holds a customized list
+  if (data.user_touched) {
+    saveLocalWallets(wallets, {
+      userTouched: true,
+      updated: data.wallets_updated || data.updated || Date.now() / 1000,
+    });
+  }
 }
 
 async function enrichPnl() {
@@ -314,14 +429,22 @@ async function load({ withPnl = false } = {}) {
   if (_loading) return;
   _loading = true;
   try {
-    // Fast path first so add form + table always appear
+    // Fast path first so add form + dropdown always appear
     const res = await fetch("/api/fomo?with_pnl=0", {
       signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
-    const data = await res.json();
+    let data = await res.json();
+    // Free-tier wipe: push browser backup back to server if needed
+    const restored = await maybeRestoreFromLocal(data);
+    if (restored) {
+      const res2 = await fetch("/api/fomo?with_pnl=0", {
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res2.ok) data = await res2.json();
+    }
     render(data);
     // Optional PnL pass (does not block UI)
     if (withPnl !== false) {
@@ -365,12 +488,16 @@ async function addWallet(ev) {
       throw new Error(detailText(data) || res.statusText || "Add failed");
     }
     setManageMsg(
-      `Added ${data.wallet?.label || label || "wallet"} — watching for new buys/exits` +
-        (data.seeded_sigs ? ` (seeded ${data.seeded_sigs} old txs)` : ""),
+      `Added ${data.wallet?.label || label || "wallet"} — saved (survives restarts)` +
+        (data.seeded_sigs ? ` · seeded ${data.seeded_sigs} old txs` : ""),
       "ok"
     );
     if ($("#wAddress")) $("#wAddress").value = "";
     if ($("#wLabel")) $("#wLabel").value = "";
+    // Optimistic local backup immediately
+    const cur = (_lastData?.wallets || []).filter((w) => w.address !== address);
+    cur.unshift(data.wallet || { address, label, tier, source: "manual" });
+    saveLocalWallets(cur, { userTouched: true });
     await load({ withPnl: true });
   } catch (e) {
     const msg = String(e.message || e);
@@ -400,7 +527,9 @@ async function removeWallet(address) {
     if (!res.ok) {
       throw new Error(detailText(data) || "Remove failed");
     }
-    setManageMsg("Removed — no more alerts for that wallet", "ok");
+    setManageMsg("Removed — saved (survives restarts)", "ok");
+    const cur = (_lastData?.wallets || []).filter((w) => w.address !== address);
+    saveLocalWallets(cur, { userTouched: true });
     await load({ withPnl: true });
   } catch (e) {
     setManageMsg(String(e.message || e), "err");

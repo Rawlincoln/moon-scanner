@@ -3,7 +3,12 @@
 Persists to DATA_DIR/fomo_wallets.json so the FOMO poller keeps alerting
 on every wallet you add until you remove it.
 
-On first empty load, seeds from elite S-tier roster (Cupsey, Cented, …).
+On free Render the disk is ephemeral. Durability comes from:
+  - ``user_touched`` flag (prevents re-seeding after you customize)
+  - GHA cache sync (scripts/gha_fomo_wallets_sync.py every ~5 min)
+  - Optional browser localStorage restore in the FOMO UI
+
+On first empty load (never customized), seeds from elite S-tier roster.
 """
 
 from __future__ import annotations
@@ -35,6 +40,11 @@ _SKIP = {
 }
 
 _cache: list[dict[str, Any]] | None = None
+_meta: dict[str, Any] = {
+    "user_touched": False,
+    "updated": 0.0,
+    "version": 1,
+}
 
 
 def valid_address(addr: str) -> bool:
@@ -91,13 +101,39 @@ def _seed_from_elite() -> list[dict[str, Any]]:
     return out
 
 
-def _save(wallets: list[dict[str, Any]]) -> None:
-    global _cache
+def _dedupe(wallets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    uniq: list[dict[str, Any]] = []
+    for w in wallets:
+        a = w["address"]
+        if a in seen:
+            continue
+        seen.add(a)
+        uniq.append(w)
+    return uniq
+
+
+def _save(
+    wallets: list[dict[str, Any]],
+    *,
+    user_touched: bool | None = None,
+    updated: float | None = None,
+) -> None:
+    """Write wallet list + durability metadata to disk."""
+    global _cache, _meta
+    if user_touched is not None:
+        _meta["user_touched"] = bool(user_touched)
+    if updated is not None:
+        _meta["updated"] = float(updated)
+    else:
+        _meta["updated"] = time.time()
+    _meta["version"] = 1
     try:
         _PATH.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "version": 1,
-            "updated": time.time(),
+            "updated": _meta["updated"],
+            "user_touched": bool(_meta.get("user_touched")),
             "wallets": wallets,
         }
         _PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -106,16 +142,45 @@ def _save(wallets: list[dict[str, Any]]) -> None:
         logger.warning("fomo wallets save failed: %s", exc)
 
 
+def meta() -> dict[str, Any]:
+    """Durability metadata (user_touched / updated). Loads file if needed."""
+    list_wallets()
+    return {
+        "user_touched": bool(_meta.get("user_touched")),
+        "updated": float(_meta.get("updated") or 0),
+        "path": str(_PATH),
+        "count": len(_cache or []),
+    }
+
+
+def export_payload() -> dict[str, Any]:
+    """Full snapshot for GHA / browser backup."""
+    wallets = list_wallets()
+    return {
+        "ok": True,
+        "version": 1,
+        "updated": float(_meta.get("updated") or 0),
+        "user_touched": bool(_meta.get("user_touched")),
+        "count": len(wallets),
+        "wallets": wallets,
+        "path": str(_PATH),
+    }
+
+
 def list_wallets(*, force: bool = False) -> list[dict[str, Any]]:
-    """Return managed FOMO wallets (create seed file if empty)."""
-    global _cache
+    """Return managed FOMO wallets (create seed file if empty & not customized)."""
+    global _cache, _meta
     if _cache is not None and not force:
         return list(_cache)
 
     wallets: list[dict[str, Any]] = []
+    user_touched = False
+    updated = 0.0
     try:
         if _PATH.exists():
             raw = json.loads(_PATH.read_text(encoding="utf-8"))
+            user_touched = bool(raw.get("user_touched"))
+            updated = float(raw.get("updated") or 0)
             for row in raw.get("wallets") or []:
                 if not isinstance(row, dict):
                     continue
@@ -125,24 +190,35 @@ def list_wallets(*, force: bool = False) -> list[dict[str, Any]]:
     except Exception as exc:
         logger.warning("fomo wallets load failed: %s", exc)
 
-    if not wallets:
+    # Migration: old files without user_touched but with manual adds count as customized
+    if not user_touched and wallets:
+        if any(str(w.get("source") or "") == "manual" for w in wallets):
+            user_touched = True
+            updated = updated or time.time()
+
+    _meta["user_touched"] = user_touched
+    _meta["updated"] = updated
+
+    # Only auto-seed when the operator has NEVER customized the list.
+    # If user_touched, empty list is intentional (or waiting for GHA restore).
+    if not wallets and not user_touched:
         wallets = _seed_from_elite()
         if wallets:
-            _save(wallets)
+            _save(wallets, user_touched=False)
             logger.info("FOMO wallets seeded %s from elite desk", len(wallets))
+            return list(_cache or wallets)
 
-    # de-dupe by address keep first
-    seen: set[str] = set()
-    uniq: list[dict[str, Any]] = []
-    for w in wallets:
-        a = w["address"]
-        if a in seen:
-            continue
-        seen.add(a)
-        uniq.append(w)
-
-    _cache = uniq
-    return list(uniq)
+    wallets = _dedupe(wallets)
+    _cache = wallets
+    # Persist migrated user_touched flag so restarts keep it
+    if user_touched and _PATH.exists():
+        try:
+            raw = json.loads(_PATH.read_text(encoding="utf-8"))
+            if not raw.get("user_touched"):
+                _save(wallets, user_touched=True, updated=updated or time.time())
+        except Exception:
+            pass
+    return list(wallets)
 
 
 def add_wallet(
@@ -170,10 +246,9 @@ def add_wallet(
         }
     )
     assert row is not None
-    # replace if exists
     out = [w for w in wallets if w["address"] != addr]
     out.insert(0, row)
-    _save(out)
+    _save(out, user_touched=True)
     return row
 
 
@@ -186,10 +261,34 @@ def remove_wallet(address: str) -> bool:
     new = [w for w in wallets if w["address"] != addr]
     if len(new) == len(wallets):
         return False
-    _save(new)
+    _save(new, user_touched=True)
     return True
 
 
+def replace_wallets(
+    rows: list[dict[str, Any]],
+    *,
+    user_touched: bool = True,
+    updated: float | None = None,
+) -> list[dict[str, Any]]:
+    """Replace entire watchlist (GHA restore / browser restore)."""
+    out: list[dict[str, Any]] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        n = _normalize(row)
+        if n:
+            out.append(n)
+    out = _dedupe(out)
+    _save(
+        out,
+        user_touched=user_touched,
+        updated=updated if updated is not None else time.time(),
+    )
+    return list(_cache or out)
+
+
 def clear_cache() -> None:
-    global _cache
+    global _cache, _meta
     _cache = None
+    _meta = {"user_touched": False, "updated": 0.0, "version": 1}

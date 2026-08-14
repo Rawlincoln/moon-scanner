@@ -4,14 +4,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.paths import BASE_DIR
 from config import FOMO_OPEN_MANAGE
-from services.alert_auth import force_auth_ok
-from services.fomo_wallets import add_wallet, list_wallets, remove_wallet, valid_address
+from services.alert_auth import cron_secret_ok, force_auth_ok
+from services.fomo_wallets import (
+    add_wallet,
+    export_payload,
+    list_wallets,
+    meta as wallets_meta,
+    remove_wallet,
+    replace_wallets,
+    valid_address,
+)
 from services.fomo_watch import (
     poll_once,
     seed_wallet_history,
@@ -29,6 +37,12 @@ class FomoWalletIn(BaseModel):
     note: str | None = Field(default=None, max_length=160)
 
 
+class FomoWalletsReplace(BaseModel):
+    wallets: list[dict[str, Any]] = Field(default_factory=list)
+    user_touched: bool = True
+    updated: float | None = None
+
+
 def _require_manage_auth(x_admin_key: str | None) -> None:
     """FOMO desk: open manage by default so the UI works without pasting keys.
 
@@ -41,6 +55,21 @@ def _require_manage_auth(x_admin_key: str | None) -> None:
             status_code=401,
             detail="X-Admin-Key required (or set FOMO_OPEN_MANAGE=1)",
         )
+
+
+def _require_restore_auth(
+    x_admin_key: str | None,
+    x_cron_secret: str | None,
+    key: str | None = None,
+) -> None:
+    """Import/replace: cron secret, admin key, or open manage."""
+    if FOMO_OPEN_MANAGE:
+        return
+    if cron_secret_ok(x_cron_secret) or force_auth_ok(
+        x_admin_key=x_admin_key, key=key, allow_query_cron=True, bot_wired=False
+    ):
+        return
+    raise HTTPException(status_code=401, detail="auth required for FOMO restore")
 
 
 @router.get("/fomo")
@@ -63,6 +92,7 @@ async def fomo_list_wallets(with_pnl: bool = True, force_pnl: bool = False):
     ``with_pnl=1`` attaches 1d/7d/30d PnL for the KOL dropdown.
     """
     wallets = list_wallets()
+    m = wallets_meta()
     if with_pnl:
         from services.wallet_pnl import fetch_pnl_for_wallets
 
@@ -71,10 +101,43 @@ async def fomo_list_wallets(with_pnl: bool = True, force_pnl: bool = False):
         "ok": True,
         "count": len(wallets),
         "wallets": wallets,
+        "user_touched": m.get("user_touched"),
+        "updated": m.get("updated"),
         "pnl_note": (
             "PnL from BIRDEYE_API_KEY / CIELO_API_KEY when set; "
             "else local FOMO exits only (or n/a)."
         ),
+    }
+
+
+@router.get("/api/fomo/wallets/export")
+async def fomo_wallets_export():
+    """Snapshot for durable backup (GHA cache / browser localStorage)."""
+    return export_payload()
+
+
+@router.post("/api/fomo/wallets/import")
+async def fomo_wallets_import(
+    body: FomoWalletsReplace,
+    x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+    x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
+    key: str | None = Query(None),
+):
+    """Replace watchlist from backup (after free-tier redeploy wipe)."""
+    _require_restore_auth(x_admin_key, x_cron_secret, key)
+    if not isinstance(body.wallets, list):
+        raise HTTPException(status_code=400, detail="wallets must be a list")
+    wallets = replace_wallets(
+        body.wallets,
+        user_touched=bool(body.user_touched),
+        updated=body.updated,
+    )
+    return {
+        "ok": True,
+        "count": len(wallets),
+        "user_touched": bool(body.user_touched),
+        "updated": wallets_meta().get("updated"),
+        "message": f"Restored {len(wallets)} FOMO wallets",
     }
 
 

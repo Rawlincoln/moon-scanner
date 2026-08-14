@@ -51,6 +51,9 @@ _EXPENSIVE_PREFIXES = (
 _EXPENSIVE_EXEMPT = (
     "/api/elite/traders",
     "/api/fomo",
+    "/api/fomo/wallets",
+    "/api/fomo/wallets/export",
+    "/api/fomo/wallets/import",
     "/api/moon/outcomes",
     "/api/moon/outcomes/export",
     "/api/moon/outcomes/import",

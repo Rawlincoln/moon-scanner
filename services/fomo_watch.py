@@ -162,7 +162,10 @@ async def seed_wallet_history(address: str) -> int:
 
 
 def status() -> dict[str, Any]:
+    from services.fomo_wallets import meta as wallets_meta
+
     wallets = fomo_wallets()
+    wm = wallets_meta()
     return {
         "ok": True,
         "enabled": FOMO_ENABLED,
@@ -173,6 +176,8 @@ def status() -> dict[str, Any]:
         "helius": bool(HELIUS_API_KEY),
         "manageable": True,
         "open_manage": FOMO_OPEN_MANAGE,
+        "user_touched": bool(wm.get("user_touched")),
+        "wallets_updated": float(wm.get("updated") or 0),
         "wallets": [
             {
                 "label": w.get("label"),
@@ -190,8 +195,8 @@ def status() -> dict[str, Any]:
         "last": dict(_last_status),
         "hint": (
             "Add/remove wallets on this page — they keep firing FOMO buy/exit alerts. "
-            "KOL dropdown shows 1d/7d/30d PnL when BIRDEYE_API_KEY or CIELO_API_KEY is set. "
-            "Set HELIUS_API_KEY for reliable buy/exit polls."
+            "List is backed up (GHA + browser) so free-tier restarts keep your changes. "
+            "KOL dropdown shows 1d/7d/30d PnL when BIRDEYE_API_KEY or CIELO_API_KEY is set."
         ),
     }
 

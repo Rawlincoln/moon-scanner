@@ -33,6 +33,11 @@ SQLite under `DATA_DIR` (default `data/`) is **ephemeral** on free tier (lost on
 **Durable moon outcomes (free tier):** GitHub Actions (`telegram-24-7`) exports/imports
 `/api/moon/outcomes` into Actions cache every 5 minutes so adaptive gates survive redeploys.
 
+**Durable FOMO wallets (free tier):** add/remove sets `user_touched` so elite re-seed does not
+overwrite your list. GHA syncs `/api/fomo/wallets/export` ↔ cache every 5 min and restores via
+`/api/fomo/wallets/import` after redeploy. The FOMO page also keeps a browser `localStorage`
+backup and auto-restores when you open `/fomo` after a wipe.
+
 **Paid / Starter:** attach a Render disk, set `DATA_DIR=/var/data` (see `render.yaml` comments).
 
 **Moons mode:** `MOON_MODE=balanced` (default) or `strict`.
