@@ -1,5 +1,6 @@
 /**
  * FOMO aping channel — manage wallets + live buy/exit events.
+ * Loads fast without PnL, then enriches 1d/7d/30d in the background.
  */
 const $ = (s) => document.querySelector(s);
 const ADMIN_KEY_LS = "fomo_admin_key";
@@ -93,6 +94,9 @@ function optionLabel(w) {
 }
 
 let _walletByAddr = {};
+let _lastData = null;
+let _loading = false;
+let _pnlInflight = false;
 
 function renderKolSelect(wallets = []) {
   const sel = $("#kolSelect");
@@ -112,9 +116,14 @@ function renderKolSelect(wallets = []) {
     );
   });
   sel.innerHTML = opts.join("");
-  if (prev && _walletByAddr[prev]) sel.value = prev;
-  else if (!prev) showKolDetail(null);
-  if (sel.value) showKolDetail(_walletByAddr[sel.value]);
+  if (prev && _walletByAddr[prev]) {
+    sel.value = prev;
+    showKolDetail(_walletByAddr[prev]);
+  } else if (sel.value) {
+    showKolDetail(_walletByAddr[sel.value]);
+  } else {
+    showKolDetail(null);
+  }
 }
 
 function showKolDetail(w) {
@@ -129,13 +138,14 @@ function showKolDetail(w) {
   const d7 = fmtPnl(w.pnl_7d ?? w.pnl?.["7d"]);
   const d30 = fmtPnl(w.pnl_30d ?? w.pnl?.["30d"]);
   const src = w.pnl_source || w.pnl?.source || "n/a";
+  const note = w.pnl?.note || w.note || "";
   const sol = a ? `https://solscan.io/account/${a}` : "#";
   el.innerHTML = `
     <div class="kol-detail-grid">
       <div>
-        <div class="name">${escapeHtml(w.label || "?")} <span class="tier">${escapeHtml(w.tier || "S")}</span></div>
+        <div class="name">${escapeHtml(w.label || "?")} <span class="tier-pill">${escapeHtml(w.tier || "S")}</span></div>
         <div class="addr">${escapeHtml(a)}</div>
-        <div class="meta-line" style="margin-top:0.35rem;font-size:0.72rem;color:#94a3b8">PnL source: ${escapeHtml(src)}</div>
+        <div style="margin-top:0.35rem;font-size:0.72rem;color:#94a3b8">PnL source: ${escapeHtml(src)}${note ? ` · ${escapeHtml(String(note).slice(0, 80))}` : ""}</div>
       </div>
       <div class="pnl-cell"><div class="lbl">1 day</div><div class="val ${d1.cls}">${d1.text}</div></div>
       <div class="pnl-cell"><div class="lbl">7 day</div><div class="val ${d7.cls}">${d7.text}</div></div>
@@ -143,13 +153,20 @@ function showKolDetail(w) {
     </div>
     <div class="kol-actions">
       <a class="btn sm" href="${sol}" target="_blank" rel="noopener">Solscan</a>
-      <button type="button" class="btn sm" id="fillFormBtn">Fill add form</button>
+      <button type="button" class="btn sm" id="copyAddrBtn">Copy address</button>
       <button type="button" class="btn sm danger" id="detailRmBtn">Remove from FOMO</button>
     </div>`;
-  $("#fillFormBtn")?.addEventListener("click", () => {
-    if ($("#wLabel")) $("#wLabel").value = w.label || "";
-    if ($("#wAddress")) $("#wAddress").value = a;
-    if ($("#wTier")) $("#wTier").value = w.tier || "S";
+  $("#copyAddrBtn")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(a);
+      const b = $("#copyAddrBtn");
+      if (b) {
+        b.textContent = "Copied";
+        setTimeout(() => (b.textContent = "Copy address"), 1000);
+      }
+    } catch {
+      /* ignore */
+    }
   });
   $("#detailRmBtn")?.addEventListener("click", () => removeWallet(a));
 }
@@ -161,32 +178,44 @@ function renderWallets(wallets = []) {
   const count = $("#walletCount");
   if (count) count.textContent = `(${wallets.length})`;
   if (!wallets.length) {
-    el.innerHTML = `<div class="roster-card">No wallets yet — add one above. Alerts start after the first new buy/sell.</div>`;
+    el.innerHTML = `<div class="wallet-empty">No wallets yet — use <strong>Add FOMO wallet</strong> above. Alerts start on the next new buy/sell.</div>`;
     return;
   }
-  el.innerHTML = wallets
+  const rows = wallets
     .map((w) => {
       const a = w.address || "";
-      const short = shortAddr(a);
       const href = a ? `https://solscan.io/account/${a}` : "#";
       const d1 = fmtPnl(w.pnl_1d ?? w.pnl?.["1d"]);
       const d7 = fmtPnl(w.pnl_7d ?? w.pnl?.["7d"]);
       const d30 = fmtPnl(w.pnl_30d ?? w.pnl?.["30d"]);
-      return `<div class="roster-card" data-addr="${escapeHtml(a)}">
-        <div class="card-top">
-          <span class="tier">${escapeHtml(w.tier || "S")}</span>
-          <span class="lbl">${escapeHtml(w.label || "?")}</span>
+      return `<tr data-addr="${escapeHtml(a)}">
+        <td class="name-cell"><span class="tier-pill">${escapeHtml(w.tier || "S")}</span>${escapeHtml(w.label || "?")}</td>
+        <td class="addr-cell"><a href="${href}" target="_blank" rel="noopener" title="${escapeHtml(a)}">${escapeHtml(a)}</a></td>
+        <td class="pnl-cell-td ${d1.cls}">${d1.text}</td>
+        <td class="pnl-cell-td ${d7.cls}">${d7.text}</td>
+        <td class="pnl-cell-td ${d30.cls}">${d30.text}</td>
+        <td class="actions-cell">
           <button type="button" class="btn sm danger rm-btn" data-addr="${escapeHtml(a)}" title="Stop watching">Remove</button>
-        </div>
-        <div class="addr"><a href="${href}" target="_blank" rel="noopener">${escapeHtml(short)}</a></div>
-        <div class="pnl-row">
-          <span class="${d1.cls}">1d ${d1.text}</span>
-          <span class="${d7.cls}">7d ${d7.text}</span>
-          <span class="${d30.cls}">30d ${d30.text}</span>
-        </div>
-      </div>`;
+        </td>
+      </tr>`;
     })
     .join("");
+
+  el.innerHTML = `<div class="wallet-table-wrap">
+    <table class="wallet-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Wallet address</th>
+          <th style="text-align:right">1d PnL</th>
+          <th style="text-align:right">7d PnL</th>
+          <th style="text-align:right">30d PnL</th>
+          <th style="text-align:right">Action</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
 
   el.querySelectorAll(".rm-btn").forEach((btn) => {
     btn.onclick = () => removeWallet(btn.dataset.addr);
@@ -239,6 +268,7 @@ function eventCard(ev) {
 }
 
 function render(data) {
+  _lastData = data;
   const events = data.events || [];
   const wallets = data.wallets || [];
   const last = data.last || {};
@@ -297,16 +327,52 @@ function render(data) {
   if (ak) ak.style.display = data.open_manage === false ? "" : "none";
 }
 
-async function load() {
+async function enrichPnl() {
+  if (_pnlInflight) return;
+  _pnlInflight = true;
   try {
-    // with_pnl loads KOL 1d/7d/30d for dropdown (may take a few seconds)
-    const res = await fetch("/api/fomo?with_pnl=1", {
-      signal: AbortSignal.timeout(45000),
+    const res = await fetch("/api/fomo/wallets?with_pnl=1", {
+      signal: AbortSignal.timeout(60000),
     });
+    if (!res.ok) return;
+    const data = await res.json();
+    const wallets = data.wallets || [];
+    if (!wallets.length) return;
+    // Merge into last status payload so events stay put
+    if (_lastData) {
+      _lastData.wallets = wallets;
+      renderWallets(wallets);
+      const w = $("#statWallets");
+      if (w) w.textContent = `${wallets.length} wallets`;
+    }
+  } catch {
+    /* PnL is optional — table already shows names/addresses */
+  } finally {
+    _pnlInflight = false;
+  }
+}
+
+async function load({ withPnl = false } = {}) {
+  if (_loading) return;
+  _loading = true;
+  try {
+    // Fast path first so add form + table always appear
+    const res = await fetch("/api/fomo?with_pnl=0", {
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
     const data = await res.json();
     render(data);
+    // Optional PnL pass (does not block UI)
+    if (withPnl !== false) {
+      enrichPnl();
+    }
   } catch (e) {
     setStatus(`Load failed: ${e.message || e}`, "err");
+  } finally {
+    _loading = false;
   }
 }
 
@@ -320,6 +386,11 @@ async function addWallet(ev) {
 
   if (!address) {
     setManageMsg("Wallet address required", "err");
+    $("#wAddress")?.focus();
+    return;
+  }
+  if (address.length < 32 || address.length > 44) {
+    setManageMsg("Invalid Solana address length (expect 32–44 base58 chars)", "err");
     return;
   }
   setManageMsg("Adding…");
@@ -342,7 +413,7 @@ async function addWallet(ev) {
     );
     if ($("#wAddress")) $("#wAddress").value = "";
     if ($("#wLabel")) $("#wLabel").value = "";
-    await load();
+    await load({ withPnl: true });
   } catch (e) {
     const msg = String(e.message || e);
     setManageMsg(
@@ -372,7 +443,7 @@ async function removeWallet(address) {
       throw new Error(detailText(data) || "Remove failed");
     }
     setManageMsg("Removed — no more alerts for that wallet", "ok");
-    await load();
+    await load({ withPnl: true });
   } catch (e) {
     setManageMsg(String(e.message || e), "err");
   }
@@ -381,27 +452,25 @@ async function removeWallet(address) {
 function bind() {
   const ak = $("#adminKey");
   if (ak) ak.value = localStorage.getItem(ADMIN_KEY_LS) || "";
-  $("#refreshBtn")?.addEventListener("click", load);
+  $("#refreshBtn")?.addEventListener("click", () => load({ withPnl: true }));
   $("#addForm")?.addEventListener("submit", addWallet);
   $("#kolSelect")?.addEventListener("change", (e) => {
     const addr = e.target.value;
-    showKolDetail(addr ? _walletByAddr[addr] : null);
-    if (addr && _walletByAddr[addr]) {
-      // Filter events list highlight — optional scroll
-      const w = _walletByAddr[addr];
-      if ($("#wLabel")) $("#wLabel").value = w.label || "";
-      if ($("#wAddress")) $("#wAddress").value = w.address || "";
-    }
+    const w = addr ? _walletByAddr[addr] : null;
+    showKolDetail(w || null);
   });
   let t = null;
   const arm = () => {
     if (t) clearInterval(t);
-    // PnL is cached server-side; refresh UI every 20s to avoid spam
-    if ($("#autoRefresh")?.checked) t = setInterval(load, 20000);
+    if ($("#autoRefresh")?.checked) t = setInterval(() => load({ withPnl: false }), 12000);
   };
   $("#autoRefresh")?.addEventListener("change", arm);
   arm();
-  load();
+  load({ withPnl: true });
 }
 
-bind();
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", bind);
+} else {
+  bind();
+}
