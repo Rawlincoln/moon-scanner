@@ -32,6 +32,7 @@ from routes.journal import router as journal_router
 from routes.money import router as money_router
 from routes.lab import router as lab_router
 from routes.elite import router as elite_router
+from routes.fomo import router as fomo_router
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(money_router)
     app.include_router(lab_router)
     app.include_router(elite_router)
+    app.include_router(fomo_router)
     app.include_router(realtime_router)
     app.include_router(analyze_router)
     app.include_router(trenches_router)

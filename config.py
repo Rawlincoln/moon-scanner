@@ -345,6 +345,18 @@ TELEGRAM_ALERT_ELITE_LABELS = {
 # Optional shared secret for GET /api/alerts/telegram/tick (external cron 24/7)
 TELEGRAM_CRON_SECRET = os.getenv("TELEGRAM_CRON_SECRET", "").strip()
 
+# --- FOMO aping channel (elite wallet buy/exit alerts) ---
+# Poll S/A-tier elite wallets for SPL buys & sells; Telegram FOMO alerts.
+_fomo_en = (os.getenv("FOMO_ENABLED", "1") or "1").strip().lower()
+FOMO_ENABLED = _fomo_en not in ("0", "false", "no", "off")
+FOMO_POLL_SEC = float(os.getenv("FOMO_POLL_SEC", "10") or "10")
+FOMO_MAX_WALLETS = int(os.getenv("FOMO_MAX_WALLETS", "16") or "16")
+FOMO_SIGS_PER_WALLET = int(os.getenv("FOMO_SIGS_PER_WALLET", "8") or "8")
+_fomo_tg = (os.getenv("FOMO_ALERT_TELEGRAM", "1") or "1").strip().lower()
+FOMO_ALERT_TELEGRAM = _fomo_tg not in ("0", "false", "no", "off")
+# Optional dedicated Telegram chat/channel for FOMO (else main TELEGRAM_CHAT_ID)
+TELEGRAM_FOMO_CHAT_ID = os.getenv("TELEGRAM_FOMO_CHAT_ID", "").strip()
+
 # --- Money plan (entry / stop / TP / invalidation) ---
 MONEY_STOP_PCT = float(os.getenv("MONEY_STOP_PCT", "0.18") or "0.18")  # −18%
 MONEY_TP1_PCT = float(os.getenv("MONEY_TP1_PCT", "0.50") or "0.50")  # +50%

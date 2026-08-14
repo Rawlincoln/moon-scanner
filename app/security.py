@@ -50,6 +50,7 @@ _EXPENSIVE_PREFIXES = (
 # Cheap JSON under those prefixes — never burn rate budget
 _EXPENSIVE_EXEMPT = (
     "/api/elite/traders",
+    "/api/fomo",
     "/api/moon/outcomes",
     "/api/moon/outcomes/export",
     "/api/moon/outcomes/import",

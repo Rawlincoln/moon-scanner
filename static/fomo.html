@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FOMO Aping — Elite buys & exits · Moon Scanner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/moon.css?v=aurora1" />
+  <link rel="stylesheet" href="/static/css/snipes.css?v=aurora1" />
+  <link rel="stylesheet" href="/static/css/fomo.css?v=1" />
+</head>
+<body class="page-fomo">
+  <div class="bg"></div>
+
+  <nav class="nav">
+    <a href="/">◈ Moons</a>
+    <a href="/snipes">⚡ Snipes</a>
+    <a href="/heat">🔥 Heat</a>
+    <a href="/elite">👑 Elite</a>
+    <a href="/fomo" class="active">🚀 FOMO</a>
+    <a href="/graduated">◆ Grad</a>
+    <a href="/money">💰 Money</a>
+    <a href="/lab">🔬 Lab</a>
+  </nav>
+
+  <header class="top">
+    <div class="brand">
+      <span class="mark fomo-mark">🚀</span>
+      <div>
+        <h1>FOMO Aping Channel</h1>
+        <p>Telegram alerts when <strong>Cupsey / Cented / Cap / …</strong> <em>buy</em> or <em>exit</em> — as soon as the tx confirms</p>
+      </div>
+    </div>
+    <div class="pills">
+      <span class="pill" id="statOn">—</span>
+      <span class="pill" id="statWallets">0 wallets</span>
+      <span class="pill" id="statOpen">0 open</span>
+    </div>
+  </header>
+
+  <section class="bar">
+    <button type="button" class="btn primary" id="refreshBtn">Refresh</button>
+    <label class="chk">
+      <input type="checkbox" id="autoRefresh" checked /> Auto 8s
+    </label>
+    <span class="pill muted" id="pollInfo">poll —</span>
+  </section>
+
+  <div class="plan-banner fomo-banner">
+    <strong>How it works:</strong> watches your elite S/A-tier wallets on-chain.
+    <b>🔥 FOMO BUY</b> when they increase a token bag ·
+    <b>🚪 FOMO EXIT</b> when they sell down / clear.
+    Optional dedicated chat: <code>TELEGRAM_FOMO_CHAT_ID</code>. Use <code>HELIUS_API_KEY</code> for reliable speed.
+  </div>
+
+  <p class="status" id="status">Loading FOMO feed…</p>
+
+  <section class="roster-wrap">
+    <h2 class="roster-title">Watched wallets</h2>
+    <div id="wallets" class="roster"></div>
+  </section>
+
+  <h2 class="roster-title" style="max-width:1100px;margin:0 auto 0.5rem;padding:0 1rem">Live events</h2>
+  <main id="list" class="list"></main>
+
+  <footer class="foot">
+    Not financial advice. Confirmed txs only (not mempool). API:
+    <a href="/api/fomo" style="color:inherit">/api/fomo</a>
+  </footer>
+
+  <script src="/static/js/fomo.js?v=1"></script>
+</body>
+</html>

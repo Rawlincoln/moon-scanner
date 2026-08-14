@@ -1,0 +1,92 @@
+/* FOMO aping — hot pink / neon pulse */
+
+.page-fomo .bg::before {
+  background:
+    radial-gradient(ellipse 55% 32% at 50% 15%, rgba(244, 63, 94, 0.32), transparent 55%),
+    radial-gradient(ellipse 40% 25% at 80% 60%, rgba(251, 146, 60, 0.2), transparent 50%),
+    radial-gradient(ellipse 35% 22% at 15% 70%, rgba(168, 85, 247, 0.15), transparent 50%);
+}
+
+.fomo-mark {
+  color: #fb7185 !important;
+  filter: drop-shadow(0 0 20px rgba(244, 63, 94, 0.7)) !important;
+}
+
+.page-fomo .nav a.active {
+  background: linear-gradient(180deg, #fda4af 0%, #f43f5e 42%, #9f1239 100%) !important;
+  color: #1a0508 !important;
+  border-color: rgba(253, 164, 175, 0.55) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 0 28px rgba(244, 63, 94, 0.45) !important;
+}
+
+.fomo-banner {
+  border-color: rgba(244, 63, 94, 0.45) !important;
+  background: linear-gradient(100deg, rgba(244, 63, 94, 0.2), rgba(251, 146, 60, 0.1)) !important;
+}
+.fomo-banner strong { color: #fda4af; }
+.fomo-banner code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.82em;
+  color: #fecdd3;
+}
+
+.card.buy {
+  border-color: rgba(52, 211, 153, 0.55);
+  box-shadow: var(--shadow-out), 0 0 28px rgba(52, 211, 153, 0.15);
+}
+.card.sell, .card.exit {
+  border-color: rgba(248, 113, 113, 0.55);
+  box-shadow: var(--shadow-out), 0 0 28px rgba(248, 113, 113, 0.12);
+}
+
+.badge.BUY {
+  background: linear-gradient(180deg, #6ee7b7, #059669);
+  color: #022c22;
+}
+.badge.EXIT, .badge.SELL {
+  background: linear-gradient(180deg, #fca5a5, #dc2626);
+  color: #1a0505;
+}
+
+.roster-wrap {
+  max-width: 1100px;
+  margin: 0.4rem auto 1rem;
+  padding: 0 1rem;
+}
+.roster-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fda4af;
+  margin: 0 0 0.55rem;
+}
+.roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.5rem;
+}
+.roster-card {
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  border-radius: 12px;
+  padding: 0.5rem 0.65rem;
+  background: linear-gradient(160deg, rgba(40, 12, 18, 0.9), rgba(12, 10, 16, 0.92));
+  font-size: 0.78rem;
+}
+.roster-card .lbl { font-weight: 700; color: #fecdd3; }
+.roster-card .tier {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.08rem 0.3rem;
+  border-radius: 4px;
+  margin-right: 0.25rem;
+  background: #f43f5e;
+  color: #fff;
+}
+.roster-card .addr {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.65rem;
+  color: #94a3b8;
+  margin-top: 0.2rem;
+  word-break: break-all;
+}
