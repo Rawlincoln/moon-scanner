@@ -33,6 +33,9 @@ services:
       # Free tier is ephemeral; GHA outcomes sync restores moon_outcomes across redeploys.
       - key: DATA_DIR
         value: data
+      # FOMO page/watch can stay on; Telegram buy/exit spam off
+      - key: FOMO_ALERT_TELEGRAM
+        value: "0"
       # Set real values in Render dashboard (do not commit secrets):
       # HELIUS_API_KEY, ADMIN_API_KEY, CORS_ORIGINS, TELEGRAM_*, TELEGRAM_CRON_SECRET
     # Persistent disk (requires paid plan). Uncomment when on Starter+:
