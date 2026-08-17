@@ -11,7 +11,6 @@ from services.alert_invalidation import run_invalidation_cycle, status as inv_st
 from services.capital import can_open_trade, enrich_plan_with_size
 from services.money_plan import build_money_plan
 from services.pending_alerts import (
-    add_pending,
     get_pending,
     list_pending,
     remove_pending,
