@@ -1,5 +1,5 @@
 /**
- * Money Desk — bankroll, session, open positions, size calc.
+ * Money Desk — pending Take/Skip, bankroll, open positions, size calc.
  */
 const $ = (s) => document.querySelector(s);
 
@@ -26,6 +26,95 @@ function setStatus(msg, kind = "") {
   el.className = "status" + (kind ? ` ${kind}` : "");
 }
 
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function ageMin(ts) {
+  if (!ts) return "—";
+  const m = (Date.now() / 1000 - Number(ts)) / 60;
+  if (m < 1) return "<1m";
+  if (m < 60) return `${m.toFixed(0)}m ago`;
+  return `${(m / 60).toFixed(1)}h ago`;
+}
+
+async function loadPending() {
+  const el = $("#pendingList");
+  if (!el) return;
+  try {
+    const res = await fetch(apiUrl("/api/journal/pending?limit=15"), {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const rows = data.pending || [];
+    if (!rows.length) {
+      el.innerHTML = `<p class="pending-empty">No pending alerts. When Telegram fires MOON/SNIPE, they show up here for Take / Skip.</p>`;
+      return;
+    }
+    el.innerHTML = rows
+      .map((p) => {
+        const padre = `https://trade.padre.gg/trade/solana/${p.mint || ""}`;
+        return `<div class="pending-row" data-id="${escapeHtml(p.id)}">
+          <span class="tag open">${escapeHtml(p.label || p.feed || "?")}</span>
+          <span class="sym">$${escapeHtml(p.symbol || "?")}</span>
+          <span class="muted">${escapeHtml((p.feed || "").toUpperCase())}</span>
+          <span class="muted">entry ${fmtUsd(p.entry_mcap)}</span>
+          <span class="muted">size ${fmtUsd(p.size_usd)}</span>
+          <span class="muted">${escapeHtml(ageMin(p.ts))}</span>
+          <div class="actions">
+            <a class="btn sm" href="${padre}" target="_blank" rel="noopener">Padre</a>
+            <button type="button" class="btn take" data-act="take" data-id="${escapeHtml(p.id)}">I took this</button>
+            <button type="button" class="btn skip" data-act="skip" data-id="${escapeHtml(p.id)}">Skip</button>
+          </div>
+        </div>`;
+      })
+      .join("");
+
+    el.querySelectorAll("button[data-act]").forEach((btn) => {
+      btn.onclick = () => onPendingAction(btn.dataset.act, btn.dataset.id, btn);
+    });
+  } catch (e) {
+    el.innerHTML = `<p class="pending-empty">Could not load pending: ${escapeHtml(e.message || e)}</p>`;
+  }
+}
+
+async function onPendingAction(act, id, btn) {
+  if (!id) return;
+  const take = act === "take";
+  if (take && !confirm("Confirm you entered this trade?\nIt will open a journal position and use a risk slot.")) {
+    return;
+  }
+  if (btn) btn.disabled = true;
+  setStatus(take ? "Opening position…" : "Skipping…", "busy");
+  try {
+    const res = await fetch(apiUrl(take ? "/api/journal/take" : "/api/journal/skip"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ id }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || data.message || res.statusText || "failed");
+    }
+    setStatus(
+      take
+        ? `Took it — position #${data.id} open (risk slot used)`
+        : "Skipped — no risk slot",
+      "ok"
+    );
+    await loadDesk();
+  } catch (e) {
+    setStatus(String(e.message || e), "err");
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function loadDesk() {
   setStatus("Loading money desk…", "busy");
   try {
@@ -33,6 +122,7 @@ async function loadDesk() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const d = await res.json();
     renderDesk(d);
+    await loadPending();
     setStatus(`Updated ${new Date().toLocaleTimeString()}`, "");
   } catch (e) {
     setStatus(`Failed: ${e.message || e}`, "err");
@@ -66,10 +156,17 @@ function renderDesk(d) {
     metric("Sample n", e.sample_n ?? "—"),
     metric("Wins", e.wins ?? "—", "good"),
     metric("Losses", e.losses ?? "—", "bad"),
-    metric("PnL $", e.total_pnl_usd != null ? fmtUsd(e.total_pnl_usd) : (d.journal?.total_pnl_usd != null ? fmtUsd(d.journal.total_pnl_usd) : "—")),
+    metric(
+      "PnL $",
+      e.total_pnl_usd != null
+        ? fmtUsd(e.total_pnl_usd)
+        : d.journal?.total_pnl_usd != null
+          ? fmtUsd(d.journal.total_pnl_usd)
+          : "—"
+    ),
   ].join("");
 
-  const open = (s.open_trades || []);
+  const open = s.open_trades || [];
   $("#openList").innerHTML = open.length
     ? open
         .map(
@@ -78,18 +175,23 @@ function renderDesk(d) {
             <span class="sym">$${escapeHtml(t.symbol || "?")}</span>
             <span class="muted">${escapeHtml(t.feed || "")} · ${escapeHtml(t.label || "")}</span>
             <span class="muted">entry ${fmtUsd(t.entry_mcap)}</span>
-            <span class="muted">peak ${fmtUsd(t.peak_mcap)}</span>
+            <span class="muted">last ${fmtUsd(t.last_mcap || t.peak_mcap)}</span>
             <span class="muted">size ${fmtUsd(t.size_usd)}</span>
             <span class="muted">#${t.id}</span>
           </div>`
         )
         .join("")
-    : `<p class="muted">No open positions. Waiting for MOON/SNIPE alerts.</p>`;
+    : `<p class="muted">No open positions. Take a pending alert after you enter.</p>`;
 
   const pb = d.playbook || [];
-  $("#playbook").innerHTML = pb.map((x) => `<li>${escapeHtml(x)}</li>`).join("");
+  const extra = [
+    "After Telegram: Money desk → I took this (only then risk slot counts)",
+    "Skip if you did not enter — never auto-open positions",
+  ];
+  $("#playbook").innerHTML = [...extra, ...pb]
+    .map((x) => `<li>${escapeHtml(x)}</li>`)
+    .join("");
 
-  // Recent from a second fetch
   loadTrades();
 }
 
@@ -116,7 +218,7 @@ async function loadTrades() {
             </div>`;
           })
           .join("")
-      : `<p class="muted">No trades yet. First MOON/SNIPE alert opens a paper trade.</p>`;
+      : `<p class="muted">No trades yet. Confirm with I took this after an alert.</p>`;
   } catch {
     /* ignore */
   }
@@ -142,14 +244,6 @@ async function calcSize() {
   } catch (e) {
     $("#sizeOut").textContent = String(e.message || e);
   }
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 $("#refreshBtn")?.addEventListener("click", () => loadDesk());

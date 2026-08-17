@@ -420,6 +420,12 @@ MONEY_RISK_PCT_HINT = float(os.getenv("MONEY_RISK_PCT_HINT", "1.0") or "1.0")  #
 MONEY_INVALIDATE_INTERVAL_SEC = float(
     os.getenv("MONEY_INVALIDATE_INTERVAL_SEC", "60") or "60"
 )
+# Auto-open journal when Telegram fires. Default OFF — use Money desk "I took this".
+_auto_j = (os.getenv("MONEY_AUTO_JOURNAL", "0") or "0").strip().lower()
+MONEY_AUTO_JOURNAL = _auto_j not in ("0", "false", "no", "off")
+# Allow Take/Skip without Admin key (private desk). Set 0 to require X-Admin-Key.
+_money_open = (os.getenv("MONEY_OPEN_MANAGE", "1") or "1").strip().lower()
+MONEY_OPEN_MANAGE = _money_open not in ("0", "false", "no", "off")
 MONEY_PAPER_DEFAULT = (os.getenv("MONEY_PAPER_DEFAULT", "1") or "1").strip().lower() not in (
     "0",
     "false",

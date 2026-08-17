@@ -66,6 +66,58 @@
 }
 .metric .v.warn { color: var(--warn); }
 
+.hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: -6px 0 12px;
+  line-height: 1.4;
+}
+.pending-list { display: flex; flex-direction: column; gap: 10px; }
+.pending-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(62, 240, 176, 0.25);
+  background: linear-gradient(165deg, rgba(20, 40, 32, 0.9), rgba(12, 18, 28, 0.95));
+}
+.pending-row .sym {
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: var(--green);
+}
+.pending-row .actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pending-row .btn.take {
+  background: linear-gradient(180deg, #7dffe0 0%, var(--green) 40%, #12a06a 100%);
+  color: #03150e;
+  border: none;
+  font-weight: 800;
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.pending-row .btn.skip {
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  color: var(--muted);
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.pending-row .btn:disabled { opacity: 0.5; cursor: wait; }
+.pending-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 8px 0;
+}
+
 .playbook { list-style: none; }
 .playbook li {
   padding: 10px 0;

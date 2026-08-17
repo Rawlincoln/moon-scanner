@@ -657,17 +657,33 @@ async def notify_new_picks(
                     logger.debug("auto-lab archive failed: %s", exc)
 
             msg = format_pick_message(feed_key, t)
+            # Point user at Money desk for risk-slot Take
+            msg += (
+                "\n\n✅ <b>Took it?</b> Open "
+                "<a href=\"https://moon-scanner-9tlz.onrender.com/money\">Money desk</a> "
+                "→ <b>I took this</b> (risk slots only count confirmed trades)"
+            )
             result = await send_telegram(msg)
             if result.get("ok"):
                 seen[key] = now
                 sent += 1
-                # Only auto-journal high-grade capital trades (not WATCH/WARM/COPY noise)
                 lab_j = _label_of(feed_key, t)
-                if lab_j in ("MOON", "SNIPE", "ELITE") and feed_key in (
-                    "moon",
-                    "snipe",
-                    "elite",
-                ):
+                # Always stash pending for Take/Skip on Money desk
+                try:
+                    from services.pending_alerts import add_pending
+
+                    add_pending(
+                        feed=feed_key,
+                        token=t,
+                        plan=plan,
+                        label=lab_j,
+                    )
+                except Exception as exc:
+                    logger.debug("pending alert save failed: %s", exc)
+                # Optional auto-journal (default OFF — MONEY_AUTO_JOURNAL=1 to restore)
+                from config import MONEY_AUTO_JOURNAL
+
+                if MONEY_AUTO_JOURNAL and lab_j in ("MOON", "SNIPE", "ELITE"):
                     try:
                         from services.trade_journal import get_journal
 

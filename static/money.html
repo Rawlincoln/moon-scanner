@@ -46,6 +46,11 @@
   </section>
 
   <section class="desk grid" id="desk">
+    <div class="card wide pending-card">
+      <h2>Pending alerts — did you take it?</h2>
+      <p class="hint">Telegram no longer auto-opens risk slots. Confirm only trades you actually entered.</p>
+      <div id="pendingList" class="pending-list"></div>
+    </div>
     <div class="card">
       <h2>Session today</h2>
       <div class="metrics" id="sessionMetrics"></div>
@@ -81,9 +86,9 @@
 
   <footer class="foot">
     Paper by default. Set <code>BANKROLL_USD</code> + <code>RISK_PER_TRADE_PCT</code> on Render.
-    Telegram manages TP1/TP2/STOP automatically when money mode is on.
+    After Telegram: use <strong>I took this</strong> so only real entries count for risk slots / day R.
   </footer>
 
-  <script src="/static/js/money.js?v=1"></script>
+  <script src="/static/js/money.js?v=2"></script>
 </body>
 </html>
