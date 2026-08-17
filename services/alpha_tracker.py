@@ -235,6 +235,61 @@ async def discover_group_mentions(*, limit: int = 40) -> list[dict[str, Any]]:
                 cur["dex_url"] = item["url"]
             merged[mint] = cur
 
+    # 3) Fresh pump climbers with real TG/X — live community heat (not only boost spam)
+    try:
+        from services.padre_feed import PadreFeedClient
+
+        feed = PadreFeedClient()
+        coins = await feed._fetch_pump_sorted("last_trade_timestamp", 60)
+    except Exception:
+        coins = []
+    for coin in coins or []:
+        if not isinstance(coin, dict):
+            continue
+        mint = str(coin.get("mint") or "").strip()
+        if not mint or mint in BLOCKED_MINTS or coin.get("complete"):
+            continue
+        tw = str(coin.get("twitter") or "")
+        tg = str(coin.get("telegram") or "")
+        replies = int(coin.get("reply_count") or 0)
+        # Community signal: TG and/or own X + replies
+        has_tg = bool(tg)
+        own_x = "status/" not in tw.lower() and (
+            "x.com/" in tw.lower() or "twitter.com/" in tw.lower()
+        )
+        if not (has_tg or (own_x and replies >= 5)):
+            continue
+        try:
+            mcap = float(coin.get("usd_market_cap") or 0)
+        except (TypeError, ValueError):
+            mcap = 0.0
+        if mcap and (
+            mcap < ALPHA_TRACKER_MCAP_MIN * 0.6 or mcap > ALPHA_TRACKER_MCAP_MAX * 1.4
+        ):
+            continue
+        cur = merged.get(mint) or {
+            "tokenAddress": mint,
+            "chainId": "solana",
+            "sources": [],
+            "group_count": 0,
+            "groups": [],
+            "boost_amount": 0,
+            "has_telegram": False,
+            "has_twitter": False,
+        }
+        cur["sources"] = list(set((cur.get("sources") or []) + ["pump_community"]))
+        cur["has_telegram"] = cur.get("has_telegram") or has_tg
+        cur["has_twitter"] = cur.get("has_twitter") or bool(tw)
+        heat = 1 + (1 if has_tg else 0) + (1 if replies >= 15 else 0) + (1 if own_x else 0)
+        cur["group_count"] = max(int(cur.get("group_count") or 0), heat)
+        cur["symbol"] = coin.get("symbol") or cur.get("symbol")
+        cur["name"] = coin.get("name") or cur.get("name")
+        cur["description"] = (coin.get("description") or "")[:280]
+        cur["mcap"] = mcap
+        if "pump_community" not in (cur.get("groups") or []):
+            cur.setdefault("groups", []).append("pump_community")
+        merged[mint] = cur
+
     # Require minimum group heat
     rows = [
         r
@@ -242,13 +297,27 @@ async def discover_group_mentions(*, limit: int = 40) -> list[dict[str, Any]]:
         if int(r.get("group_count") or 0) >= max(1, ALPHA_TRACKER_MIN_GROUPS)
         or "padre_alpha_tracker" in (r.get("sources") or [])
     ]
-    rows.sort(
-        key=lambda r: (
+    def _rank(r: dict[str, Any]) -> tuple:
+        mcap = float(r.get("mcap") or 0)
+        in_band = (
+            0
+            if (
+                mcap <= 0
+                or ALPHA_TRACKER_MCAP_MIN * 0.5
+                <= mcap
+                <= ALPHA_TRACKER_MCAP_MAX
+            )
+            else 1
+        )
+        return (
+            0 if "padre_alpha_tracker" in (r.get("sources") or []) else 1,
+            in_band,
+            0 if "pump_community" in (r.get("sources") or []) else 1,
             -int(r.get("group_count") or 0),
             -int(r.get("boost_amount") or 0),
-            0 if "padre_alpha_tracker" in (r.get("sources") or []) else 1,
         )
-    )
+
+    rows.sort(key=_rank)
     return rows[:limit]
 
 
@@ -300,15 +369,33 @@ def _score_pro(
 
     if honeypot:
         return 0, "SKIP", ["honeypot"]
-    if avoid.get("avoid") or avoid.get("hard_avoid"):
-        return 5, "SKIP", [
-            f"hard avoid: {(avoid.get('reasons') or avoid.get('flags') or ['blocked'])[:2]}"
-        ]
-
     flags = set(avoid.get("flags") or [])
-    soft = set(avoid.get("soft_flags") or avoid.get("soft_avoid") or [])
-    if flags & {"wash_buys", "extreme_wash", "creator_dumped", "flash_holders"}:
-        return 15, "SKIP", ["toxic book flags"]
+    reasons = [str(r) for r in (avoid.get("reasons") or [])]
+    reasons_l = [r.lower() for r in reasons]
+    # Dump already happened — never chase
+    if any("crashed" in r and "ath" in r for r in reasons_l):
+        return 10, "SKIP", ["already dumped from ATH"]
+    # Only true hard flags kill the trade — soft avoid notes demote score only
+    hard_flags = flags & {
+        "blocklist",
+        "banned",
+        "honeypot",
+        "lp_unlocked",
+        "mint_authority",
+        "freeze_authority",
+        "entry_trap_social",
+        "social_spoof_scam",
+        "flash_holders",
+        "extreme_wash",
+        "wash_buys",
+        "drained_curve",
+        "ghost_launch",
+        "padre_danger",
+    }
+    # avoid.hard_avoid alone is too broad (includes soft stacks) — use flags
+    if hard_flags:
+        return 5, "SKIP", [f"hard avoid: {list(hard_flags)[:3]}"]
+    soft = set(flags) - hard_flags
 
     # Group heat
     score += min(25, group_count * 8)
@@ -395,9 +482,17 @@ def _score_pro(
         score -= min(15, 4 * len(soft))
 
     score = max(0, min(100, score))
-    if score >= ALPHA_TRACKER_MIN_SCORE and mcap <= ALPHA_TRACKER_MCAP_MAX:
+    # BUY only in entry mcap band (or unknown mcap with strong group heat)
+    mcap_ok = mcap <= 0 or mcap <= ALPHA_TRACKER_MCAP_MAX
+    mcap_floor_ok = mcap <= 0 or mcap >= ALPHA_TRACKER_MCAP_MIN * 0.7
+    if (
+        score >= ALPHA_TRACKER_MIN_SCORE
+        and mcap_ok
+        and mcap_floor_ok
+        and not (mcap > 0 and mcap < ALPHA_TRACKER_MCAP_MIN * 0.5)
+    ):
         label = "BUY"
-    elif score >= max(50, ALPHA_TRACKER_MIN_SCORE - 12):
+    elif score >= max(52, ALPHA_TRACKER_MIN_SCORE - 14):
         label = "WATCH"
     else:
         label = "SKIP"
