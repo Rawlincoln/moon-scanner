@@ -31,6 +31,10 @@ def status() -> dict[str, Any]:
 
 
 async def fetch_mcap(mint: str) -> float | None:
+    """Best mcap: pump.fun first, DexScreener fallback (post-migrate)."""
+    mint = (mint or "").strip()
+    if not mint:
+        return None
     try:
         resp = await http_get(
             f"{PUMPFUN_API_URL}/coins/{mint}",
@@ -40,12 +44,35 @@ async def fetch_mcap(mint: str) -> float | None:
             },
             timeout=REQUEST_TIMEOUT,
         )
-        if resp.status_code != 200:
-            return None
-        data = resp.json()
-        return float(data.get("usd_market_cap") or 0) or None
+        if resp.status_code == 200:
+            data = resp.json() or {}
+            m = float(data.get("usd_market_cap") or data.get("market_cap") or 0)
+            if m > 0:
+                return m
     except Exception:
-        return None
+        pass
+    # Graduated / pump miss → Dex pairs
+    try:
+        resp = await http_get(
+            f"https://api.dexscreener.com/token-pairs/v1/solana/{mint}",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=REQUEST_TIMEOUT,
+        )
+        if resp.status_code == 200:
+            pairs = resp.json() or []
+            best = 0.0
+            for p in pairs if isinstance(pairs, list) else []:
+                try:
+                    m = float(p.get("marketCap") or p.get("fdv") or 0)
+                except (TypeError, ValueError):
+                    m = 0.0
+                if m > best:
+                    best = m
+            if best > 0:
+                return best
+    except Exception:
+        pass
+    return None
 
 
 async def run_invalidation_cycle() -> dict[str, Any]:

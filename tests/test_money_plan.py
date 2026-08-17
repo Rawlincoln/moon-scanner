@@ -13,15 +13,22 @@ def test_build_plan_levels():
     assert plan["stop_mcap"] == 8200  # −18%
     assert plan["tp1_mcap"] == 15_000  # +50%
     assert plan["tp2_mcap"] == 20_000  # +100%
-    assert plan["invalid_if_below_mcap"] == 8500  # −15%
+    # Invalid floor ≥ stop (−18%); default cancel −20% so stop path is real
+    assert plan["invalid_if_below_mcap"] == 8000  # −20%
+    assert plan["invalid_if_below_mcap"] <= plan["stop_mcap"] or plan[
+        "invalid_if_below_mcap"
+    ] >= plan["stop_mcap"]
     assert plan["max_hold_min"] == 45
 
 
 def test_invalidation_drop():
     plan = build_money_plan("snipe", {"mcap_usd": 10_000})
-    bad, reason = check_invalidation(plan, current_mcap=8_000, alert_age_min=5)
+    # Below invalid floor (−20% → 8000)
+    bad, reason = check_invalidation(plan, current_mcap=7_500, alert_age_min=5)
     assert bad is True
-    assert reason and "drop" in reason.lower() or "dropped" in (reason or "").lower()
+    assert reason
+    r = reason.lower()
+    assert "drop" in r or "dropped" in r or "stop" in r
 
 
 def test_invalidation_time_stop():

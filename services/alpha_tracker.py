@@ -28,13 +28,21 @@ from config import (
     ALPHA_TRACKER_TELEGRAM,
     ALPHA_TRACKER_WATCH_TELEGRAM,
     DATA_DIR,
+    MONEY_ENTRY_MIN_USD,
     PADRE_AUTH_TOKEN,
     PADRE_TRADE_URL,
     TELEGRAM_ALPHA_CHAT_ID,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
+    TELEGRAM_MONEY_MODE,
 )
-from services.avoid_filters import BLOCKED_MINTS, analyze_avoid_flags
+from services.avoid_filters import (
+    BLOCKED_MINTS,
+    HARD_AVOID_FLAGS,
+    analyze_avoid_flags,
+    is_hard_avoid,
+)
+from services.runner_radar import is_crashed_runner
 from services.dexscreener import DexScreenerClient
 from services.http_client import get_client
 from services.padre import PadreClient
@@ -384,27 +392,14 @@ def _score_pro(
     # Dump already happened — never chase
     if any("crashed" in r and "ath" in r for r in reasons_l):
         return 10, "SKIP", ["already dumped from ATH"]
-    # Only true hard flags kill the trade — soft avoid notes demote score only
-    hard_flags = flags & {
-        "blocklist",
-        "banned",
-        "honeypot",
-        "lp_unlocked",
-        "mint_authority",
-        "freeze_authority",
-        "entry_trap_social",
-        "social_spoof_scam",
-        "flash_holders",
-        "extreme_wash",
-        "wash_buys",
-        "drained_curve",
-        "ghost_launch",
-        "padre_danger",
-    }
-    # avoid.hard_avoid alone is too broad (includes soft stacks) — use flags
+    # Full hard-avoid parity with moon/snipes
+    hard, hard_why = is_hard_avoid(avoid)
+    if hard:
+        return 5, "SKIP", [f"hard avoid: {hard_why or list(flags & HARD_AVOID_FLAGS)[:3]}"]
+    hard_flags = flags & HARD_AVOID_FLAGS
     if hard_flags:
         return 5, "SKIP", [f"hard avoid: {list(hard_flags)[:3]}"]
-    soft = set(flags) - hard_flags
+    soft = set(flags) - HARD_AVOID_FLAGS
 
     # Group heat
     score += min(25, group_count * 8)
@@ -461,14 +456,16 @@ def _score_pro(
             score -= 20
             why.append("too old")
 
-    # ATH retention
+    # ATH retention (money-grade: need ≥85% for BUY boost; <80% skip)
     if ath_ret is not None:
-        if ath_ret >= 0.75:
-            score += 8
+        if ath_ret < 0.80:
+            return 12, "SKIP", [f"dumped {ath_ret:.0%} of ATH"]
+        if ath_ret >= 0.88:
+            score += 10
             why.append(f"near ATH {ath_ret:.0%}")
-        elif ath_ret < 0.45:
-            score -= 18
-            why.append(f"dumped {ath_ret:.0%} of ATH")
+        elif ath_ret >= 0.85:
+            score += 6
+            why.append(f"ATH ret {ath_ret:.0%}")
 
     # Social honesty
     sflags = set(snipe_soc.get("flags") or [])
@@ -625,6 +622,19 @@ async def analyze_candidate(cand: dict[str, Any]) -> dict[str, Any] | None:
         ath = None
     ath_ret = (mcap / ath) if ath and mcap > 0 else None
 
+    # Crash gate using true peak (not live-as-ATH)
+    tokenish["_peak_mcap"] = ath or mcap
+    crashed, crash_why = is_crashed_runner(
+        tokenish, mcap=mcap, ath=ath, peak=ath
+    )
+    if crashed:
+        return None
+
+    # Survival floor for money-aligned BUY desk
+    floor = float(MONEY_ENTRY_MIN_USD or ALPHA_TRACKER_MCAP_MIN)
+    if mcap > 0 and mcap < floor * 0.9:
+        return None
+
     score, label, why = _score_pro(
         mcap=mcap,
         liq=liq,
@@ -640,6 +650,8 @@ async def analyze_candidate(cand: dict[str, Any]) -> dict[str, Any] | None:
         ath_ret=ath_ret,
         sources=list(cand.get("sources") or []),
     )
+    if crash_why:
+        why = list(why) + [crash_why]
 
     return {
         "tokenAddress": mint,
@@ -805,6 +817,7 @@ async def scan_alpha_tracker(
     buys.sort(key=lambda c: -int((c.get("alpha") or {}).get("score") or 0))
 
     do_send = ALPHA_TRACKER_TELEGRAM if send_alerts is None else send_alerts
+    # Money mode: only alert at/above survival and never open phantom risk for alpha
     sent = 0
     if do_send:
         to_alert: list[dict[str, Any]] = list(buys)

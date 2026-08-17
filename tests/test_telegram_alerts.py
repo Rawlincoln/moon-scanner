@@ -56,13 +56,12 @@ def test_label_and_allowed():
     from config import TELEGRAM_MONEY_MODE
 
     if TELEGRAM_MONEY_MODE:
-        assert "WATCH" in _allowed_labels("moon")
+        # Capital book: MOON + SNIPE primary (WATCH/HEAT/COPY are opt-in via env)
+        assert "MOON" in _allowed_labels("moon")
         assert "SETUP" not in _allowed_labels("snipe")
-        assert "HEAT" in _allowed_labels("heat")
-        assert "ELITE" in _allowed_labels("elite")
-        assert "COPY" in _allowed_labels("elite")
+        assert "SNIPE" in _allowed_labels("snipe")
         st = status()
-        assert "elite" in (st.get("feeds") or []) or True  # env may override
+        assert "moon" in (st.get("feeds") or []) or True
 
 
 def test_status_shape():

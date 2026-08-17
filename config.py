@@ -276,13 +276,12 @@ _money_raw = (os.getenv("TELEGRAM_MONEY_MODE", "1") or "1").strip().lower()
 TELEGRAM_MONEY_MODE = _money_raw not in ("0", "false", "no", "off")
 
 if TELEGRAM_MONEY_MODE:
-    # Heat + elite copy signals; still no grad spam
-    _default_feeds = "moon,snipe,heat,elite"
-    # WATCH allowed so mid-curve migrators surface (still gated by stage filter in telegram)
-    _default_moon_labels = "MOON,WATCH"
+    # Capital book: MOON + SNIPE only (heat/elite are noisy — opt-in via TELEGRAM_ALERT_FEEDS)
+    _default_feeds = "moon,snipe"
+    _default_moon_labels = "MOON"  # WATCH opt-in only
     _default_snipe_labels = "SNIPE"
-    _default_heat_labels = "HEAT,WARM"  # HEAT first; WARM secondary
-    _default_elite_labels = "ELITE,COPY"
+    _default_heat_labels = "HEAT"
+    _default_elite_labels = "ELITE"
 else:
     _default_feeds = "moon,snipe,heat,elite,grad"
     _default_moon_labels = "MOON,WATCH"
@@ -381,9 +380,13 @@ _alpha_watch_tg = (os.getenv("ALPHA_TRACKER_WATCH_TELEGRAM", "1") or "1").strip(
 ALPHA_TRACKER_WATCH_TELEGRAM = _alpha_watch_tg not in ("0", "false", "no", "off")
 ALPHA_TRACKER_POLL_SEC = float(os.getenv("ALPHA_TRACKER_POLL_SEC", "55") or "55")
 ALPHA_TRACKER_MIN_GROUPS = int(os.getenv("ALPHA_TRACKER_MIN_GROUPS", "1") or "1")
-ALPHA_TRACKER_MIN_SCORE = int(os.getenv("ALPHA_TRACKER_MIN_SCORE", "60") or "60")
-ALPHA_TRACKER_MCAP_MIN = float(os.getenv("ALPHA_TRACKER_MCAP_MIN", "4000") or "4000")
-ALPHA_TRACKER_MCAP_MAX = float(os.getenv("ALPHA_TRACKER_MCAP_MAX", "120000") or "120000")
+ALPHA_TRACKER_MIN_SCORE = int(os.getenv("ALPHA_TRACKER_MIN_SCORE", "68") or "68")
+# Align with money survival floor — no sub-$7k lottery BUY
+ALPHA_TRACKER_MCAP_MIN = float(
+    os.getenv("ALPHA_TRACKER_MCAP_MIN", str(MONEY_ENTRY_MIN_USD))
+    or str(MONEY_ENTRY_MIN_USD)
+)
+ALPHA_TRACKER_MCAP_MAX = float(os.getenv("ALPHA_TRACKER_MCAP_MAX", "55000") or "55000")
 ALPHA_TRACKER_MAX_AGE_MIN = float(
     os.getenv("ALPHA_TRACKER_MAX_AGE_MIN", "180") or "180"
 )
@@ -403,9 +406,12 @@ TELEGRAM_ALPHA_CHAT_ID = os.getenv("TELEGRAM_ALPHA_CHAT_ID", "").strip()
 MONEY_STOP_PCT = float(os.getenv("MONEY_STOP_PCT", "0.18") or "0.18")  # −18%
 MONEY_TP1_PCT = float(os.getenv("MONEY_TP1_PCT", "0.50") or "0.50")  # +50%
 MONEY_TP2_PCT = float(os.getenv("MONEY_TP2_PCT", "1.00") or "1.00")  # +100% (2×)
+# Invalid must not fire before stop (was 0.15 vs stop 0.18 → dead stop path)
 MONEY_INVALID_DROP_PCT = float(
-    os.getenv("MONEY_INVALID_DROP_PCT", "0.15") or "0.15"
-)  # −15% from alert entry → CANCEL
+    os.getenv("MONEY_INVALID_DROP_PCT", "0.20") or "0.20"
+)  # −20% hard cancel floor (≥ stop)
+if MONEY_INVALID_DROP_PCT < MONEY_STOP_PCT:
+    MONEY_INVALID_DROP_PCT = MONEY_STOP_PCT
 MONEY_MAX_HOLD_MIN = float(os.getenv("MONEY_MAX_HOLD_MIN", "45") or "45")
 MONEY_INVALID_NO_MOVE_PCT = float(
     os.getenv("MONEY_INVALID_NO_MOVE_PCT", "0.08") or "0.08"

@@ -252,8 +252,16 @@ def fee_flow_gate(ff: dict[str, Any] | None) -> tuple[bool, str | None]:
         return True, None
     if ff.get("hard_reject") or "flash_fees" in (ff.get("flags") or []):
         return False, ff.get("summary") or "flash fee/volume war"
-    if ff.get("quality") == "wash" and int(ff.get("buys_m5") or 0) >= 40:
+    buys = int(ff.get("buys_m5") or 0)
+    sells = int(ff.get("sells_m5") or 0)
+    ratio = buys / max(sells, 1)
+    # Wash / one-way books destroy expectancy — gate early
+    if ff.get("quality") == "wash" and buys >= 15:
         return False, ff.get("summary") or "wash fee trail"
+    if buys >= 12 and sells == 0:
+        return False, "one-way buys m5 (0 sells) — wash/honeypot paint"
+    if buys >= 15 and ratio >= 4.0:
+        return False, f"one-way flow {buys}b/{sells}s m5 — wash skew"
     return True, None
 
 

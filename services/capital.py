@@ -43,16 +43,18 @@ def size_position(
     bankroll: float | None = None,
     risk_pct: float | None = None,
     sol_usd: float | None = None,
+    liquidity_usd: float | None = None,
 ) -> dict[str, Any]:
     """Risk-based size: lose risk_usd if stop hits.
 
     For memecoins we size in **USD notional** (what you'd spend), not token count.
-    stop_pct is fraction e.g. 0.18.
+    stop_pct is fraction e.g. 0.18. Cap vs bankroll and pool liquidity.
     """
     br = _f(bankroll, BANKROLL_USD)
     rp = _f(risk_pct, RISK_PER_TRADE_PCT)
     sp = _f(stop_pct, 0.18)
     sol = _f(sol_usd, SOL_USD)
+    liq = _f(liquidity_usd)
     if sp <= 0:
         sp = 0.18
     if br <= 0:
@@ -62,6 +64,9 @@ def size_position(
     size_usd = risk_usd / sp if sp > 0 else 0.0
     # Cap single position at 25% bankroll (never yolo full bag)
     size_usd = min(size_usd, br * 0.25)
+    # Never recommend more than ~2% of visible pool (fill / impact)
+    if liq > 0:
+        size_usd = min(size_usd, liq * 0.02)
     size_sol = (size_usd / sol) if sol > 0 else None
     return {
         "bankroll_usd": round(br, 2),
@@ -71,9 +76,11 @@ def size_position(
         "size_usd": round(size_usd, 2),
         "size_sol": round(size_sol, 4) if size_sol is not None else None,
         "sol_usd": sol,
+        "liquidity_usd": round(liq, 2) if liq else None,
         "entry_mcap": round(entry_mcap, 2) if entry_mcap else None,
-        "max_loss_if_stopped_usd": round(risk_usd, 2),
-        "rule": f"Risk ${risk_usd:.2f} ({rp}% of ${br:.0f}) to −{sp * 100:.0f}% stop → size ${size_usd:.2f}",
+        "max_loss_if_stopped_usd": round(min(risk_usd, size_usd * sp), 2),
+        "rule": f"Risk ${risk_usd:.2f} ({rp}% of ${br:.0f}) to −{sp * 100:.0f}% stop → size ${size_usd:.2f}"
+        + (f" (liq-capped)" if liq > 0 and size_usd <= liq * 0.021 else ""),
     }
 
 
@@ -81,7 +88,14 @@ def enrich_plan_with_size(kind: str, token: dict[str, Any]) -> dict[str, Any]:
     plan = build_money_plan(kind, token)
     stop_pct = _f(plan.get("stop_pct"), 18.0) / 100.0
     entry = _f(plan.get("entry_mcap"))
-    sizing = size_position(entry_mcap=entry, stop_pct=stop_pct)
+    liq = _f(
+        token.get("liquidity_usd")
+        or token.get("liquidity")
+        or (token.get("pair") or {}).get("liquidity", {}).get("usd")
+        if isinstance((token.get("pair") or {}).get("liquidity"), dict)
+        else token.get("liquidity_usd")
+    )
+    sizing = size_position(entry_mcap=entry, stop_pct=stop_pct, liquidity_usd=liq)
     plan["sizing"] = sizing
     plan["size_usd"] = sizing["size_usd"]
     plan["risk_usd"] = sizing["risk_usd"]
@@ -153,6 +167,7 @@ def session_stats(journal: Any) -> dict[str, Any]:
                 "label": r.get("label"),
                 "entry_mcap": r.get("entry_mcap"),
                 "peak_mcap": r.get("peak_mcap"),
+                "last_mcap": r.get("last_mcap"),
                 "size_usd": r.get("size_usd"),
                 "opened_at": r.get("opened_at"),
             }
@@ -162,34 +177,47 @@ def session_stats(journal: Any) -> dict[str, Any]:
 
 
 def can_open_trade(journal: Any, *, kind: str = "moon") -> tuple[bool, str]:
-    """Gate new money alerts / journal opens."""
-    if not MONEY_SYSTEM_ARMED:
-        return False, "system disarmed (MONEY_SYSTEM_ARMED=0) — scan only"
-    if not TELEGRAM_MONEY_MODE and kind not in ("moon", "snipe"):
-        # still allow non-money if mode off
-        pass
-    stats = session_stats(journal)
-    if stats["open_count"] >= MAX_OPEN_TRADES:
-        return (
-            False,
-            f"max open trades {stats['open_count']}/{MAX_OPEN_TRADES} — manage or close first",
-        )
-    if stats["opened_today"] >= MAX_TRADES_PER_DAY:
-        return (
-            False,
-            f"max trades today {stats['opened_today']}/{MAX_TRADES_PER_DAY} — session cap",
-        )
-    if stats["day_r"] <= -abs(MAX_DAILY_LOSS_R):
-        return (
-            False,
-            f"daily loss limit hit ({stats['day_r']}R ≤ −{MAX_DAILY_LOSS_R}R) — STOP trading today",
-        )
-    if stats["day_r"] >= MAX_DAILY_PROFIT_R and kind not in ("snipe",):
-        return (
-            False,
-            f"daily profit lock {stats['day_r']}R ≥ +{MAX_DAILY_PROFIT_R}R — only SNIPE or stop",
-        )
-    return True, "ok"
+    """Gate new money alerts / journal opens. Fail-closed on errors."""
+    try:
+        if not MONEY_SYSTEM_ARMED:
+            return False, "system disarmed (MONEY_SYSTEM_ARMED=0) — scan only"
+        stats = session_stats(journal)
+        # Include open MTM so daily stop isn't blind to open bags
+        open_r = 0.0
+        for r in stats.get("open_trades") or []:
+            try:
+                entry = _f(r.get("entry_mcap"))
+                last = _f(r.get("peak_mcap") or entry)  # prefer last if available later
+                # journal open_trades may not have last_mcap — use entry as 0R
+                if entry > 0 and r.get("last_mcap"):
+                    last = _f(r.get("last_mcap"))
+                    open_r += (last / entry - 1.0) / 0.18
+            except Exception:
+                pass
+        day_r = _f(stats.get("day_r")) + open_r
+        if stats["open_count"] >= MAX_OPEN_TRADES:
+            return (
+                False,
+                f"max open trades {stats['open_count']}/{MAX_OPEN_TRADES} — manage or close first",
+            )
+        if stats["opened_today"] >= MAX_TRADES_PER_DAY:
+            return (
+                False,
+                f"max trades today {stats['opened_today']}/{MAX_TRADES_PER_DAY} — session cap",
+            )
+        if day_r <= -abs(MAX_DAILY_LOSS_R):
+            return (
+                False,
+                f"daily loss limit hit ({day_r:.1f}R ≤ −{MAX_DAILY_LOSS_R}R) — STOP trading today",
+            )
+        if day_r >= MAX_DAILY_PROFIT_R and kind not in ("snipe",):
+            return (
+                False,
+                f"daily profit lock {day_r:.1f}R ≥ +{MAX_DAILY_PROFIT_R}R — only SNIPE or stop",
+            )
+        return True, "ok"
+    except Exception as exc:
+        return False, f"risk gate error (fail-closed): {exc}"
 
 
 def desk_snapshot(journal: Any) -> dict[str, Any]:

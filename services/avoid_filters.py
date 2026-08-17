@@ -73,6 +73,9 @@ HARD_AVOID_FLAGS: frozenset[str] = frozenset(
         "post_ath_crash",
         "adult_bait",
         "extreme_wash",
+        "wash_buys",  # one-way book — pure expectancy destroyer
+        "zero_sellers",  # painted green / honeypot class
+        "creator_dumped",  # dev out — do not chase
         "ai_pitch_no_socials",
         "dev_out_green_chart",
         "bundled",

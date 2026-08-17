@@ -95,10 +95,13 @@ def compute_volume_score(pair: dict) -> float:
 
     if buys_h1 + sells_h1 > 0:
         ratio = buys_h1 / max(sells_h1, 1)
-        if ratio >= 2:
-            score += 25
-        elif ratio >= 1.3:
-            score += 15
+        # Two-way sweet spot is edge; extreme buy skew is often wash
+        if 1.2 <= ratio <= 2.5:
+            score += 18
+        elif 2.5 < ratio <= 4.0:
+            score += 6  # mild — not full reward
+        elif ratio > 4.0:
+            score -= 12  # wash-like
         elif ratio < 0.7:
             score -= 15
 

@@ -77,15 +77,19 @@ def extract_ath_mcap(token: dict[str, Any]) -> float:
             f = _f(src.get(k))
             if f > 0:
                 cands.append(f)
-    # Live mcap is a floor for ATH (price at high = ATH)
-    live = extract_mcap_usd(token)
-    if live > 0:
-        cands.append(live)
-    # Dex marketCap/fdv as weak high-water when pump ATH missing
-    for k in ("marketCap", "fdv"):
-        f = _f(mkt.get(k)) if isinstance(mkt, dict) else 0.0
+    # Session / card peak only — NEVER floor ATH with live mcap alone.
+    # Live-as-ATH made dump gates fail open (retention always ~100%).
+    for k in ("_peak_mcap", "peak_mcap", "ath_market_cap", "ath_mcap"):
+        f = _f(token.get(k))
         if f > 0:
             cands.append(f)
+    # Dex high-water only if already tracked as peak-ish fields on pair
+    if isinstance(mkt, dict):
+        for k in ("ath_market_cap", "ath_mcap"):
+            f = _f(mkt.get(k))
+            if f > 0:
+                cands.append(f)
+    # If no peak history at all, return 0 (unknown) — caller must not invent 100% retention
     return max(cands) if cands else 0.0
 
 

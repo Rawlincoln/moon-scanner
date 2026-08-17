@@ -104,14 +104,33 @@ async def manage_open_positions() -> dict[str, Any]:
             continue
         checked += 1
         mcap = await fetch_mcap(mint)
-        if mcap is None:
-            await asyncio.sleep(0.1)
-            continue
         plan = _plan_of(row)
         mgmt = _mgmt(row)
         entry = float(plan.get("entry_mcap") or row.get("entry_mcap") or 0)
-        peak = max(float(row.get("peak_mcap") or 0), float(mcap))
         age_min = (time.time() - float(row.get("opened_at") or time.time())) / 60.0
+        max_hold = float(plan.get("max_hold_min") or 45)
+        # No print N cycles or past hold → force close (don't lock desk forever)
+        if mcap is None:
+            misses = int(mgmt.get("mcap_misses") or 0) + 1
+            mgmt["mcap_misses"] = misses
+            journal.update_management(tid, mgmt=mgmt)
+            if misses >= 8 or age_min >= max_hold * 1.5:
+                journal.close_trade(
+                    tid,
+                    exit_mcap=float(row.get("last_mcap") or entry or 0) or None,
+                    notes="stale — no mcap feed (migrated / API down)",
+                    force_outcome="stale_exit",
+                )
+                events.append({"id": tid, "event": "stale_exit", "mint": mint[:8]})
+                await _notify(
+                    f"⚠ <b>STALE EXIT</b> ${_esc(row.get('symbol') or '?')}\n"
+                    f"No mcap for {misses} cycles — closed to free desk slot\n"
+                    f"<code>{_esc(mint)}</code>"
+                )
+            await asyncio.sleep(0.1)
+            continue
+        mgmt["mcap_misses"] = 0
+        peak = max(float(row.get("peak_mcap") or 0), float(mcap))
         tp1 = float(plan.get("tp1_mcap") or 0)
         tp2 = float(plan.get("tp2_mcap") or 0)
         stop_m = float(plan.get("stop_mcap") or 0)
@@ -124,19 +143,20 @@ async def manage_open_positions() -> dict[str, Any]:
         outcome = None
         notes = ""
 
-        # Priority: TP2 full exit → stop → invalid → TP1 scale notice
-        if tp2 > 0 and peak >= tp2 and not mgmt.get("tp2_hit"):
-            event = "tp2"
-            close = True
-            outcome = "tp2"
-            notes = "TP2 hit — close remainder"
-            mgmt["tp2_hit"] = True
-            mgmt["tp1_hit"] = True
-        elif stop_m > 0 and mcap <= stop_m:
+        # Priority: live mcap only (peak is MFE for stats — never book TP on a wick)
+        # stop → TP2 → invalid → TP1 scale
+        if stop_m > 0 and mcap <= stop_m:
             event = "stop"
             close = True
             outcome = "stop" if not mgmt.get("tp1_hit") else "be_stop"
             notes = "Stop / trail hit — exit"
+        elif tp2 > 0 and mcap >= tp2 and not mgmt.get("tp2_hit"):
+            event = "tp2"
+            close = True
+            outcome = "tp2"
+            notes = "TP2 hit (live mcap) — close remainder"
+            mgmt["tp2_hit"] = True
+            mgmt["tp1_hit"] = True
         else:
             invalid, reason = check_invalidation(
                 plan, current_mcap=float(mcap), alert_age_min=age_min
@@ -147,11 +167,12 @@ async def manage_open_positions() -> dict[str, Any]:
                 close = True
                 outcome = "invalid"
                 notes = reason or "setup invalid"
-            elif tp1 > 0 and peak >= tp1 and not mgmt.get("tp1_hit"):
+            elif tp1 > 0 and mcap >= tp1 and not mgmt.get("tp1_hit"):
                 event = "tp1"
                 mgmt["tp1_hit"] = True
                 mgmt["tp1_at"] = time.time()
-                notes = "TP1 hit — sell ~50%, move stop to BE"
+                mgmt["tp1_mcap"] = float(mcap)
+                notes = "TP1 hit (live mcap) — sell ~50%, move stop to BE"
 
         # Persist peak + mgmt always
         journal.update_management(

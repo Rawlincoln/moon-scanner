@@ -452,7 +452,9 @@ async def notify_new_picks(
             _last_cycle["gate"] = gate_why
             return 0
     except Exception as exc:
-        logger.debug("gate check failed: %s", exc)
+        logger.warning("gate check failed (fail-closed): %s", exc)
+        _last_cycle["gate"] = str(exc)[:120]
+        return 0
 
     async with _lock:
         seen = _load_seen()
@@ -547,7 +549,7 @@ async def notify_new_picks(
         for t in ranked:
             if sent >= TELEGRAM_ALERT_MAX_PER_CYCLE:
                 break
-            # Re-check gate each send (open count may fill)
+            # Re-check gate each send (open count may fill) — fail-closed
             try:
                 from services.trade_journal import get_journal
 
@@ -555,8 +557,9 @@ async def notify_new_picks(
                 if not ok_gate:
                     _last_cycle["gate"] = gate_why
                     break
-            except Exception:
-                pass
+            except Exception as exc:
+                _last_cycle["gate"] = f"gate error: {exc}"
+                break
             mint = _mint_of(t)
             key = f"{feed_key}:{mint}"
             plan = enrich_plan_with_size(feed_key, t)
@@ -658,14 +661,21 @@ async def notify_new_picks(
             if result.get("ok"):
                 seen[key] = now
                 sent += 1
-                try:
-                    from services.trade_journal import get_journal
+                # Only auto-journal high-grade capital trades (not WATCH/WARM/COPY noise)
+                lab_j = _label_of(feed_key, t)
+                if lab_j in ("MOON", "SNIPE", "ELITE") and feed_key in (
+                    "moon",
+                    "snipe",
+                    "elite",
+                ):
+                    try:
+                        from services.trade_journal import get_journal
 
-                    get_journal().open_from_alert(
-                        feed_key, t, alert_sent=True, plan=plan
-                    )
-                except Exception as exc:
-                    logger.debug("journal open failed: %s", exc)
+                        get_journal().open_from_alert(
+                            feed_key, t, alert_sent=True, plan=plan
+                        )
+                    except Exception as exc:
+                        logger.debug("journal open failed: %s", exc)
                 await asyncio.sleep(0.35)
             else:
                 _last_cycle["error"] = result.get("error")

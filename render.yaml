@@ -36,15 +36,26 @@ services:
       # FOMO page/watch can stay on; Telegram buy/exit spam off
       - key: FOMO_ALERT_TELEGRAM
         value: "0"
-      # Alpha Tracker: group mentions → pro BUY Telegram alerts
+      # Capital book: MOON+SNIPE only (override in dashboard to add heat/elite)
+      - key: TELEGRAM_ALERT_FEEDS
+        value: moon,snipe
+      - key: TELEGRAM_ALERT_MOON_LABELS
+        value: MOON
+      - key: MONEY_INVALID_DROP_PCT
+        value: "0.20"
+      # Alpha Tracker: group mentions → pro BUY Telegram alerts (survival-aligned)
       - key: ALPHA_TRACKER_ENABLED
         value: "1"
       - key: ALPHA_TRACKER_TELEGRAM
         value: "1"
       - key: ALPHA_TRACKER_WATCH_TELEGRAM
-        value: "1"
+        value: "0"
       - key: ALPHA_TRACKER_MIN_SCORE
-        value: "60"
+        value: "68"
+      - key: ALPHA_TRACKER_MCAP_MIN
+        value: "7000"
+      - key: ALPHA_TRACKER_MCAP_MAX
+        value: "55000"
       # Optional: paste trade.padre.gg Bearer token for live Alpha Tracker WS
       # - key: PADRE_AUTH_TOKEN
       # Set real values in Render dashboard (do not commit secrets):

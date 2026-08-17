@@ -178,12 +178,13 @@ def classify_exit(
     tp2 = _f(plan.get("tp2_mcap"))
     stop_pct = _f(plan.get("stop_pct"), MONEY_STOP_PCT * 100) / 100.0 or MONEY_STOP_PCT
 
-    if peak_mult >= 1.0 + MONEY_TP2_PCT or (tp2 > 0 and peak >= tp2):
-        outcome = "tp2"
-    elif peak_mult >= 1.0 + MONEY_TP1_PCT or (tp1 > 0 and peak >= tp1):
-        outcome = "tp1"
-    elif stop_m > 0 and x <= stop_m * 1.02:
+    # Exit-first outcomes (peak is MFE only — never book a win on a wick then dump)
+    if stop_m > 0 and x <= stop_m * 1.02:
         outcome = "stop"
+    elif tp2 > 0 and x >= tp2 * 0.98:
+        outcome = "tp2"
+    elif tp1 > 0 and x >= tp1 * 0.98:
+        outcome = "tp1"
     elif mult < 0.85:
         outcome = "loss"
     elif mult >= 1.08:
@@ -191,12 +192,13 @@ def classify_exit(
     else:
         outcome = "scratch"
 
-    # R: risk unit = stop distance
+    # R: risk unit = stop distance from EXIT (not peak)
     r = (x - e) / (e * stop_pct) if e * stop_pct > 0 else None
     return {
         "outcome": outcome,
         "multiple": round(mult, 3),
         "peak_multiple": round(peak_mult, 3),
+        "mfe_multiple": round(peak_mult, 3),
         "r_multiple": round(r, 2) if r is not None else None,
     }
 

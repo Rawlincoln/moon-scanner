@@ -21,7 +21,7 @@ def test_score_pro_buy_band():
         ath_ret=0.85,
         sources=["padre_alpha_tracker", "dex_boost"],
     )
-    assert score >= 60
+    assert score >= 68
     assert label == "BUY"
     assert why
 
