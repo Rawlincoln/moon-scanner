@@ -36,6 +36,13 @@ services:
       # FOMO page/watch can stay on; Telegram buy/exit spam off
       - key: FOMO_ALERT_TELEGRAM
         value: "0"
+      # Alpha Tracker: group mentions → pro BUY Telegram alerts
+      - key: ALPHA_TRACKER_ENABLED
+        value: "1"
+      - key: ALPHA_TRACKER_TELEGRAM
+        value: "1"
+      # Optional: paste trade.padre.gg Bearer token for live Alpha Tracker WS
+      # - key: PADRE_AUTH_TOKEN
       # Set real values in Render dashboard (do not commit secrets):
       # HELIUS_API_KEY, ADMIN_API_KEY, CORS_ORIGINS, TELEGRAM_*, TELEGRAM_CRON_SECRET
     # Persistent disk (requires paid plan). Uncomment when on Starter+:

@@ -10,13 +10,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from config import (
+    ALPHA_TRACKER_ENABLED,
     BACKGROUND_SCAN_INTERVAL_SEC,
     BACKGROUND_SCAN_PER_COLUMN,
+    FOMO_ENABLED,
     IS_RENDER,
     RUNNER_RADAR_INTERVAL_SEC,
+    SOLANA_RPC_HTTP,
+    TELEGRAM_MONEY_MODE,
     rpc_is_paid,
     rpc_provider_label,
-    SOLANA_RPC_HTTP,
 )
 from services import http_client as http_pool
 from services.scan_moon import get_moon_outcomes
@@ -24,7 +27,7 @@ from services.snipe_outcomes import get_snipe_outcomes
 from services.telegram_alerts import background_telegram_alert_loop, configured as tg_configured
 from services.position_manager import background_position_manager_loop
 from services.fomo_watch import background_fomo_loop
-from config import TELEGRAM_MONEY_MODE, FOMO_ENABLED
+from services.alpha_tracker import background_alpha_tracker_loop
 from services.scan_trenches import (
     background_runner_alert_loop,
     background_trenches_warm,
@@ -136,14 +139,19 @@ async def lifespan(app: FastAPI):
     tasks.append(asyncio.create_task(background_telegram_alert_loop()))
     tasks.append(asyncio.create_task(background_position_manager_loop()))
     tasks.append(asyncio.create_task(background_fomo_loop()))
+    if ALPHA_TRACKER_ENABLED:
+        tasks.append(asyncio.create_task(background_alpha_tracker_loop()))
     if tg_configured():
         logger.info(
-            "Telegram + position manager enabled — money_mode=%s FOMO=%s",
+            "Telegram + position manager enabled — money_mode=%s FOMO=%s alpha=%s",
             TELEGRAM_MONEY_MODE,
             FOMO_ENABLED,
+            ALPHA_TRACKER_ENABLED,
         )
     elif FOMO_ENABLED:
         logger.info("FOMO wallet watch enabled (Telegram off until bot+chat set)")
+    if ALPHA_TRACKER_ENABLED:
+        logger.info("Alpha Tracker desk enabled (group mentions → BUY alerts)")
     if RUNNER_RADAR_INTERVAL_SEC > 0:
         tasks.append(asyncio.create_task(background_runner_alert_loop()))
 

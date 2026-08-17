@@ -369,6 +369,30 @@ TELEGRAM_FOMO_CHAT_ID = os.getenv("TELEGRAM_FOMO_CHAT_ID", "").strip()
 _fomo_open = (os.getenv("FOMO_OPEN_MANAGE", "1") or "1").strip().lower()
 FOMO_OPEN_MANAGE = _fomo_open not in ("0", "false", "no", "off")
 
+# --- Padre Alpha Tracker (group mentions → pro BUY alerts) ---
+# Real Alpha Tracker feed needs PADRE_AUTH_TOKEN (Bearer from trade.padre.gg session).
+# Without it we use Dex boosts + social profiles as group-heat proxies.
+_alpha_en = (os.getenv("ALPHA_TRACKER_ENABLED", "1") or "1").strip().lower()
+ALPHA_TRACKER_ENABLED = _alpha_en not in ("0", "false", "no", "off")
+_alpha_tg = (os.getenv("ALPHA_TRACKER_TELEGRAM", "1") or "1").strip().lower()
+ALPHA_TRACKER_TELEGRAM = _alpha_tg not in ("0", "false", "no", "off")
+ALPHA_TRACKER_POLL_SEC = float(os.getenv("ALPHA_TRACKER_POLL_SEC", "55") or "55")
+ALPHA_TRACKER_MIN_GROUPS = int(os.getenv("ALPHA_TRACKER_MIN_GROUPS", "1") or "1")
+ALPHA_TRACKER_MIN_SCORE = int(os.getenv("ALPHA_TRACKER_MIN_SCORE", "68") or "68")
+ALPHA_TRACKER_MCAP_MIN = float(os.getenv("ALPHA_TRACKER_MCAP_MIN", "4500") or "4500")
+ALPHA_TRACKER_MCAP_MAX = float(os.getenv("ALPHA_TRACKER_MCAP_MAX", "85000") or "85000")
+ALPHA_TRACKER_MAX_AGE_MIN = float(
+    os.getenv("ALPHA_TRACKER_MAX_AGE_MIN", "180") or "180"
+)
+ALPHA_TRACKER_MAX_PER_CYCLE = int(
+    os.getenv("ALPHA_TRACKER_MAX_PER_CYCLE", "3") or "3"
+)
+# Firebase/session JWT from trade.padre.gg (Application → Local Storage / network Bearer)
+PADRE_AUTH_TOKEN = (
+    os.getenv("PADRE_AUTH_TOKEN") or os.getenv("PADRE_SESSION_TOKEN") or ""
+).strip()
+TELEGRAM_ALPHA_CHAT_ID = os.getenv("TELEGRAM_ALPHA_CHAT_ID", "").strip()
+
 # --- Money plan (entry / stop / TP / invalidation) ---
 MONEY_STOP_PCT = float(os.getenv("MONEY_STOP_PCT", "0.18") or "0.18")  # −18%
 MONEY_TP1_PCT = float(os.getenv("MONEY_TP1_PCT", "0.50") or "0.50")  # +50%

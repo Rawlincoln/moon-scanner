@@ -54,6 +54,7 @@ _EXPENSIVE_EXEMPT = (
     "/api/fomo/wallets",
     "/api/fomo/wallets/export",
     "/api/fomo/wallets/import",
+    "/api/alpha",
     "/api/moon/outcomes",
     "/api/moon/outcomes/export",
     "/api/moon/outcomes/import",
