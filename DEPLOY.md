@@ -38,6 +38,11 @@ overwrite your list. GHA syncs `/api/fomo/wallets/export` ↔ cache every 5 min 
 `/api/fomo/wallets/import` after redeploy. The FOMO page also keeps a browser `localStorage`
 backup and auto-restores when you open `/fomo` after a wipe.
 
+**Padre Alpha Tracker:** background desk at `/api/alpha` — tokens mentioned in groups
+(live Padre WS if `PADRE_AUTH_TOKEN` set; else Dex boosts + pump community heat) → pro gates
+(mcap band, dump skip, social honesty, flow) → Telegram `ALPHA BUY`. Toggle with
+`ALPHA_TRACKER_ENABLED` / `ALPHA_TRACKER_TELEGRAM`.
+
 **Paid / Starter:** attach a Render disk, set `DATA_DIR=/var/data` (see `render.yaml` comments).
 
 **Moons mode:** `MOON_MODE=balanced` (default) or `strict`.
