@@ -63,6 +63,8 @@ _cache: dict[str, Any] = {"buys": [], "ts": 0.0}
 
 
 def status() -> dict[str, Any]:
+    buys = list(_cache.get("buys") or [])
+    watch = list(_cache.get("watch") or [])
     return {
         "ok": True,
         "enabled": ALPHA_TRACKER_ENABLED,
@@ -74,7 +76,10 @@ def status() -> dict[str, Any]:
         "padre_token_set": bool(PADRE_AUTH_TOKEN),
         "padre_ws": padre_ws_status(),
         "last": dict(_last),
-        "cached_buys": len(_cache.get("buys") or []),
+        "cached_buys": len(buys),
+        "buys": buys[:20],
+        "watch": watch[:20],
+        "cache_ts": float(_cache.get("ts") or 0),
         "hint": (
             "Set PADRE_AUTH_TOKEN from trade.padre.gg session for live Alpha Tracker. "
             "Without it, Dex boosts + TG socials act as group-heat proxy."
@@ -800,6 +805,7 @@ async def scan_alpha_tracker(
         }
     )
     _cache["buys"] = buys[:20]
+    _cache["watch"] = watch[:20]
     _cache["ts"] = time.time()
 
     return {
@@ -813,6 +819,10 @@ async def scan_alpha_tracker(
         "sent": sent,
         "errors": errors[:5],
         "padre_ws": padre_ws_status(),
+        "telegram": ALPHA_TRACKER_TELEGRAM,
+        "poll_sec": ALPHA_TRACKER_POLL_SEC,
+        "min_score": ALPHA_TRACKER_MIN_SCORE,
+        "padre_token_set": bool(PADRE_AUTH_TOKEN),
     }
 
 

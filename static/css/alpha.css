@@ -1,0 +1,133 @@
+/* Alpha Buy — violet / signal pulse */
+
+.page-alpha .bg::before {
+  background:
+    radial-gradient(ellipse 55% 32% at 50% 12%, rgba(167, 139, 250, 0.32), transparent 55%),
+    radial-gradient(ellipse 40% 25% at 85% 55%, rgba(244, 114, 182, 0.18), transparent 50%),
+    radial-gradient(ellipse 35% 22% at 12% 70%, rgba(34, 211, 238, 0.12), transparent 50%);
+}
+
+.alpha-mark {
+  color: #c4b5fd !important;
+  filter: drop-shadow(0 0 20px rgba(167, 139, 250, 0.7)) !important;
+}
+
+.page-alpha .nav a.active {
+  background: linear-gradient(180deg, #ddd6fe 0%, #a78bfa 42%, #5b21b6 100%) !important;
+  color: #1a0a2e !important;
+  border-color: rgba(221, 214, 254, 0.55) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 0 28px rgba(167, 139, 250, 0.45) !important;
+}
+
+.page-alpha .plan-banner,
+.page-alpha .section-title,
+.page-alpha .list,
+.page-alpha .top,
+.page-alpha .bar,
+.page-alpha .status,
+.page-alpha .foot,
+.page-alpha .nav {
+  position: relative;
+  z-index: 1;
+}
+
+.alpha-banner {
+  max-width: 1100px;
+  margin: 0.5rem auto 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  background: linear-gradient(100deg, rgba(167, 139, 250, 0.18), rgba(244, 114, 182, 0.08));
+  color: #e9d5ff;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+.alpha-banner strong { color: #ddd6fe; }
+.alpha-banner code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.82em;
+  color: #f5d0fe;
+}
+.alpha-banner em { color: #c4b5fd; font-style: normal; font-weight: 700; }
+
+.section-title {
+  max-width: 1100px;
+  margin: 0.85rem auto 0.45rem;
+  padding: 0 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #c4b5fd;
+}
+.section-title .muted {
+  font-weight: 400;
+  color: #94a3b8;
+  font-size: 0.85em;
+}
+
+.card.buy {
+  border-color: rgba(52, 211, 153, 0.55);
+  box-shadow: var(--shadow-out), 0 0 28px rgba(52, 211, 153, 0.14);
+}
+.card.watch {
+  border-color: rgba(167, 139, 250, 0.4);
+}
+
+.badge.BUY {
+  background: linear-gradient(180deg, #6ee7b7, #059669);
+  color: #022c22;
+}
+.badge.WATCH {
+  background: linear-gradient(180deg, #ddd6fe, #7c3aed);
+  color: #1e0a3a;
+}
+
+.alpha-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  margin-top: 0.25rem;
+}
+.alpha-meta .pos { color: #6ee7b7; }
+.alpha-meta .neg { color: #fca5a5; }
+.alpha-why {
+  margin: 0.45rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+.alpha-why li { margin: 0.15rem 0; }
+.group-chip {
+  display: inline-block;
+  font-size: 0.68rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+  background: rgba(167, 139, 250, 0.2);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  color: #e9d5ff;
+  margin-right: 0.25rem;
+}
+.empty-alpha {
+  max-width: 960px;
+  margin: 0.5rem auto 1rem;
+  padding: 1.25rem 1rem;
+  border: 1px dashed rgba(167, 139, 250, 0.3);
+  border-radius: 14px;
+  color: #94a3b8;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.page-alpha .btn.sm {
+  display: inline-block;
+  padding: 0.28rem 0.55rem !important;
+  font-size: 0.72rem !important;
+  border-radius: 8px !important;
+  font-weight: 600;
+  text-decoration: none;
+  line-height: 1.2;
+  cursor: pointer;
+}

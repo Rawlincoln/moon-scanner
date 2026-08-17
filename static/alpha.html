@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Alpha Buy — Group mentions · pro analysis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/moon.css?v=aurora1" />
+  <link rel="stylesheet" href="/static/css/snipes.css?v=aurora1" />
+  <link rel="stylesheet" href="/static/css/alpha.css?v=1" />
+</head>
+<body class="page-alpha">
+  <div class="bg" aria-hidden="true"></div>
+
+  <nav class="nav">
+    <a href="/">◈ Moons</a>
+    <a href="/snipes">⚡ Snipes</a>
+    <a href="/heat">🔥 Heat</a>
+    <a href="/elite">👑 Elite</a>
+    <a href="/fomo">🚀 FOMO</a>
+    <a href="/alpha" class="active">📣 Alpha</a>
+    <a href="/graduated">◆ Grad</a>
+    <a href="/money">💰 Money</a>
+    <a href="/lab">🔬 Lab</a>
+  </nav>
+
+  <header class="top">
+    <div class="brand">
+      <span class="mark alpha-mark">📣</span>
+      <div>
+        <h1>Alpha Buy</h1>
+        <p>Padre Alpha Tracker / group heat · <strong>pro gates</strong> · Telegram BUY</p>
+      </div>
+    </div>
+    <div class="pills">
+      <span class="pill" id="statOn">—</span>
+      <span class="pill" id="statBuys">0 BUY</span>
+      <span class="pill" id="statWatch">0 watch</span>
+      <span class="pill muted" id="statSource">—</span>
+    </div>
+  </header>
+
+  <section class="bar">
+    <button type="button" class="btn primary" id="scanBtn">Scan alpha</button>
+    <label class="chk">
+      <input type="checkbox" id="autoRefresh" checked /> Auto 55s
+    </label>
+    <label class="chk" title="Also push Telegram on this scan">
+      <input type="checkbox" id="tgOnScan" /> 📨 Telegram on scan
+    </label>
+    <span class="pill muted" id="pollInfo">poll —</span>
+  </section>
+
+  <div class="plan-banner alpha-banner">
+    <strong>Alpha desk:</strong> tokens called in groups (Padre Alpha Tracker when
+    <code>PADRE_AUTH_TOKEN</code> is set; else Dex boosts + pump community heat).
+    Pro filters skip dumps, spoof socials, honeypots. Only <em>BUY</em> scores alert.
+  </div>
+
+  <p class="status" id="status">Loading Alpha desk…</p>
+
+  <h2 class="section-title">BUY signals <span class="muted" id="buyCount"></span></h2>
+  <main id="buyList" class="list"></main>
+
+  <h2 class="section-title">Watch list <span class="muted" id="watchCount"></span></h2>
+  <main id="watchList" class="list"></main>
+
+  <footer class="foot">
+    Not financial advice. Group heat ≠ free money.
+    API: <a href="/api/alpha" style="color:inherit">/api/alpha</a> ·
+    <a href="/api/alpha/scan" style="color:inherit">POST /api/alpha/scan</a>
+  </footer>
+
+  <script src="/static/js/alpha.js?v=1"></script>
+</body>
+</html>

@@ -27,17 +27,23 @@ async def alpha_page():
 
 
 @router.get("/api/alpha")
-async def alpha_status_api():
+async def alpha_status_api(fresh: bool = False, send: bool = False):
+    """Status + last BUY/WATCH cards. ``fresh=1`` runs a scan first."""
+    if fresh:
+        return await scan_alpha_tracker(send_alerts=send)
     return alpha_status()
 
 
 @router.post("/api/alpha/scan")
 async def alpha_scan(
-    send: bool = True,
+    send: bool = False,
     x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
 ):
-    """Run one Alpha Tracker cycle (discover → analyze → optional Telegram BUY)."""
-    # Open for desk use; force path still accepts admin when locked down later
+    """Run one Alpha Tracker cycle (discover → analyze → optional Telegram BUY).
+
+    Default ``send=false`` so the UI can refresh without spamming Telegram;
+    background loop still sends when ALPHA_TRACKER_TELEGRAM=1.
+    """
     _ = x_admin_key
     return await scan_alpha_tracker(send_alerts=send)
 
