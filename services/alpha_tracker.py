@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from config import (
+    ALPHA_TRACKER_DEDUPE_SEC,
     ALPHA_TRACKER_ENABLED,
     ALPHA_TRACKER_MAX_AGE_MIN,
     ALPHA_TRACKER_MAX_PER_CYCLE,
@@ -25,6 +26,7 @@ from config import (
     ALPHA_TRACKER_MIN_SCORE,
     ALPHA_TRACKER_POLL_SEC,
     ALPHA_TRACKER_TELEGRAM,
+    ALPHA_TRACKER_WATCH_TELEGRAM,
     DATA_DIR,
     PADRE_AUTH_TOKEN,
     PADRE_TRADE_URL,
@@ -69,6 +71,7 @@ def status() -> dict[str, Any]:
         "ok": True,
         "enabled": ALPHA_TRACKER_ENABLED,
         "telegram": ALPHA_TRACKER_TELEGRAM,
+        "watch_telegram": ALPHA_TRACKER_WATCH_TELEGRAM,
         "poll_sec": ALPHA_TRACKER_POLL_SEC,
         "min_groups": ALPHA_TRACKER_MIN_GROUPS,
         "min_score": ALPHA_TRACKER_MIN_SCORE,
@@ -80,9 +83,10 @@ def status() -> dict[str, Any]:
         "buys": buys[:20],
         "watch": watch[:20],
         "cache_ts": float(_cache.get("ts") or 0),
+        "sent": _last.get("sent"),
         "hint": (
-            "Set PADRE_AUTH_TOKEN from trade.padre.gg session for live Alpha Tracker. "
-            "Without it, Dex boosts + TG socials act as group-heat proxy."
+            "Telegram ALPHA BUY/WATCH when ALPHA_TRACKER_TELEGRAM=1. "
+            "Set PADRE_AUTH_TOKEN for live Padre Alpha Tracker WS."
         ),
     }
 
@@ -412,15 +416,18 @@ def _score_pro(
         score += 12
         why.append("Padre Alpha Tracker mention")
 
-    # Mcap band
+    # Mcap band (allow slightly extended band for strong heat)
     if ALPHA_TRACKER_MCAP_MIN <= mcap <= ALPHA_TRACKER_MCAP_MAX:
         score += 12
         why.append(f"mcap {_fmt_usd(mcap)} in entry band")
     elif mcap < ALPHA_TRACKER_MCAP_MIN:
-        score -= 10
+        score -= 8
         why.append("mcap too low")
+    elif mcap <= ALPHA_TRACKER_MCAP_MAX * 1.6:
+        score -= 8
+        why.append("mcap elevated")
     else:
-        score -= 18
+        score -= 16
         why.append("mcap late")
 
     # Liquidity
@@ -487,17 +494,22 @@ def _score_pro(
         score -= min(15, 4 * len(soft))
 
     score = max(0, min(100, score))
-    # BUY only in entry mcap band (or unknown mcap with strong group heat)
-    mcap_ok = mcap <= 0 or mcap <= ALPHA_TRACKER_MCAP_MAX
-    mcap_floor_ok = mcap <= 0 or mcap >= ALPHA_TRACKER_MCAP_MIN * 0.7
+    # BUY in primary band; strong scores may BUY up to 1.6× max mcap
+    mcap_buy_ok = mcap <= 0 or mcap <= ALPHA_TRACKER_MCAP_MAX
+    mcap_stretch = (
+        mcap > ALPHA_TRACKER_MCAP_MAX and mcap <= ALPHA_TRACKER_MCAP_MAX * 1.6
+    )
+    mcap_floor_ok = mcap <= 0 or mcap >= ALPHA_TRACKER_MCAP_MIN * 0.65
     if (
         score >= ALPHA_TRACKER_MIN_SCORE
-        and mcap_ok
         and mcap_floor_ok
-        and not (mcap > 0 and mcap < ALPHA_TRACKER_MCAP_MIN * 0.5)
+        and (
+            mcap_buy_ok
+            or (mcap_stretch and score >= ALPHA_TRACKER_MIN_SCORE + 8)
+        )
     ):
         label = "BUY"
-    elif score >= max(52, ALPHA_TRACKER_MIN_SCORE - 14):
+    elif score >= max(50, ALPHA_TRACKER_MIN_SCORE - 10):
         label = "WATCH"
     else:
         label = "SKIP"
@@ -663,6 +675,7 @@ def format_alpha_buy_telegram(card: dict[str, Any]) -> str:
     mint = card.get("tokenAddress") or ""
     sym = card.get("symbol") or "?"
     name = card.get("name") or ""
+    label = str(card.get("alpha_label") or a.get("label") or "BUY").upper()
     score = a.get("score") or card.get("alpha_score")
     groups = a.get("groups") or []
     gcount = a.get("group_count") or 0
@@ -671,7 +684,10 @@ def format_alpha_buy_telegram(card: dict[str, Any]) -> str:
     padre = card.get("padre_url") or f"{PADRE_TRADE_URL}/trade/solana/{mint}"
     pump = f"https://pump.fun/coin/{mint}" if mint else ""
 
-    title = f"📣 <b>ALPHA BUY</b> ${_esc(sym)}"
+    if label == "BUY":
+        title = f"📣 <b>ALPHA BUY</b> ${_esc(sym)}"
+    else:
+        title = f"👁 <b>ALPHA WATCH</b> ${_esc(sym)}"
     if name:
         title += f" <i>({_esc(name)[:36]})</i>"
 
@@ -687,11 +703,25 @@ def format_alpha_buy_telegram(card: dict[str, Any]) -> str:
     age = card.get("age_minutes")
     age_s = f"{float(age):.0f}m" if age is not None else "—"
 
-    # Simple plan from mcap
     mcap = float(card.get("mcap_usd") or 0)
     stop = mcap * 0.82
     tp1 = mcap * 1.5
     tp2 = mcap * 2.0
+
+    plan = ""
+    if label == "BUY":
+        plan = (
+            f"\n\n<b>PLAN</b> (mcap ref)"
+            f"\nEntry ≈ {_fmt_usd(mcap)}"
+            f"\n🛑 STOP −18% → {_fmt_usd(stop)}"
+            f"\n🎯 TP1 +50% → {_fmt_usd(tp1)}"
+            f"\n🚀 TP2 +100% → {_fmt_usd(tp2)}"
+        )
+    else:
+        plan = (
+            f"\n\n<i>WATCH only — size small or wait for pullback into band</i>"
+            f"\nRef mcap {_fmt_usd(mcap)} · stop zone {_fmt_usd(stop)}"
+        )
 
     return (
         f"{title}\n"
@@ -699,22 +729,23 @@ def format_alpha_buy_telegram(card: dict[str, Any]) -> str:
         f"{group_line}"
         f"\n📡 Source: {_esc(src)}"
         f"{why_line}"
-        f"\n\n<b>PLAN</b> (mcap ref)"
-        f"\nEntry ≈ {_fmt_usd(mcap)}"
-        f"\n🛑 STOP −18% → {_fmt_usd(stop)}"
-        f"\n🎯 TP1 +50% → {_fmt_usd(tp1)}"
-        f"\n🚀 TP2 +100% → {_fmt_usd(tp2)}"
+        f"{plan}"
         f"\n<a href=\"{padre}\">Padre</a> · <a href=\"{pump}\">Pump</a>"
         f"\n<code>{_esc(mint)}</code>"
     )
 
 
 async def send_alpha_telegram(text: str) -> dict[str, Any]:
-    if not TELEGRAM_BOT_TOKEN:
-        return {"ok": False, "error": "no bot token"}
+    """Send via main telegram helper when available (same bot + chat)."""
     cid = (TELEGRAM_ALPHA_CHAT_ID or TELEGRAM_CHAT_ID or "").strip()
-    if not cid:
-        return {"ok": False, "error": "no chat id"}
+    if not TELEGRAM_BOT_TOKEN or not cid:
+        return {"ok": False, "error": "TELEGRAM_BOT_TOKEN / CHAT_ID not set"}
+    try:
+        from services.telegram_alerts import send_telegram
+
+        return await send_telegram(text, chat_id=cid)
+    except Exception:
+        pass
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
         client = get_client()
@@ -775,21 +806,49 @@ async def scan_alpha_tracker(
 
     do_send = ALPHA_TRACKER_TELEGRAM if send_alerts is None else send_alerts
     sent = 0
-    if do_send and buys:
+    if do_send:
+        to_alert: list[dict[str, Any]] = list(buys)
+        if ALPHA_TRACKER_WATCH_TELEGRAM:
+            # Strong watches only (score ≥ min)
+            for w in watch:
+                sc = int((w.get("alpha") or {}).get("score") or w.get("alpha_score") or 0)
+                if sc >= ALPHA_TRACKER_MIN_SCORE:
+                    to_alert.append(w)
+        # Prefer BUY first, then highest score
+        to_alert.sort(
+            key=lambda c: (
+                0 if (c.get("alpha_label") or "") == "BUY" else 1,
+                -int((c.get("alpha") or {}).get("score") or c.get("alpha_score") or 0),
+            )
+        )
         seen = _load_seen()
         now = time.time()
-        for card in buys[: ALPHA_TRACKER_MAX_PER_CYCLE]:
+        dedupe = max(600.0, float(ALPHA_TRACKER_DEDUPE_SEC))
+        for card in to_alert[: ALPHA_TRACKER_MAX_PER_CYCLE]:
             mint = card.get("tokenAddress") or ""
-            key = f"alpha:{mint}"
-            if key in seen and now - seen[key] < 90 * 60:
+            lab = str(card.get("alpha_label") or "BUY")
+            key = f"alpha:{lab}:{mint}"
+            if key in seen and now - seen[key] < dedupe:
                 continue
+            # Also skip if same mint alerted as BUY recently
+            if lab != "BUY" and f"alpha:BUY:{mint}" in seen:
+                if now - seen[f"alpha:BUY:{mint}"] < dedupe:
+                    continue
             msg = format_alpha_buy_telegram(card)
             res = await send_alpha_telegram(msg)
             if res.get("ok"):
                 sent += 1
                 seen[key] = now
+                logger.info(
+                    "alpha telegram %s $%s score=%s",
+                    lab,
+                    card.get("symbol"),
+                    (card.get("alpha") or {}).get("score"),
+                )
             else:
-                errors.append(str(res.get("error") or "tg fail")[:80])
+                err = str(res.get("error") or "tg fail")[:80]
+                errors.append(err)
+                logger.warning("alpha telegram fail: %s", err)
         _save_seen(seen)
 
     _last.update(

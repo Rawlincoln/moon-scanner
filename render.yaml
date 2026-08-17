@@ -41,6 +41,10 @@ services:
         value: "1"
       - key: ALPHA_TRACKER_TELEGRAM
         value: "1"
+      - key: ALPHA_TRACKER_WATCH_TELEGRAM
+        value: "1"
+      - key: ALPHA_TRACKER_MIN_SCORE
+        value: "60"
       # Optional: paste trade.padre.gg Bearer token for live Alpha Tracker WS
       # - key: PADRE_AUTH_TOKEN
       # Set real values in Render dashboard (do not commit secrets):

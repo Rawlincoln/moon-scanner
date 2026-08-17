@@ -376,16 +376,22 @@ _alpha_en = (os.getenv("ALPHA_TRACKER_ENABLED", "1") or "1").strip().lower()
 ALPHA_TRACKER_ENABLED = _alpha_en not in ("0", "false", "no", "off")
 _alpha_tg = (os.getenv("ALPHA_TRACKER_TELEGRAM", "1") or "1").strip().lower()
 ALPHA_TRACKER_TELEGRAM = _alpha_tg not in ("0", "false", "no", "off")
+# Also push strong WATCH cards (near-miss / slightly late) — set 0 for BUY-only
+_alpha_watch_tg = (os.getenv("ALPHA_TRACKER_WATCH_TELEGRAM", "1") or "1").strip().lower()
+ALPHA_TRACKER_WATCH_TELEGRAM = _alpha_watch_tg not in ("0", "false", "no", "off")
 ALPHA_TRACKER_POLL_SEC = float(os.getenv("ALPHA_TRACKER_POLL_SEC", "55") or "55")
 ALPHA_TRACKER_MIN_GROUPS = int(os.getenv("ALPHA_TRACKER_MIN_GROUPS", "1") or "1")
-ALPHA_TRACKER_MIN_SCORE = int(os.getenv("ALPHA_TRACKER_MIN_SCORE", "68") or "68")
-ALPHA_TRACKER_MCAP_MIN = float(os.getenv("ALPHA_TRACKER_MCAP_MIN", "4500") or "4500")
-ALPHA_TRACKER_MCAP_MAX = float(os.getenv("ALPHA_TRACKER_MCAP_MAX", "85000") or "85000")
+ALPHA_TRACKER_MIN_SCORE = int(os.getenv("ALPHA_TRACKER_MIN_SCORE", "60") or "60")
+ALPHA_TRACKER_MCAP_MIN = float(os.getenv("ALPHA_TRACKER_MCAP_MIN", "4000") or "4000")
+ALPHA_TRACKER_MCAP_MAX = float(os.getenv("ALPHA_TRACKER_MCAP_MAX", "120000") or "120000")
 ALPHA_TRACKER_MAX_AGE_MIN = float(
     os.getenv("ALPHA_TRACKER_MAX_AGE_MIN", "180") or "180"
 )
 ALPHA_TRACKER_MAX_PER_CYCLE = int(
-    os.getenv("ALPHA_TRACKER_MAX_PER_CYCLE", "3") or "3"
+    os.getenv("ALPHA_TRACKER_MAX_PER_CYCLE", "4") or "4"
+)
+ALPHA_TRACKER_DEDUPE_SEC = float(
+    os.getenv("ALPHA_TRACKER_DEDUPE_SEC", str(45 * 60)) or str(45 * 60)
 )
 # Firebase/session JWT from trade.padre.gg (Application → Local Storage / network Bearer)
 PADRE_AUTH_TOKEN = (

@@ -47,16 +47,18 @@
     <label class="chk">
       <input type="checkbox" id="autoRefresh" checked /> Auto 55s
     </label>
-    <label class="chk" title="Also push Telegram on this scan">
-      <input type="checkbox" id="tgOnScan" /> 📨 Telegram on scan
+    <label class="chk" title="Send ALPHA BUY/WATCH to Telegram on this scan">
+      <input type="checkbox" id="tgOnScan" checked /> 📨 Telegram alerts
     </label>
     <span class="pill muted" id="pollInfo">poll —</span>
+    <span class="pill muted" id="tgStatus">TG —</span>
   </section>
 
   <div class="plan-banner alpha-banner">
     <strong>Alpha desk:</strong> tokens called in groups (Padre Alpha Tracker when
     <code>PADRE_AUTH_TOKEN</code> is set; else Dex boosts + pump community heat).
-    Pro filters skip dumps, spoof socials, honeypots. Only <em>BUY</em> scores alert.
+    Pro filters skip dumps, spoof socials, honeypots.
+    Telegram: <em>ALPHA BUY</em> + strong <em>WATCH</em> when alerts are on.
   </div>
 
   <p class="status" id="status">Loading Alpha desk…</p>
@@ -73,6 +75,6 @@
     <a href="/api/alpha/scan" style="color:inherit">POST /api/alpha/scan</a>
   </footer>
 
-  <script src="/static/js/alpha.js?v=1"></script>
+  <script src="/static/js/alpha.js?v=2"></script>
 </body>
 </html>

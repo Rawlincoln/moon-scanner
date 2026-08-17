@@ -21,7 +21,7 @@ def test_score_pro_buy_band():
         ath_ret=0.85,
         sources=["padre_alpha_tracker", "dex_boost"],
     )
-    assert score >= 68
+    assert score >= 60
     assert label == "BUY"
     assert why
 
@@ -54,8 +54,10 @@ def test_format_alpha_buy_telegram():
             "name": "Test Coin",
             "mcap_usd": 15000,
             "age_minutes": 12,
+            "alpha_label": "BUY",
             "alpha": {
                 "score": 78,
+                "label": "BUY",
                 "group_count": 2,
                 "groups": ["dex_boost", "alpha"],
                 "why": ["2 group heat", "mcap in band"],
@@ -67,3 +69,14 @@ def test_format_alpha_buy_telegram():
     assert "ALPHA BUY" in msg
     assert "TEST" in msg
     assert "PLAN" in msg
+
+    watch = format_alpha_buy_telegram(
+        {
+            "tokenAddress": "2fg5QD1eD7rzNNCsvnhmXFm5hqNgwTTG8p7kQ6f3rx6f",
+            "symbol": "WATCHME",
+            "mcap_usd": 90000,
+            "alpha_label": "WATCH",
+            "alpha": {"score": 62, "label": "WATCH", "why": ["elevated"], "sources": []},
+        }
+    )
+    assert "ALPHA WATCH" in watch

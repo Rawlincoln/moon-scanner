@@ -154,7 +154,18 @@ function render(data) {
   if (pi) {
     pi.textContent = `poll ${data.poll_sec ?? last.poll_sec ?? "—"}s · score≥${
       data.min_score ?? "—"
-    } · TG ${data.telegram ? "on" : "off"}`;
+    }`;
+  }
+  const tg = $("#tgStatus");
+  if (tg) {
+    const on = data.telegram !== false;
+    const sent = data.sent ?? last.sent;
+    tg.textContent =
+      sent != null && Number(sent) > 0
+        ? `TG on · sent ${sent}`
+        : on
+          ? "TG on"
+          : "TG off";
   }
 
   const errs = data.errors || last.errors || [];
@@ -163,11 +174,17 @@ function render(data) {
     : `Live · ${buys.length} BUY · ${watch.length} watch · analyzed ${
         data.analyzed ?? last.analyzed ?? "—"
       }`;
+  if (data.telegram !== false) {
+    msg += " · Telegram ALPHA alerts ON";
+  } else {
+    msg += " · Telegram off (ALPHA_TRACKER_TELEGRAM=0)";
+  }
   if (!data.padre_token_set) {
     msg += " · public group-heat proxy (set PADRE_AUTH_TOKEN for live Alpha Tracker)";
   } else {
     msg += " · Padre token set";
   }
+  if (data.sent != null) msg += ` · last sent ${data.sent}`;
   if (errs.length) msg += ` · ${String(errs[0]).slice(0, 60)}`;
   setStatus(msg, data.enabled === false ? "" : "ok");
 }
@@ -228,7 +245,8 @@ function bind() {
   const arm = () => {
     if (t) clearInterval(t);
     if ($("#autoRefresh")?.checked) {
-      t = setInterval(() => load({ scan: true, sendTg: false }), 55000);
+      // Auto refresh UI only; background server loop owns Telegram spam control
+      t = setInterval(() => load({ scan: false }), 55000);
     }
   };
   $("#autoRefresh")?.addEventListener("change", arm);
