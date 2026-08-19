@@ -416,6 +416,13 @@ async def scan_moon_tokens(
     ):
         cached = dict(_moon_cache["data"])
         cached["cached"] = True
+        try:
+            from services.moon_filtered import list_filtered
+
+            cached["near_misses"] = list_filtered(limit=40)
+            cached["filtered_ttl_hours"] = 6
+        except Exception:
+            pass
         return cached
 
     async with _moon_lock:
@@ -640,13 +647,21 @@ async def scan_moon_tokens(
                 t["moon_label"] = t["moon"]["label"]
                 t["confidence"] = t["moon"]["confidence"]
 
+        # Persist filtered tokens 6h for Moons UI (Padre links)
+        try:
+            from services.moon_filtered import remember_filtered
+
+            near_misses = remember_filtered(near_misses, limit=24)
+        except Exception as exc:
+            logger.debug("moon filtered persist: %s", exc)
+
         try:
             outs = get_moon_outcomes()
             rec_n = outs.record_shown(display)
             if rec_n:
                 logger.info("Moon outcomes recorded %s new recs", rec_n)
             # Sample near-misses for false-negative / precision study
-            nm_n = outs.record_near_misses(near_misses, limit=6)
+            nm_n = outs.record_near_misses(near_misses, limit=12)
             if nm_n:
                 logger.info("Moon near-miss sample recorded %s", nm_n)
         except Exception as exc:
@@ -711,7 +726,8 @@ async def scan_moon_tokens(
             "scanned_at": time.time(),
             "cached": False,
             "tokens": display,
-            "near_misses": near_misses,
+            "near_misses": near_misses[:40],
+            "filtered_ttl_hours": 6,
             "empty": empty_info,
             "counts": {
                 "shown": len(display),

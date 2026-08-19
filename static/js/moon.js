@@ -230,21 +230,43 @@ function cardHtml(t) {
   `;
 }
 
-function nearMissHtml(misses = []) {
+function nearMissHtml(misses = [], ttlHours = 6) {
   if (!misses.length) return "";
   const rows = misses
-    .slice(0, 6)
+    .slice(0, 40)
     .map((m) => {
+      const mint = m.tokenAddress || m.mint || "";
       const mcap = m.mcap_usd != null ? fmtUsd(m.mcap_usd) : "—";
       const age =
         m.age_minutes != null ? `${Number(m.age_minutes).toFixed(0)}m` : "—";
-      return `<li><strong>${escapeHtml(m.symbol || "?")}</strong>
-        <span class="muted">${mcap} · ${age}</span>
-        — ${escapeHtml(m.reject || m.reject_key || "filtered")}</li>`;
+      const padre =
+        m.padre_url ||
+        (mint ? `https://trade.padre.gg/trade/solana/${mint}` : "");
+      const pump =
+        m.pump_url || (mint ? `https://pump.fun/coin/${mint}` : "");
+      const short = mint
+        ? `${mint.slice(0, 4)}…${mint.slice(-4)}`
+        : "";
+      const links = mint
+        ? `<span class="nm-links">
+            <a class="btn tiny" href="${escapeHtml(padre)}" target="_blank" rel="noopener">Padre</a>
+            <a class="btn tiny" href="${escapeHtml(pump)}" target="_blank" rel="noopener">Pump</a>
+            <button type="button" class="btn tiny copy-mint" data-mint="${escapeHtml(mint)}">Copy</button>
+          </span>`
+        : "";
+      return `<li>
+        <div class="nm-top">
+          <strong>${escapeHtml(m.symbol || "?")}</strong>
+          <span class="muted">${mcap} · ${age}${short ? ` · ${escapeHtml(short)}` : ""}</span>
+          ${links}
+        </div>
+        <div class="nm-why">${escapeHtml(m.reject || m.reject_key || "filtered")}</div>
+      </li>`;
     })
     .join("");
-  return `<div class="near-miss">
+  return `<div class="near-miss" id="filteredPanel">
     <strong>Checked but filtered (not shown)</strong>
+    <span class="muted"> · kept ${ttlHours}h · Padre Terminal links</span>
     <ul>${rows}</ul>
   </div>`;
 }
@@ -262,9 +284,27 @@ function rejectBreakdownHtml(rb = {}, gates = {}) {
   return `<p class="muted">Why empty: ${parts.join(" · ") || "filters"}${g}</p>`;
 }
 
+function bindCopyButtons(root) {
+  root?.querySelectorAll(".copy-mint").forEach((btn) => {
+    btn.onclick = async () => {
+      const m = btn.dataset.mint;
+      if (!m) return;
+      try {
+        await navigator.clipboard.writeText(m);
+        btn.textContent = "Copied";
+        setTimeout(() => (btn.textContent = "Copy"), 1200);
+      } catch {
+        btn.textContent = "Fail";
+      }
+    };
+  });
+}
+
 function render(tokens, counts = {}, nearMisses = [], extra = {}) {
   const list = $("#list");
   if (!list) return;
+  const ttl = extra.filtered_ttl_hours ?? 6;
+  const filteredBlock = nearMissHtml(nearMisses, ttl);
   if (!tokens.length) {
     const band = counts.band_hits != null ? counts.band_hits : "—";
     const empty = extra.empty || {};
@@ -278,24 +318,14 @@ function render(tokens, counts = {}, nearMisses = [], extra = {}) {
       ${hint}
       <p class="muted">Scanned ${counts.candidates_raw ?? "—"} · band hits ${band} · accurate ${counts.accurate ?? "—"} · rejected ${counts.rejected ?? "—"}</p>
       ${rejectBreakdownHtml(extra.reject_breakdown, extra.gates)}
-      ${nearMissHtml(nearMisses)}
+      ${filteredBlock}
     </div>`;
   } else {
-    list.innerHTML = tokens.map(cardHtml).join("");
-    list.querySelectorAll(".copy-mint").forEach((btn) => {
-      btn.onclick = async () => {
-        const m = btn.dataset.mint;
-        if (!m) return;
-        try {
-          await navigator.clipboard.writeText(m);
-          btn.textContent = "Copied";
-          setTimeout(() => (btn.textContent = "Copy"), 1200);
-        } catch {
-          btn.textContent = "Fail";
-        }
-      };
-    });
+    list.innerHTML =
+      tokens.map(cardHtml).join("") +
+      (filteredBlock ? `<div class="filtered-wrap">${filteredBlock}</div>` : "");
   }
+  bindCopyButtons(list);
   const shown = counts.shown ?? tokens.length;
   const moonN = counts.moon ?? tokens.filter((t) => t.moon_label === "MOON").length;
   const watchN = counts.watch ?? tokens.filter((t) => t.moon_label === "WATCH").length;
@@ -333,6 +363,7 @@ async function scan(force = false) {
       gates: data.gates || (data.outcomes || {}).gates,
       empty: data.empty,
       moon_mode: data.moon_mode,
+      filtered_ttl_hours: data.filtered_ttl_hours ?? 6,
     });
     try {
       if (window.MoonAlerts) {

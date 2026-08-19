@@ -672,14 +672,46 @@ input:focus {
   background: linear-gradient(165deg, rgba(167, 139, 250, 0.14), rgba(20, 24, 40, 0.9));
   box-shadow: var(--shadow-out);
 }
+.filtered-wrap {
+  max-width: 960px;
+  margin: 8px auto 28px;
+  padding: 0 20px;
+  position: relative;
+  z-index: 1;
+}
 .near-miss ul {
   margin: 8px 0 0;
-  padding-left: 1.1rem;
+  padding-left: 0;
+  list-style: none;
   font-size: 0.86rem;
   color: var(--muted);
 }
-.near-miss li { margin: 4px 0; }
+.near-miss li {
+  margin: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(140, 180, 255, 0.12);
+}
+.near-miss li:last-child { border-bottom: none; }
 .near-miss .muted { margin-left: 4px; }
+.nm-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.nm-top strong { color: var(--text); }
+.nm-links {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.nm-why {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  line-height: 1.35;
+}
 
 /* Shared filt active state for lab/money */
 .filt.active {
