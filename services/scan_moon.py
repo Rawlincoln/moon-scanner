@@ -434,6 +434,13 @@ async def scan_moon_tokens(
         ):
             cached = dict(_moon_cache["data"])
             cached["cached"] = True
+            try:
+                from services.moon_filtered import list_filtered
+
+                cached["near_misses"] = list_filtered(limit=40)
+                cached["filtered_ttl_hours"] = 6
+            except Exception:
+                pass
             return cached
 
         # Honor UI age filter (cap at MAX_AGE); default routes still pass 120.
